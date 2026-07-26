@@ -20,3 +20,6 @@ authors = ["Manifold contributors"]
 lto = "fat"
 codegen-units = 1
 panic = "abort"
+
+[profile.dev.build-override]
+opt-level = 3

@@ -5,5 +5,8 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+force-magic = []
+
 [dev-dependencies]
 cozy-chess = "0.3.4"
