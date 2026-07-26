@@ -1,0 +1,10 @@
+[package]
+name = "mf-tune"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+mf-core = { path = "../mf-core" }
+mf-nnue = { path = "../mf-nnue" }

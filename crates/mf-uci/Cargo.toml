@@ -1,0 +1,15 @@
+[package]
+name = "mf-uci"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "manifold"
+path = "src/main.rs"
+
+[dependencies]
+mf-core = { path = "../mf-core" }
+mf-nnue = { path = "../mf-nnue" }
+mf-search = { path = "../mf-search" }

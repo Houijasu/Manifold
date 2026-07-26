@@ -1,0 +1,9 @@
+[package]
+name = "mf-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dev-dependencies]
+cozy-chess = "0.3.4"
