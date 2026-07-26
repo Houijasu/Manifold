@@ -28,6 +28,19 @@ fn stdout_lines(output: &Output) -> Vec<&str> {
         .collect()
 }
 
+fn perft_rows(output: &Output) -> Vec<(&str, u64)> {
+    stdout_lines(output)
+        .into_iter()
+        .filter_map(|line| {
+            let (mv, nodes) = line.split_once(": ")?;
+            let valid_move = matches!(mv.len(), 4 | 5)
+                && mv.as_bytes()[0].is_ascii_lowercase()
+                && mv.as_bytes()[1].is_ascii_digit();
+            valid_move.then(|| (mv, nodes.parse::<u64>().unwrap()))
+        })
+        .collect()
+}
+
 #[test]
 fn uci_handshake_is_ordered_and_well_formed() {
     let output = run_uci(&["uci", "quit"]);
@@ -116,6 +129,7 @@ fn malformed_position_inputs_do_not_crash_or_poison_loop() {
         "position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR x KQkq - 0 1",
         "position fen 9/8/8/8/8/8/8/RNBQKBNR w KQkq - 0 1",
         "position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq zz 0 1",
+        "position fen 4k3/3pP3/4n3/8/8/8/8/4K3 b - e6 0 1",
         "position startpos moves e2e5",
         "position startpos moves zzzz",
     ];
@@ -148,5 +162,96 @@ fn malformed_position_inputs_do_not_crash_or_poison_loop() {
                 && !stderr.contains("index out of bounds"),
             "command emitted a panic: {command}\n{stderr}"
         );
+    }
+}
+
+#[test]
+fn go_perft_emits_machine_parseable_divide_output() {
+    let output = run_uci(&[
+        "position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "go perft 3",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let rows = perft_rows(&output);
+    assert_eq!(rows.len(), 48);
+    assert_eq!(rows.iter().map(|(_, nodes)| nodes).sum::<u64>(), 97_862);
+    assert!(stdout_lines(&output).contains(&"Nodes searched: 97862"));
+}
+
+#[test]
+fn go_perft_honors_chess960_castling_encoding() {
+    let output = run_uci(&[
+        "setoption name UCI_Chess960 value true",
+        "position fen rk6/8/8/8/8/8/8/RK6 w Aa - 0 1",
+        "go perft 1",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let rows = perft_rows(&output);
+    assert_eq!(rows.len(), 11);
+    assert!(rows.iter().any(|(mv, _)| *mv == "b1a1"));
+    assert!(rows.iter().any(|(mv, _)| *mv == "b1c1"));
+    assert!(stdout_lines(&output).contains(&"Nodes searched: 11"));
+}
+
+#[test]
+fn castling_notation_switches_and_round_trips_in_both_modes() {
+    let standard_fen = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
+    let standard = run_uci(&[
+        "setoption name UCI_Chess960 value false",
+        &format!("position fen {standard_fen}"),
+        "go perft 1",
+        "quit",
+    ]);
+    assert!(standard.status.success());
+    let standard_moves: Vec<_> = perft_rows(&standard)
+        .into_iter()
+        .map(|(mv, _)| mv.to_string())
+        .collect();
+    assert!(standard_moves.contains(&"e1g1".to_string()));
+    assert!(standard_moves.contains(&"e1c1".to_string()));
+    assert!(!standard_moves.contains(&"e1h1".to_string()));
+    assert!(!standard_moves.contains(&"e1a1".to_string()));
+
+    for mv in ["e1g1", "e1c1"] {
+        let replay = run_uci(&[
+            "setoption name UCI_Chess960 value false",
+            &format!("position fen {standard_fen} moves {mv}"),
+            "go perft 1",
+            "quit",
+        ]);
+        assert!(replay.status.success());
+        assert!(stdout_lines(&replay).contains(&"Nodes searched: 23"));
+    }
+
+    let chess960_fen = "r3k2r/8/8/8/8/8/8/R3K2R w HAha - 0 1";
+    let chess960 = run_uci(&[
+        "setoption name UCI_Chess960 value true",
+        &format!("position fen {chess960_fen}"),
+        "go perft 1",
+        "quit",
+    ]);
+    assert!(chess960.status.success());
+    let chess960_moves: Vec<_> = perft_rows(&chess960)
+        .into_iter()
+        .map(|(mv, _)| mv.to_string())
+        .collect();
+    assert!(chess960_moves.contains(&"e1h1".to_string()));
+    assert!(chess960_moves.contains(&"e1a1".to_string()));
+    assert!(!chess960_moves.contains(&"e1g1".to_string()));
+    assert!(!chess960_moves.contains(&"e1c1".to_string()));
+
+    for mv in ["e1h1", "e1a1"] {
+        let replay = run_uci(&[
+            "setoption name UCI_Chess960 value true",
+            &format!("position fen {chess960_fen} moves {mv}"),
+            "go perft 1",
+            "quit",
+        ]);
+        assert!(replay.status.success());
+        assert!(stdout_lines(&replay).contains(&"Nodes searched: 23"));
     }
 }

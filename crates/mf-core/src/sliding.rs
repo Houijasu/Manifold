@@ -177,16 +177,10 @@ unsafe fn pext_index(occupancy: u64, mask: u64) -> usize {
 
 #[inline]
 fn entry_for_square(entries: &[MagicEntry; 64], square: Square) -> MagicEntry {
-    let index = square.index() as usize;
-    debug_assert!(index < entries.len());
-    // SAFETY: Square can only contain an index in 0..64, matching the entry array.
-    unsafe { *entries.get_unchecked(index) }
+    entries[square.index() as usize]
 }
 
 #[inline]
 fn attack_at(attacks: &[u64], index: usize) -> Bitboard {
-    debug_assert!(index < attacks.len());
-    // SAFETY: build.rs allocates 1 << relevant_bits entries per square. PEXT
-    // extracts at most relevant_bits, and magic shifts to exactly that width.
-    unsafe { Bitboard::new(*attacks.get_unchecked(index)) }
+    Bitboard::new(attacks[index])
 }
