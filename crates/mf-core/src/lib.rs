@@ -10,6 +10,7 @@ mod notation;
 mod perft;
 mod piece;
 mod position;
+mod see;
 mod sliding;
 mod zobrist;
 
@@ -23,6 +24,7 @@ pub use notation::{format_uci_move, parse_uci_move};
 pub use perft::{perft, perft_divide};
 pub use piece::{Color, Piece, PieceKind};
 pub use position::{Position, Undo};
+pub use see::static_exchange_evaluation;
 pub use sliding::{
     SlidingAttackBackend, SlidingAttacks, bishop_attacks, queen_attacks, rook_attacks,
 };

@@ -111,7 +111,38 @@ impl Position {
         self.castling.rook(color, side)
     }
 
+    /// Sets or clears one castling rook.
+    ///
+    /// A present right must name the matching friendly rook on the same back rank and wing as
+    /// the king. This keeps the side metadata and Chess960 rook geometry consistent.
     pub fn set_castling_rook(&mut self, color: Color, side: CastlingSide, rook: Option<Square>) {
+        if let Some(rook) = rook {
+            let king = self
+                .pieces(color, PieceKind::King)
+                .first()
+                .expect("setting a castling rook requires the king to be present");
+            assert_eq!(
+                self.piece_at(rook),
+                Some(Piece::new(color, PieceKind::Rook)),
+                "castling right must reference a friendly rook"
+            );
+            assert_eq!(
+                king.rank(),
+                color.back_rank(),
+                "castling king must be on its back rank"
+            );
+            assert_eq!(
+                rook.rank(),
+                color.back_rank(),
+                "castling rook must be on its back rank"
+            );
+            assert_eq!(
+                CastlingSide::from_rook_origin(king, rook),
+                side,
+                "castling side must match king and rook geometry"
+            );
+        }
+
         let previous = self.castling.rook(color, side);
         if previous == rook {
             return;

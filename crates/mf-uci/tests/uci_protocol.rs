@@ -41,6 +41,13 @@ fn perft_rows(output: &Output) -> Vec<(&str, u64)> {
         .collect()
 }
 
+fn bestmoves(output: &Output) -> Vec<&str> {
+    stdout_lines(output)
+        .into_iter()
+        .filter_map(|line| line.strip_prefix("bestmove "))
+        .collect()
+}
+
 #[test]
 fn uci_handshake_is_ordered_and_well_formed() {
     let output = run_uci(&["uci", "quit"]);
@@ -254,4 +261,114 @@ fn castling_notation_switches_and_round_trips_in_both_modes() {
         assert!(replay.status.success());
         assert!(stdout_lines(&replay).contains(&"Nodes searched: 23"));
     }
+}
+
+#[test]
+fn position_startpos_and_fen_move_suffixes_load_exact_positions() {
+    let startpos = run_uci(&[
+        "position startpos moves e2e4 e7e5 g1f3",
+        "go perft 2",
+        "quit",
+    ]);
+    assert!(startpos.status.success());
+    assert!(stdout_lines(&startpos).contains(&"Nodes searched: 779"));
+
+    let kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    for (mv, expected) in [("e1g1", 2_059), ("e5d7", 2_124)] {
+        let output = run_uci(&[
+            &format!("position fen {kiwipete} moves {mv}"),
+            "go perft 2",
+            "quit",
+        ]);
+        assert!(output.status.success());
+        assert!(
+            stdout_lines(&output).contains(&format!("Nodes searched: {expected}").as_str()),
+            "{mv} should produce the Stockfish perft anchor"
+        );
+    }
+}
+
+#[test]
+fn setoption_name_and_boolean_value_are_case_insensitive() {
+    let standard_fen = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
+    let output = run_uci(&[
+        "SeToPtIoN NaMe uci_chess960 VaLuE TrUe",
+        "position fen r3k2r/8/8/8/8/8/8/R3K2R w HAha - 0 1",
+        "go perft 1",
+        "SETOPTION NAME UCI_CHESS960 VALUE FALSE",
+        &format!("position fen {standard_fen}"),
+        "go perft 1",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let rows = perft_rows(&output);
+    assert!(rows.iter().any(|(mv, _)| *mv == "e1h1"));
+    assert!(rows.iter().any(|(mv, _)| *mv == "e1a1"));
+    assert!(rows.iter().any(|(mv, _)| *mv == "e1g1"));
+    assert!(rows.iter().any(|(mv, _)| *mv == "e1c1"));
+}
+
+#[test]
+fn ucinewgame_resets_position_but_preserves_options() {
+    let output = run_uci(&[
+        "setoption name UCI_Chess960 value TRUE",
+        "position startpos moves e2e4 e7e5 g1f3",
+        "ucinewgame",
+        "go perft 1",
+        "position fen r3k2r/8/8/8/8/8/8/R3K2R w HAha - 0 1",
+        "go perft 1",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let lines = stdout_lines(&output);
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| **line == "Nodes searched: 20")
+            .count(),
+        1
+    );
+    assert!(perft_rows(&output).iter().any(|(mv, _)| *mv == "e1h1"));
+}
+
+#[test]
+fn fixed_depth_and_node_budget_go_forms_emit_deterministic_legal_bestmoves() {
+    let commands = [
+        "position startpos",
+        "go depth 4",
+        "ucinewgame",
+        "go nodes 1000",
+        "quit",
+    ];
+    let first = run_uci(&commands);
+    let second = run_uci(&commands);
+    assert!(first.status.success());
+    assert!(second.status.success());
+
+    let legal_opening_moves = [
+        "a2a3", "a2a4", "b2b3", "b2b4", "c2c3", "c2c4", "d2d3", "d2d4", "e2e3", "e2e4", "f2f3",
+        "f2f4", "g2g3", "g2g4", "h2h3", "h2h4", "b1a3", "b1c3", "g1f3", "g1h3",
+    ];
+    let first_moves = bestmoves(&first);
+    assert_eq!(first_moves.len(), 2);
+    assert!(
+        first_moves
+            .iter()
+            .all(|mv| legal_opening_moves.contains(mv))
+    );
+    assert_eq!(first_moves, bestmoves(&second));
+
+    let first_lines = stdout_lines(&first);
+    assert!(
+        first_lines
+            .iter()
+            .any(|line| line.starts_with("info depth 4 ") && line.contains(" nodes 197281"))
+    );
+    assert!(
+        first_lines
+            .iter()
+            .any(|line| line.starts_with("info depth ") && line.contains(" nodes 1000"))
+    );
 }

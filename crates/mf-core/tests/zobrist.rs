@@ -240,9 +240,14 @@ fn main_key_includes_side_en_passant_and_chess960_rook_origins() {
     en_passant.set_en_passant(Some(square(20)));
     assert_ne!(white.zobrist().main(), en_passant.zobrist().main());
 
-    let mut a_file_right = white.clone();
+    let mut castling_base = white.clone();
+    castling_base.place_piece(square(4), Piece::new(Color::White, PieceKind::King));
+    castling_base.place_piece(square(0), Piece::new(Color::White, PieceKind::Rook));
+    castling_base.place_piece(square(1), Piece::new(Color::White, PieceKind::Rook));
+
+    let mut a_file_right = castling_base.clone();
     a_file_right.set_castling_rook(Color::White, CastlingSide::QueenSide, Some(square(0)));
-    let mut b_file_right = white;
+    let mut b_file_right = castling_base;
     b_file_right.set_castling_rook(Color::White, CastlingSide::QueenSide, Some(square(1)));
     assert_ne!(a_file_right.zobrist().main(), b_file_right.zobrist().main());
 }

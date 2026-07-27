@@ -130,6 +130,16 @@ fn orthodox_and_chess960_castling_round_trip_overlapping_destinations() {
 }
 
 #[test]
+#[should_panic(expected = "castling side must match king and rook geometry")]
+fn castling_rook_rejects_inconsistent_side_metadata() {
+    let mut position = Position::empty(Color::White);
+    position.place_piece(square(4), Piece::new(Color::White, PieceKind::King));
+    position.place_piece(square(7), Piece::new(Color::White, PieceKind::Rook));
+
+    position.set_castling_rook(Color::White, CastlingSide::QueenSide, Some(square(7)));
+}
+
+#[test]
 fn castling_rights_follow_king_rook_moves_and_rook_captures() {
     let mut king_move = Position::empty(Color::White);
     king_move.place_piece(square(4), Piece::new(Color::White, PieceKind::King));
@@ -157,6 +167,8 @@ fn castling_rights_follow_king_rook_moves_and_rook_captures() {
     );
 
     let mut rook_capture = Position::empty(Color::White);
+    rook_capture.place_piece(square(4), Piece::new(Color::White, PieceKind::King));
+    rook_capture.place_piece(square(60), Piece::new(Color::Black, PieceKind::King));
     rook_capture.place_piece(square(0), Piece::new(Color::White, PieceKind::Rook));
     rook_capture.place_piece(square(56), Piece::new(Color::Black, PieceKind::Rook));
     rook_capture.set_castling_rook(Color::White, CastlingSide::QueenSide, Some(square(0)));
