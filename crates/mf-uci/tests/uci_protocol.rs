@@ -1,6 +1,88 @@
-use std::io::Write;
-use std::process::{Command, Output, Stdio};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Child, ChildStdin, Command, Output, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 use std::time::{Duration, Instant};
+
+use mf_core::{Position, format_uci_move, generate_legal_moves};
+
+struct InteractiveUci {
+    child: Child,
+    stdin: ChildStdin,
+    lines: Receiver<String>,
+}
+
+impl InteractiveUci {
+    fn spawn() -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_manifold"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("manifold binary should start");
+        let stdin = child.stdin.take().expect("stdin should be piped");
+        let stdout = child.stdout.take().expect("stdout should be piped");
+        let (sender, lines) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else {
+                    break;
+                };
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            child,
+            stdin,
+            lines,
+        }
+    }
+
+    fn send(&mut self, command: &str) {
+        writeln!(self.stdin, "{command}").expect("command should be written");
+        self.stdin.flush().expect("command should be flushed");
+    }
+
+    fn receive_until(&self, timeout: Duration, predicate: impl Fn(&str) -> bool) -> Option<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let line = self.lines.recv_timeout(remaining).ok()?;
+            if predicate(&line) {
+                return Some(line);
+            }
+        }
+    }
+
+    fn wait_for_exit(&mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self
+                .child
+                .try_wait()
+                .expect("process status should be readable")
+                .is_some()
+            {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+impl Drop for InteractiveUci {
+    fn drop(&mut self) {
+        if !self.child.try_wait().is_ok_and(|status| status.is_some()) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
 
 fn run_uci(commands: &[&str]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -9,17 +91,122 @@ fn run_uci(commands: &[&str]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("manifold binary should start");
+    let mut stdin = child.stdin.take().expect("stdin should be piped");
+    let stdout = child.stdout.take().expect("stdout should be piped");
+    let mut stderr = child.stderr.take().expect("stderr should be piped");
+    let (sender, receiver) = mpsc::channel();
+    let stdout_reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut output = Vec::new();
+        stderr
+            .read_to_end(&mut output)
+            .expect("stderr should be readable");
+        output
+    });
+    let mut lines = Vec::new();
 
-    {
-        let stdin = child.stdin.as_mut().expect("stdin should be piped");
-        for command in commands {
-            writeln!(stdin, "{command}").expect("command should be written");
+    for command in commands {
+        writeln!(stdin, "{command}").expect("command should be written");
+        stdin.flush().expect("command should be flushed");
+        let Some(response) = expected_response(command) else {
+            continue;
+        };
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match receiver.recv_timeout(remaining) {
+                Ok(line) => {
+                    let matched = response.matches(&line);
+                    lines.push(line);
+                    if matched {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("timed out waiting for {response:?} after '{command}': {error}");
+                }
+            }
         }
     }
+    drop(stdin);
 
-    child
-        .wait_with_output()
-        .expect("manifold process should exit")
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("process status should be readable") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            break child.wait().expect("killed process should be waitable");
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    stdout_reader.join().expect("stdout reader should finish");
+    lines.extend(receiver.try_iter());
+    let stderr = stderr_reader.join().expect("stderr reader should finish");
+    let mut stdout = lines.join("\n").into_bytes();
+    if !stdout.is_empty() {
+        stdout.push(b'\n');
+    }
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ExpectedResponse {
+    Exact(&'static str),
+    Prefix(&'static str),
+}
+
+impl ExpectedResponse {
+    fn matches(self, line: &str) -> bool {
+        match self {
+            Self::Exact(expected) => line == expected,
+            Self::Prefix(expected) => line.starts_with(expected),
+        }
+    }
+}
+
+fn expected_response(command: &str) -> Option<ExpectedResponse> {
+    let tokens: Vec<_> = command.split_whitespace().collect();
+    let keyword = tokens.first()?;
+    if tokens.len() == 1 && keyword.eq_ignore_ascii_case("uci") {
+        return Some(ExpectedResponse::Exact("uciok"));
+    }
+    if tokens.len() == 1 && keyword.eq_ignore_ascii_case("isready") {
+        return Some(ExpectedResponse::Exact("readyok"));
+    }
+    if !keyword.eq_ignore_ascii_case("go") {
+        return None;
+    }
+    if tokens.len() == 3
+        && tokens[1].eq_ignore_ascii_case("perft")
+        && tokens[2].parse::<u32>().is_ok()
+    {
+        return Some(ExpectedResponse::Prefix("Nodes searched: "));
+    }
+    tokens
+        .get(1)
+        .is_some_and(|parameter| {
+            ["depth", "nodes", "movetime", "wtime", "btime"]
+                .iter()
+                .any(|known| parameter.eq_ignore_ascii_case(known))
+        })
+        .then_some(ExpectedResponse::Prefix("bestmove "))
 }
 
 fn stdout_lines(output: &Output) -> Vec<&str> {
@@ -57,14 +244,14 @@ fn search_info_lines(output: &Output) -> Vec<&str> {
 }
 
 fn field(line: &str, name: &str) -> u64 {
+    optional_field(line, name)
+        .unwrap_or_else(|| panic!("missing or non-numeric field '{name}' in '{line}'"))
+}
+
+fn optional_field(line: &str, name: &str) -> Option<u64> {
     let tokens: Vec<_> = line.split_whitespace().collect();
-    let index = tokens
-        .iter()
-        .position(|token| *token == name)
-        .unwrap_or_else(|| panic!("missing field '{name}' in '{line}'"));
-    tokens[index + 1]
-        .parse()
-        .unwrap_or_else(|_| panic!("non-numeric field '{name}' in '{line}'"))
+    let index = tokens.iter().position(|token| *token == name)?;
+    tokens.get(index + 1)?.parse().ok()
 }
 
 #[test]
@@ -143,6 +330,26 @@ fn readiness_unknown_commands_and_quit_are_safe() {
     let lines = stdout_lines(&output);
     assert_eq!(lines, ["readyok", "readyok"]);
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn malformed_no_argument_commands_are_ignored() {
+    let output = run_uci(&[
+        "uci trailing",
+        "isready trailing",
+        "position startpos moves e2e4 e7e5 g1f3",
+        "ucinewgame trailing",
+        "go perft 1",
+        "quit trailing",
+        "isready",
+        "quit",
+    ]);
+
+    assert!(output.status.success());
+    let lines = stdout_lines(&output);
+    assert!(lines.contains(&"Nodes searched: 29"));
+    assert_eq!(lines.iter().filter(|line| **line == "readyok").count(), 1);
+    assert!(!lines.contains(&"uciok"));
 }
 
 #[test]
@@ -418,7 +625,13 @@ fn fixed_depth_and_node_budget_go_forms_emit_deterministic_legal_bestmoves() {
         .filter(|line| line.starts_with("info depth "))
         .collect();
     assert!(infos.iter().any(|line| field(line, "depth") == 4));
-    assert_eq!(field(infos.last().unwrap(), "nodes"), 1000);
+    assert_eq!(
+        first_lines
+            .iter()
+            .filter_map(|line| optional_field(line, "nodes"))
+            .next_back(),
+        Some(1000)
+    );
 }
 
 #[test]
@@ -481,9 +694,9 @@ fn node_limited_search_is_repeatable_at_exact_budget() {
     let moves = bestmoves(&output);
     assert_eq!(moves.len(), 2);
     assert_eq!(moves[0], moves[1]);
-    let exact_budget_lines: Vec<_> = search_info_lines(&output)
+    let exact_budget_lines: Vec<_> = stdout_lines(&output)
         .into_iter()
-        .filter(|line| field(line, "nodes") == 20_000)
+        .filter(|line| optional_field(line, "nodes") == Some(20_000))
         .collect();
     assert_eq!(exact_budget_lines.len(), 2);
 }
@@ -501,7 +714,7 @@ fn movetime_and_clock_go_forms_honor_bounded_budgets() {
     let fast_started = Instant::now();
     let fast = run_uci(&[
         "position startpos",
-        "go wtime 1000 btime 1000 movestogo 40",
+        "go wtime 1000 btime 1000 winc 80 binc 80 movestogo 40",
         "quit",
     ]);
     let fast_elapsed = fast_started.elapsed();
@@ -509,7 +722,7 @@ fn movetime_and_clock_go_forms_honor_bounded_budgets() {
     let slow_started = Instant::now();
     let slow = run_uci(&[
         "position startpos",
-        "go wtime 1000 btime 1000 movestogo 2",
+        "go wtime 1000 btime 1000 winc 80 binc 80 movestogo 2",
         "quit",
     ]);
     let slow_elapsed = slow_started.elapsed();
@@ -522,6 +735,342 @@ fn movetime_and_clock_go_forms_honor_bounded_budgets() {
         slow_elapsed > fast_elapsed + Duration::from_millis(100),
         "movestogo=2 ({slow_elapsed:?}) must budget more than movestogo=40 ({fast_elapsed:?})"
     );
+}
+
+#[test]
+fn explicit_depth_ignores_small_clock_values() {
+    let output = run_uci(&["position startpos", "go depth 5 wtime 1 btime 1", "quit"]);
+
+    assert!(output.status.success());
+    let infos = search_info_lines(&output);
+    assert_eq!(
+        field(infos.last().expect("search should emit info"), "depth"),
+        5
+    );
+}
+
+#[test]
+fn fifty_millisecond_clock_returns_legal_moves_without_overshoot() {
+    let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    let position = Position::from_fen(fen, false).expect("test FEN should parse");
+    let legal_moves: Vec<_> = generate_legal_moves(&position)
+        .into_iter()
+        .map(|mv| format_uci_move(&position, *mv, false))
+        .collect();
+    let mut engine = InteractiveUci::spawn();
+    engine.send("uci");
+    assert!(
+        engine
+            .receive_until(Duration::from_secs(1), |line| line == "uciok")
+            .is_some()
+    );
+
+    for sample in 0..50 {
+        engine.send(&format!("position fen {fen}"));
+        let started = Instant::now();
+        engine.send("go wtime 50 btime 50 winc 0 binc 0");
+        let bestmove = engine
+            .receive_until(Duration::from_millis(50), |line| {
+                line.starts_with("bestmove ")
+            })
+            .unwrap_or_else(|| panic!("sample {sample} exceeded the 50 ms clock"));
+        let elapsed = started.elapsed();
+        let mv = bestmove
+            .strip_prefix("bestmove ")
+            .expect("bestmove prefix should exist");
+        assert!(
+            legal_moves.iter().any(|legal| legal == mv),
+            "sample {sample} returned illegal move {mv}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(50),
+            "sample {sample} overshot after {elapsed:?}"
+        );
+    }
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(Duration::from_secs(1)));
+}
+
+#[test]
+fn infinite_search_waits_for_stop_and_then_returns_promptly() {
+    let mut engine = InteractiveUci::spawn();
+    engine.send("uci");
+    assert!(
+        engine
+            .receive_until(Duration::from_secs(1), |line| line == "uciok")
+            .is_some()
+    );
+    engine.send("position startpos");
+    engine.send("go infinite");
+
+    assert!(
+        engine
+            .receive_until(Duration::from_secs(2), |line| {
+                line.starts_with("info depth 2 ")
+            })
+            .is_some(),
+        "infinite search should complete real iterations"
+    );
+    let quiet_deadline = Instant::now() + Duration::from_millis(150);
+    while Instant::now() < quiet_deadline {
+        let remaining = quiet_deadline.saturating_duration_since(Instant::now());
+        match engine.lines.recv_timeout(remaining) {
+            Ok(line) => assert!(
+                !line.starts_with("bestmove "),
+                "infinite search terminated before stop: {line}"
+            ),
+            Err(_) => break,
+        }
+    }
+    engine.send("stop trailing");
+    assert!(
+        engine
+            .receive_until(Duration::from_millis(150), |line| {
+                line.starts_with("bestmove ")
+            })
+            .is_none(),
+        "malformed stop must not stop the search"
+    );
+    engine.send("go banana");
+    assert!(
+        engine
+            .receive_until(Duration::from_millis(150), |line| {
+                line.starts_with("bestmove ")
+            })
+            .is_none(),
+        "malformed go must not stop the search"
+    );
+
+    let stopped = Instant::now();
+    engine.send("stop");
+    let bestmove = engine
+        .receive_until(Duration::from_secs(1), |line| line.starts_with("bestmove "))
+        .expect("stop should produce bestmove");
+    assert!(stopped.elapsed() <= Duration::from_secs(1));
+    assert_ne!(bestmove, "bestmove 0000");
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(Duration::from_secs(1)));
+    assert_eq!(
+        engine
+            .child
+            .try_wait()
+            .expect("exit status should be readable")
+            .expect("process should have exited")
+            .code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn finite_search_can_be_stopped_before_its_budget_expires() {
+    let mut engine = InteractiveUci::spawn();
+    engine.send("position startpos");
+    engine.send("go movetime 3000");
+    assert!(
+        engine
+            .receive_until(Duration::from_secs(1), |line| {
+                line.starts_with("info depth 2 ")
+            })
+            .is_some(),
+        "stop test requires an active finite search"
+    );
+
+    let stopped = Instant::now();
+    engine.send("stop");
+    assert!(
+        engine
+            .receive_until(Duration::from_secs(1), |line| {
+                line.starts_with("bestmove ")
+            })
+            .is_some(),
+        "stop should interrupt a finite search"
+    );
+    assert!(stopped.elapsed() <= Duration::from_secs(1));
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(Duration::from_secs(1)));
+}
+
+#[test]
+fn interrupted_iteration_does_not_duplicate_a_completed_depth() {
+    let mut engine = InteractiveUci::spawn();
+    engine.send("position startpos");
+    engine.send("go nodes 1000000");
+    let mut depths = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while depths.last().copied().unwrap_or(0) < 6 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let line = engine
+            .lines
+            .recv_timeout(remaining)
+            .expect("search should complete depth 6");
+        if line.starts_with("info depth ") {
+            depths.push(field(&line, "depth"));
+        }
+    }
+
+    engine.send("stop");
+    loop {
+        let line = engine
+            .lines
+            .recv_timeout(Duration::from_secs(1))
+            .expect("stop should finish the search");
+        if line.starts_with("info depth ") {
+            depths.push(field(&line, "depth"));
+        }
+        if line.starts_with("bestmove ") {
+            break;
+        }
+    }
+
+    assert!(
+        depths.windows(2).all(|pair| pair[0] < pair[1]),
+        "completed depths must be strictly increasing: {depths:?}"
+    );
+    engine.send("quit");
+    assert!(engine.wait_for_exit(Duration::from_secs(1)));
+}
+
+#[test]
+fn infinite_overrides_depth_and_node_limits_until_stop() {
+    for go in ["go infinite depth 1", "go infinite nodes 1"] {
+        let mut engine = InteractiveUci::spawn();
+        engine.send("position startpos");
+        engine.send(go);
+        assert!(
+            engine
+                .receive_until(Duration::from_millis(150), |line| {
+                    line.starts_with("bestmove ")
+                })
+                .is_none(),
+            "{go} must not terminate before stop"
+        );
+        engine.send("stop");
+        assert!(
+            engine
+                .receive_until(Duration::from_secs(1), |line| {
+                    line.starts_with("bestmove ")
+                })
+                .is_some(),
+            "{go} should return bestmove after stop"
+        );
+        engine.send("quit");
+        assert!(engine.wait_for_exit(Duration::from_secs(1)));
+    }
+}
+
+#[test]
+fn terminal_infinite_search_waits_for_stop() {
+    let mut engine = InteractiveUci::spawn();
+    engine.send("position fen 7k/5KQ1/8/8/8/8/8/8 b - - 0 1");
+    engine.send("go infinite");
+    assert!(
+        engine
+            .receive_until(Duration::from_millis(150), |line| {
+                line.starts_with("bestmove ")
+            })
+            .is_none(),
+        "terminal infinite search must wait for stop"
+    );
+
+    engine.send("stop");
+    assert_eq!(
+        engine.receive_until(Duration::from_secs(1), |line| line.starts_with("bestmove ")),
+        Some("bestmove 0000".to_string())
+    );
+    engine.send("quit");
+    assert!(engine.wait_for_exit(Duration::from_secs(1)));
+}
+
+#[test]
+fn quit_during_infinite_search_exits_cleanly() {
+    let mut engine = InteractiveUci::spawn();
+    engine.send("setoption name Threads value 4");
+    engine.send("position startpos");
+    engine.send("go infinite");
+    assert!(
+        engine
+            .receive_until(Duration::from_secs(2), |line| {
+                line.starts_with("info depth 2 ")
+            })
+            .is_some(),
+        "quit test requires an active search"
+    );
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(Duration::from_secs(2)));
+    assert_eq!(
+        engine
+            .child
+            .try_wait()
+            .expect("exit status should be readable")
+            .expect("process should have exited")
+            .code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn quit_during_finite_search_exits_cleanly() {
+    let mut engine = InteractiveUci::spawn();
+    engine.send("position startpos");
+    engine.send("go movetime 3000");
+    assert!(
+        engine
+            .receive_until(Duration::from_secs(1), |line| {
+                line.starts_with("info depth 2 ")
+            })
+            .is_some(),
+        "quit test requires an active finite search"
+    );
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(Duration::from_secs(2)));
+    assert_eq!(
+        engine
+            .child
+            .try_wait()
+            .expect("exit status should be readable")
+            .expect("process should have exited")
+            .code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn checkmate_uses_the_uci_null_move_token() {
+    let output = run_uci(&[
+        "position fen 7k/5KQ1/8/8/8/8/8/8 b - - 0 1",
+        "go depth 5",
+        "isready",
+        "quit",
+    ]);
+
+    assert!(output.status.success());
+    let infos = search_info_lines(&output);
+    let info = infos.last().expect("terminal search should emit info");
+    assert!(info.contains(" score mate 0 "));
+    assert_eq!(bestmoves(&output), ["0000"]);
+    assert!(stdout_lines(&output).contains(&"readyok"));
+}
+
+#[test]
+fn stalemate_uses_the_uci_null_move_token() {
+    let output = run_uci(&[
+        "position fen 7k/5Q2/6K1/8/8/8/8/8 b - - 0 1",
+        "go movetime 200",
+        "isready",
+        "quit",
+    ]);
+
+    assert!(output.status.success());
+    let infos = search_info_lines(&output);
+    let info = infos.last().expect("terminal search should emit info");
+    assert!(info.contains(" score cp 0 "));
+    assert_eq!(bestmoves(&output), ["0000"]);
+    assert!(stdout_lines(&output).contains(&"readyok"));
 }
 
 #[test]

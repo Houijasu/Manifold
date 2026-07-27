@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mf_core::{Move, Position, generate_legal_moves, is_in_check};
@@ -20,6 +21,7 @@ pub struct SearchLimits {
     pub nodes: Option<u64>,
     pub soft_time: Option<Duration>,
     pub hard_time: Option<Duration>,
+    pub infinite: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,9 +51,27 @@ pub fn search(
     transposition_table: &TranspositionTable,
     limits: SearchLimits,
 ) -> SearchResult {
+    let stop = AtomicBool::new(false);
+    search_with_callback(position, transposition_table, limits, &stop, |_| {})
+}
+
+pub fn search_with_callback<F>(
+    position: &Position,
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+    stop: &AtomicBool,
+    mut on_iteration: F,
+) -> SearchResult
+where
+    F: FnMut(&IterationInfo),
+{
     let started = Instant::now();
-    let maximum_depth = limits.depth.unwrap_or(DEFAULT_MAX_DEPTH).max(1);
-    let mut context = SearchContext::new(transposition_table, limits, started);
+    let maximum_depth = if limits.infinite {
+        u32::MAX
+    } else {
+        limits.depth.unwrap_or(DEFAULT_MAX_DEPTH).max(1)
+    };
+    let mut context = SearchContext::new(transposition_table, limits, started, stop);
     let root_moves = generate_legal_moves(position);
 
     if root_moves.is_empty() {
@@ -99,12 +119,13 @@ pub fn search(
             pv,
         };
         completed = Some(info.clone());
+        on_iteration(&info);
         context.iterations.push(info);
 
         if context.nodes == iteration_start_nodes
             || limits.depth == Some(depth)
             || context.should_stop_after_iteration()
-            || score.abs() >= MATE_SCORE - depth as i32
+            || (!limits.infinite && score.abs() >= MATE_SCORE - depth as i32)
         {
             break;
         }
@@ -533,6 +554,7 @@ fn score_from_tt(score: i32, ply: usize) -> i32 {
 
 struct SearchContext<'a> {
     transposition_table: &'a TranspositionTable,
+    stop: &'a AtomicBool,
     limits: SearchLimits,
     started: Instant,
     nodes: u64,
@@ -547,9 +569,11 @@ impl<'a> SearchContext<'a> {
         transposition_table: &'a TranspositionTable,
         limits: SearchLimits,
         started: Instant,
+        stop: &'a AtomicBool,
     ) -> Self {
         Self {
             transposition_table,
+            stop,
             limits,
             started,
             nodes: 0,
@@ -561,7 +585,8 @@ impl<'a> SearchContext<'a> {
     }
 
     fn visit_node(&mut self, ply: usize) -> bool {
-        if self.stopped {
+        if self.stopped || self.stop.load(Ordering::Relaxed) {
+            self.stopped = true;
             return false;
         }
         if self.limits.nodes.is_some_and(|limit| self.nodes >= limit) {

@@ -38,6 +38,7 @@ fn limits(depth: u32) -> SearchLimits {
         nodes: None,
         soft_time: None,
         hard_time: None,
+        infinite: false,
     }
 }
 
@@ -143,6 +144,7 @@ fn deterministic_single_thread() {
         nodes: Some(50_000),
         soft_time: None,
         hard_time: None,
+        infinite: false,
     };
 
     let table = TranspositionTable::new(16).expect("test TT should allocate");
@@ -181,6 +183,7 @@ fn time_limits_are_observed_without_returning_immediately() {
             nodes: None,
             soft_time: Some(Duration::from_millis(30)),
             hard_time: Some(Duration::from_millis(40)),
+            infinite: false,
         },
     );
 

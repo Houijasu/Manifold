@@ -28,7 +28,7 @@ fn main() -> ExitCode {
     let stdin = io::stdin();
     let stdout = io::stdout();
 
-    match mf_uci::run(stdin.lock(), stdout.lock()) {
+    match mf_uci::run(stdin.lock(), stdout) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("UCI I/O error: {error}");

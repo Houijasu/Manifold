@@ -1,12 +1,15 @@
 //! Universal Chess Interface protocol handling for Manifold.
 
 use std::io::{self, BufRead, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use mf_core::{Position, format_uci_move, parse_uci_move, perft, perft_divide};
 use mf_search::{
-    SearchLimits, SearchResult, TranspositionTable, clamp_centipawn_score, score_to_uci_mate,
-    search,
+    IterationInfo, SearchLimits, SearchResult, TranspositionTable, clamp_centipawn_score,
+    score_to_uci_mate, search_with_callback,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
@@ -47,12 +50,13 @@ const BENCH_CASES: [(&str, u64); 6] = [
 const BENCH_DEPTH: u32 = 4;
 const DEFAULT_MOVES_TO_GO: u64 = 30;
 const TIME_OVERHEAD_MILLIS: u64 = 10;
+const NULL_BESTMOVE: &str = "0000";
 
 struct EngineState {
     position: Position,
     chess960: bool,
     threads: usize,
-    transposition_table: TranspositionTable,
+    transposition_table: Arc<TranspositionTable>,
 }
 
 impl Default for EngineState {
@@ -61,8 +65,10 @@ impl Default for EngineState {
             position: Position::startpos(),
             chess960: false,
             threads: 1,
-            transposition_table: TranspositionTable::new(DEFAULT_HASH_MIB)
-                .expect("the default transposition table should allocate"),
+            transposition_table: Arc::new(
+                TranspositionTable::new(DEFAULT_HASH_MIB)
+                    .expect("the default transposition table should allocate"),
+            ),
         }
     }
 }
@@ -74,42 +80,151 @@ impl EngineState {
     }
 }
 
+struct ActiveSearch {
+    stop: Arc<AtomicBool>,
+    handle: JoinHandle<()>,
+}
+
+impl ActiveSearch {
+    fn stop_and_join(self) {
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = self.handle.join();
+    }
+}
+
 /// Serves UCI commands until `quit` or end-of-file.
-pub fn run<R: BufRead, W: Write>(reader: R, mut writer: W) -> io::Result<()> {
+pub fn run<R, W>(reader: R, writer: W) -> io::Result<()>
+where
+    R: BufRead,
+    W: Write + Send + 'static,
+{
     let mut state = EngineState::default();
+    let writer = Arc::new(Mutex::new(writer));
+    let mut active_search = None;
 
     for line in reader.lines() {
         let command = line?;
         let command = command.trim();
-        let keyword = command.split_whitespace().next().unwrap_or_default();
+        let tokens: Vec<_> = command.split_whitespace().collect();
+        let keyword = tokens.first().copied().unwrap_or_default();
+        let has_no_arguments = tokens.len() == 1;
 
-        if keyword.eq_ignore_ascii_case("uci") {
-            if command.split_whitespace().count() == 1 {
+        if keyword.eq_ignore_ascii_case("uci") && has_no_arguments {
+            {
+                let mut writer = writer
+                    .lock()
+                    .expect("UCI writer lock should not be poisoned");
                 for response in UCI_RESPONSE {
                     writeln!(writer, "{response}")?;
                 }
                 writer.flush()?;
             }
-        } else if keyword.eq_ignore_ascii_case("isready") {
-            if command.split_whitespace().count() == 1 {
-                writeln!(writer, "readyok")?;
-                writer.flush()?;
-            }
-        } else if keyword.eq_ignore_ascii_case("quit") {
+        } else if keyword.eq_ignore_ascii_case("isready") && has_no_arguments {
+            let mut writer = writer
+                .lock()
+                .expect("UCI writer lock should not be poisoned");
+            writeln!(writer, "readyok")?;
+            writer.flush()?;
+        } else if keyword.eq_ignore_ascii_case("stop") && has_no_arguments {
+            stop_active_search(&mut active_search);
+        } else if keyword.eq_ignore_ascii_case("quit") && has_no_arguments {
+            stop_active_search(&mut active_search);
             break;
-        } else if keyword.eq_ignore_ascii_case("ucinewgame") {
+        } else if keyword.eq_ignore_ascii_case("ucinewgame") && has_no_arguments {
+            stop_active_search(&mut active_search);
             state.new_game();
         } else if keyword.eq_ignore_ascii_case("setoption") {
-            handle_setoption(command, &mut state, &mut writer)?;
+            stop_active_search(&mut active_search);
+            let mut writer = writer
+                .lock()
+                .expect("UCI writer lock should not be poisoned");
+            handle_setoption(command, &mut state, &mut *writer)?;
+            writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("position") {
+            stop_active_search(&mut active_search);
             let _ = handle_position(command, &mut state);
         } else if keyword.eq_ignore_ascii_case("go") {
-            handle_go(command, &mut writer, &mut state)?;
-            writer.flush()?;
+            let Some(request) = GoRequest::parse(&tokens) else {
+                continue;
+            };
+            stop_active_search(&mut active_search);
+            match request {
+                GoRequest::Perft(depth) => {
+                    let mut writer = writer
+                        .lock()
+                        .expect("UCI writer lock should not be poisoned");
+                    write_perft(&mut *writer, &mut state.position, depth, state.chess960)?;
+                    writer.flush()?;
+                }
+                GoRequest::Search(parameters) if parameters.infinite => {
+                    active_search = Some(start_search(
+                        state.position.clone(),
+                        Arc::clone(&state.transposition_table),
+                        parameters.search_limits(&state.position),
+                        state.chess960,
+                        Arc::clone(&writer),
+                        true,
+                    ));
+                }
+                GoRequest::Search(parameters) => {
+                    active_search = Some(start_search(
+                        state.position.clone(),
+                        Arc::clone(&state.transposition_table),
+                        parameters.search_limits(&state.position),
+                        state.chess960,
+                        Arc::clone(&writer),
+                        false,
+                    ));
+                }
+            }
         }
     }
 
+    stop_active_search(&mut active_search);
     Ok(())
+}
+
+fn stop_active_search(active_search: &mut Option<ActiveSearch>) {
+    if let Some(search) = active_search.take() {
+        search.stop_and_join();
+    }
+}
+
+fn start_search<W>(
+    position: Position,
+    transposition_table: Arc<TranspositionTable>,
+    limits: SearchLimits,
+    chess960: bool,
+    writer: Arc<Mutex<W>>,
+    wait_for_stop: bool,
+) -> ActiveSearch
+where
+    W: Write + Send + 'static,
+{
+    let stop = Arc::new(AtomicBool::new(false));
+    let search_stop = Arc::clone(&stop);
+    let handle = thread::spawn(move || {
+        let result = search_with_callback(
+            &position,
+            &transposition_table,
+            limits,
+            &search_stop,
+            |iteration| {
+                if let Ok(mut writer) = writer.lock() {
+                    let _ = write_iteration_info(&mut *writer, &position, iteration, chess960);
+                    let _ = writer.flush();
+                }
+            },
+        );
+        while wait_for_stop && !search_stop.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(1));
+        }
+        if let Ok(mut writer) = writer.lock() {
+            let _ = write_search_tail(&mut *writer, &position, &result, chess960);
+            let _ = writer.flush();
+        }
+    });
+    ActiveSearch { stop, handle }
 }
 
 /// Runs the standalone `perft` subcommand arguments.
@@ -243,7 +358,7 @@ fn handle_setoption<W: Write>(
         let clamped = requested.min(MAX_HASH_MIB) as usize;
         match TranspositionTable::new(clamped) {
             Ok(table) => {
-                state.transposition_table = table;
+                state.transposition_table = Arc::new(table);
                 writeln!(writer, "info string hash resized to {clamped} MB")?;
             }
             Err(error) => {
@@ -304,27 +419,24 @@ fn handle_position(command: &str, state: &mut EngineState) -> Result<(), String>
     Ok(())
 }
 
-fn handle_go<W: Write>(command: &str, writer: &mut W, state: &mut EngineState) -> io::Result<()> {
-    let tokens: Vec<_> = command.split_whitespace().collect();
-    if tokens
-        .first()
-        .is_none_or(|token| !token.eq_ignore_ascii_case("go"))
-    {
-        return Ok(());
-    }
-    if tokens.len() == 3 && tokens[1].eq_ignore_ascii_case("perft") {
-        if let Ok(depth) = tokens[2].parse::<u32>() {
-            return write_perft(writer, &mut state.position, depth, state.chess960);
-        }
-        return Ok(());
-    }
+enum GoRequest {
+    Perft(u32),
+    Search(GoParameters),
+}
 
-    let Some(parameters) = GoParameters::parse(&tokens[1..]) else {
-        return Ok(());
-    };
-    let limits = parameters.search_limits(&state.position);
-    let result = search(&state.position, &state.transposition_table, limits);
-    write_search_result(writer, &state.position, &result, state.chess960)
+impl GoRequest {
+    fn parse(tokens: &[&str]) -> Option<Self> {
+        if tokens
+            .first()
+            .is_none_or(|token| !token.eq_ignore_ascii_case("go"))
+        {
+            return None;
+        }
+        if tokens.len() == 3 && tokens[1].eq_ignore_ascii_case("perft") {
+            return tokens[2].parse().ok().map(Self::Perft);
+        }
+        GoParameters::parse(&tokens[1..]).map(Self::Search)
+    }
 }
 
 #[derive(Default)]
@@ -337,6 +449,7 @@ struct GoParameters {
     winc: Option<u64>,
     binc: Option<u64>,
     movestogo: Option<u64>,
+    infinite: bool,
 }
 
 impl GoParameters {
@@ -346,25 +459,32 @@ impl GoParameters {
         while index < tokens.len() {
             let key = tokens[index];
             index += 1;
+            if key.eq_ignore_ascii_case("infinite") {
+                if parameters.infinite {
+                    return None;
+                }
+                parameters.infinite = true;
+                continue;
+            }
             let value = *tokens.get(index)?;
             index += 1;
 
             if key.eq_ignore_ascii_case("depth") {
-                parameters.depth = value.parse().ok();
+                parameters.depth = Some(value.parse().ok()?);
             } else if key.eq_ignore_ascii_case("nodes") {
-                parameters.nodes = value.parse().ok();
+                parameters.nodes = Some(value.parse().ok()?);
             } else if key.eq_ignore_ascii_case("movetime") {
-                parameters.movetime = value.parse().ok();
+                parameters.movetime = Some(value.parse().ok()?);
             } else if key.eq_ignore_ascii_case("wtime") {
-                parameters.wtime = value.parse().ok();
+                parameters.wtime = Some(value.parse().ok()?);
             } else if key.eq_ignore_ascii_case("btime") {
-                parameters.btime = value.parse().ok();
+                parameters.btime = Some(value.parse().ok()?);
             } else if key.eq_ignore_ascii_case("winc") {
-                parameters.winc = value.parse().ok();
+                parameters.winc = Some(value.parse().ok()?);
             } else if key.eq_ignore_ascii_case("binc") {
-                parameters.binc = value.parse().ok();
+                parameters.binc = Some(value.parse().ok()?);
             } else if key.eq_ignore_ascii_case("movestogo") {
-                parameters.movestogo = value.parse().ok();
+                parameters.movestogo = Some(value.parse().ok()?);
             } else {
                 return None;
             }
@@ -374,27 +494,29 @@ impl GoParameters {
             || parameters.nodes.is_some()
             || parameters.movetime.is_some()
             || parameters.wtime.is_some()
-            || parameters.btime.is_some())
-        .then_some(parameters)
+            || parameters.btime.is_some()
+            || parameters.infinite)
+            .then_some(parameters)
     }
 
     fn search_limits(&self, position: &Position) -> SearchLimits {
-        let (soft_time, hard_time) = if self.nodes.is_some() {
-            (None, None)
-        } else if let Some(millis) = self.movetime {
-            let hard = millis.saturating_sub(TIME_OVERHEAD_MILLIS).max(1);
-            (
-                Some(Duration::from_millis(hard)),
-                Some(Duration::from_millis(hard)),
-            )
-        } else {
-            self.clock_limits(position)
-        };
+        let (soft_time, hard_time) =
+            if self.infinite || self.depth.is_some() || self.nodes.is_some() {
+                (None, None)
+            } else if let Some(millis) = self.movetime {
+                (
+                    Some(Duration::from_millis(millis)),
+                    Some(Duration::from_millis(millis)),
+                )
+            } else {
+                self.clock_limits(position)
+            };
         SearchLimits {
-            depth: self.depth,
-            nodes: self.nodes,
+            depth: if self.infinite { None } else { self.depth },
+            nodes: if self.infinite { None } else { self.nodes },
             soft_time,
             hard_time,
+            infinite: self.infinite,
         }
     }
 
@@ -427,28 +549,12 @@ impl GoParameters {
     }
 }
 
-fn write_search_result<W: Write>(
+fn write_search_tail<W: Write>(
     writer: &mut W,
     position: &Position,
     result: &SearchResult,
     chess960: bool,
 ) -> io::Result<()> {
-    for iteration in &result.iterations {
-        let elapsed_millis = iteration.elapsed.as_millis() as u64;
-        let nps = iteration
-            .nodes
-            .saturating_mul(1_000)
-            .checked_div(elapsed_millis.max(1))
-            .unwrap_or(0);
-        let score = format_score(iteration.score);
-        let pv = format_pv(position, &iteration.pv, chess960);
-        writeln!(
-            writer,
-            "info depth {} seldepth {} score {} nodes {} nps {} time {} pv {}",
-            iteration.depth, iteration.seldepth, score, iteration.nodes, nps, elapsed_millis, pv
-        )?;
-    }
-
     if result.iterations.is_empty() {
         let score = format_score(result.score);
         let pv = format_pv(position, &result.pv, chess960);
@@ -473,20 +579,41 @@ fn write_search_result<W: Write>(
             .saturating_mul(1_000)
             .checked_div(elapsed_millis.max(1))
             .unwrap_or(0);
-        let score = format_score(result.score);
-        let pv = format_pv(position, &result.pv, chess960);
         writeln!(
             writer,
-            "info depth {} seldepth {} score {} nodes {} nps {} time {} pv {}",
-            result.depth, result.seldepth, score, result.nodes, nps, elapsed_millis, pv
+            "info nodes {} nps {} time {}",
+            result.nodes, nps, elapsed_millis
         )?;
     }
 
     let bestmove = result
         .best_move
         .map(|mv| format_uci_move(position, mv, chess960))
-        .unwrap_or_else(|| "(none)".to_string());
+        // UCI represents "no legal move" with the null-move token. `0000`
+        // is accepted by strict GUIs that reject the older `(none)` spelling.
+        .unwrap_or_else(|| NULL_BESTMOVE.to_string());
     writeln!(writer, "bestmove {bestmove}")
+}
+
+fn write_iteration_info<W: Write>(
+    writer: &mut W,
+    position: &Position,
+    iteration: &IterationInfo,
+    chess960: bool,
+) -> io::Result<()> {
+    let elapsed_millis = iteration.elapsed.as_millis() as u64;
+    let nps = iteration
+        .nodes
+        .saturating_mul(1_000)
+        .checked_div(elapsed_millis.max(1))
+        .unwrap_or(0);
+    let score = format_score(iteration.score);
+    let pv = format_pv(position, &iteration.pv, chess960);
+    writeln!(
+        writer,
+        "info depth {} seldepth {} score {} nodes {} nps {} time {} pv {}",
+        iteration.depth, iteration.seldepth, score, iteration.nodes, nps, elapsed_millis, pv
+    )
 }
 
 fn format_score(score: i32) -> String {
@@ -617,5 +744,14 @@ mod tests {
 
         assert_eq!(state.transposition_table.allocated_bytes(), 3 * 1024 * 1024);
         assert_eq!(state.transposition_table.probe(key), None);
+    }
+
+    #[test]
+    fn movetime_search_limits_use_the_requested_duration() {
+        let parameters = GoParameters::parse(&["movetime", "100"]).expect("movetime should parse");
+        let limits = parameters.search_limits(&Position::startpos());
+
+        assert_eq!(limits.soft_time, Some(Duration::from_millis(100)));
+        assert_eq!(limits.hard_time, Some(Duration::from_millis(100)));
     }
 }
