@@ -1,19 +1,20 @@
 //! Universal Chess Interface protocol handling for Manifold.
 
 use std::io::{self, BufRead, Write};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use mf_core::{
-    Position, format_uci_move, generate_legal_moves, parse_uci_move, perft, perft_divide,
+use mf_core::{Position, format_uci_move, parse_uci_move, perft, perft_divide};
+use mf_search::{
+    SearchLimits, SearchResult, TranspositionTable, clamp_centipawn_score, score_to_uci_mate,
+    search,
 };
-use mf_search::TranspositionTable;
 
 const DEFAULT_HASH_MIB: usize = 16;
 const MIN_HASH_MIB: i128 = 1;
 const MAX_HASH_MIB: i128 = 1_048_576;
 const UCI_RESPONSE: &[&str] = &[
     "id name Manifold",
-    "id author Manifold contributors",
+    "id author Houijasu",
     "option name Hash type spin default 16 min 1 max 1048576",
     "option name Threads type spin default 1 min 1 max 256",
     "option name UCI_Chess960 type check default false",
@@ -44,11 +45,13 @@ const BENCH_CASES: [(&str, u64); 6] = [
     ),
 ];
 const BENCH_DEPTH: u32 = 4;
-const NODE_SEARCH_MAX_PLY: u32 = 64;
+const DEFAULT_MOVES_TO_GO: u64 = 30;
+const TIME_OVERHEAD_MILLIS: u64 = 10;
 
 struct EngineState {
     position: Position,
     chess960: bool,
+    threads: usize,
     transposition_table: TranspositionTable,
 }
 
@@ -57,6 +60,7 @@ impl Default for EngineState {
         Self {
             position: Position::startpos(),
             chess960: false,
+            threads: 1,
             transposition_table: TranspositionTable::new(DEFAULT_HASH_MIB)
                 .expect("the default transposition table should allocate"),
         }
@@ -249,6 +253,10 @@ fn handle_setoption<W: Write>(
                 )?;
             }
         }
+    } else if name.eq_ignore_ascii_case("Threads")
+        && let Ok(requested) = value.parse::<usize>()
+    {
+        state.threads = requested.clamp(1, 256);
     }
     Ok(())
 }
@@ -297,115 +305,205 @@ fn handle_position(command: &str, state: &mut EngineState) -> Result<(), String>
 }
 
 fn handle_go<W: Write>(command: &str, writer: &mut W, state: &mut EngineState) -> io::Result<()> {
-    let mut tokens = command.split_whitespace();
-    if !tokens
-        .next()
-        .is_some_and(|token| token.eq_ignore_ascii_case("go"))
+    let tokens: Vec<_> = command.split_whitespace().collect();
+    if tokens
+        .first()
+        .is_none_or(|token| !token.eq_ignore_ascii_case("go"))
     {
         return Ok(());
     }
-    let Some(kind) = tokens.next() else {
+    if tokens.len() == 3 && tokens[1].eq_ignore_ascii_case("perft") {
+        if let Ok(depth) = tokens[2].parse::<u32>() {
+            return write_perft(writer, &mut state.position, depth, state.chess960);
+        }
+        return Ok(());
+    }
+
+    let Some(parameters) = GoParameters::parse(&tokens[1..]) else {
         return Ok(());
     };
-    let Some(value) = tokens.next() else {
-        return Ok(());
-    };
-    if tokens.next().is_some() {
-        return Ok(());
-    }
-
-    if kind.eq_ignore_ascii_case("perft") {
-        if let Ok(depth) = value.parse::<u32>() {
-            write_perft(writer, &mut state.position, depth, state.chess960)?;
-        }
-    } else if kind.eq_ignore_ascii_case("depth") {
-        if let Ok(depth) = value.parse::<u32>() {
-            write_depth_search(
-                writer,
-                &mut state.position,
-                depth,
-                state.chess960,
-                &state.transposition_table,
-            )?;
-        }
-    } else if kind.eq_ignore_ascii_case("nodes")
-        && let Ok(nodes) = value.parse::<u64>()
-    {
-        write_node_search(
-            writer,
-            &mut state.position,
-            nodes,
-            state.chess960,
-            &state.transposition_table,
-        )?;
-    }
-    Ok(())
+    let limits = parameters.search_limits(&state.position);
+    let result = search(&state.position, &state.transposition_table, limits);
+    write_search_result(writer, &state.position, &result, state.chess960)
 }
 
-fn write_depth_search<W: Write>(
-    writer: &mut W,
-    position: &mut Position,
-    depth: u32,
-    chess960: bool,
-    transposition_table: &TranspositionTable,
-) -> io::Result<()> {
-    let zobrist_key = position.zobrist().main();
-    transposition_table.prefetch(zobrist_key);
-    let nodes = perft(position, depth);
-    write_search_result(writer, position, depth, nodes, chess960)
+#[derive(Default)]
+struct GoParameters {
+    depth: Option<u32>,
+    nodes: Option<u64>,
+    movetime: Option<u64>,
+    wtime: Option<u64>,
+    btime: Option<u64>,
+    winc: Option<u64>,
+    binc: Option<u64>,
+    movestogo: Option<u64>,
 }
 
-fn write_node_search<W: Write>(
-    writer: &mut W,
-    position: &mut Position,
-    budget: u64,
-    chess960: bool,
-    transposition_table: &TranspositionTable,
-) -> io::Result<()> {
-    let zobrist_key = position.zobrist().main();
-    transposition_table.prefetch(zobrist_key);
-    let mut max_ply = 0;
-    let nodes = consume_nodes(position, budget, 0, &mut max_ply);
-    write_search_result(writer, position, max_ply, nodes, chess960)
-}
+impl GoParameters {
+    fn parse(tokens: &[&str]) -> Option<Self> {
+        let mut parameters = Self::default();
+        let mut index = 0;
+        while index < tokens.len() {
+            let key = tokens[index];
+            index += 1;
+            let value = *tokens.get(index)?;
+            index += 1;
 
-fn consume_nodes(position: &mut Position, budget: u64, ply: u32, max_ply: &mut u32) -> u64 {
-    if budget == 0 {
-        return 0;
-    }
-    *max_ply = (*max_ply).max(ply);
-    if budget == 1 || ply == NODE_SEARCH_MAX_PLY {
-        return 1;
-    }
-
-    let moves = generate_legal_moves(position);
-    let mut nodes = 1;
-    for &mv in &moves {
-        if nodes == budget {
-            break;
+            if key.eq_ignore_ascii_case("depth") {
+                parameters.depth = value.parse().ok();
+            } else if key.eq_ignore_ascii_case("nodes") {
+                parameters.nodes = value.parse().ok();
+            } else if key.eq_ignore_ascii_case("movetime") {
+                parameters.movetime = value.parse().ok();
+            } else if key.eq_ignore_ascii_case("wtime") {
+                parameters.wtime = value.parse().ok();
+            } else if key.eq_ignore_ascii_case("btime") {
+                parameters.btime = value.parse().ok();
+            } else if key.eq_ignore_ascii_case("winc") {
+                parameters.winc = value.parse().ok();
+            } else if key.eq_ignore_ascii_case("binc") {
+                parameters.binc = value.parse().ok();
+            } else if key.eq_ignore_ascii_case("movestogo") {
+                parameters.movestogo = value.parse().ok();
+            } else {
+                return None;
+            }
         }
-        let undo = position.make_move(mv);
-        nodes += consume_nodes(position, budget - nodes, ply + 1, max_ply);
-        position.unmake_move(mv, undo);
+
+        (parameters.depth.is_some()
+            || parameters.nodes.is_some()
+            || parameters.movetime.is_some()
+            || parameters.wtime.is_some()
+            || parameters.btime.is_some())
+        .then_some(parameters)
     }
-    nodes
+
+    fn search_limits(&self, position: &Position) -> SearchLimits {
+        let (soft_time, hard_time) = if self.nodes.is_some() {
+            (None, None)
+        } else if let Some(millis) = self.movetime {
+            let hard = millis.saturating_sub(TIME_OVERHEAD_MILLIS).max(1);
+            (
+                Some(Duration::from_millis(hard)),
+                Some(Duration::from_millis(hard)),
+            )
+        } else {
+            self.clock_limits(position)
+        };
+        SearchLimits {
+            depth: self.depth,
+            nodes: self.nodes,
+            soft_time,
+            hard_time,
+        }
+    }
+
+    fn clock_limits(&self, position: &Position) -> (Option<Duration>, Option<Duration>) {
+        let white = position.side_to_move() == mf_core::Color::White;
+        let remaining = if white { self.wtime } else { self.btime };
+        let Some(remaining) = remaining else {
+            return (None, None);
+        };
+        let increment = if white {
+            self.winc.unwrap_or(0)
+        } else {
+            self.binc.unwrap_or(0)
+        };
+        let moves = self.movestogo.unwrap_or(DEFAULT_MOVES_TO_GO).max(1);
+        let ideal = (remaining / moves)
+            .saturating_add(increment.saturating_mul(3) / 4)
+            .max(1);
+        let hard = ideal
+            .saturating_mul(5)
+            .checked_div(4)
+            .unwrap_or(ideal)
+            .saturating_sub(TIME_OVERHEAD_MILLIS)
+            .max(1)
+            .min(remaining.saturating_sub(TIME_OVERHEAD_MILLIS).max(1));
+        (
+            Some(Duration::from_millis(ideal.min(hard))),
+            Some(Duration::from_millis(hard)),
+        )
+    }
 }
 
 fn write_search_result<W: Write>(
     writer: &mut W,
     position: &Position,
-    depth: u32,
-    nodes: u64,
+    result: &SearchResult,
     chess960: bool,
 ) -> io::Result<()> {
-    let bestmove = generate_legal_moves(position)
-        .iter()
-        .copied()
+    for iteration in &result.iterations {
+        let elapsed_millis = iteration.elapsed.as_millis() as u64;
+        let nps = iteration
+            .nodes
+            .saturating_mul(1_000)
+            .checked_div(elapsed_millis.max(1))
+            .unwrap_or(0);
+        let score = format_score(iteration.score);
+        let pv = format_pv(position, &iteration.pv, chess960);
+        writeln!(
+            writer,
+            "info depth {} seldepth {} score {} nodes {} nps {} time {} pv {}",
+            iteration.depth, iteration.seldepth, score, iteration.nodes, nps, elapsed_millis, pv
+        )?;
+    }
+
+    if result.iterations.is_empty() {
+        let score = format_score(result.score);
+        let pv = format_pv(position, &result.pv, chess960);
+        writeln!(
+            writer,
+            "info depth {} seldepth {} score {} nodes {} nps 0 time {} pv {}",
+            result.depth,
+            result.seldepth,
+            score,
+            result.nodes,
+            result.elapsed.as_millis(),
+            pv
+        )?;
+    } else if result
+        .iterations
+        .last()
+        .is_some_and(|iteration| iteration.nodes != result.nodes)
+    {
+        let elapsed_millis = result.elapsed.as_millis() as u64;
+        let nps = result
+            .nodes
+            .saturating_mul(1_000)
+            .checked_div(elapsed_millis.max(1))
+            .unwrap_or(0);
+        let score = format_score(result.score);
+        let pv = format_pv(position, &result.pv, chess960);
+        writeln!(
+            writer,
+            "info depth {} seldepth {} score {} nodes {} nps {} time {} pv {}",
+            result.depth, result.seldepth, score, result.nodes, nps, elapsed_millis, pv
+        )?;
+    }
+
+    let bestmove = result
+        .best_move
         .map(|mv| format_uci_move(position, mv, chess960))
-        .min()
         .unwrap_or_else(|| "(none)".to_string());
-    writeln!(writer, "info depth {depth} nodes {nodes}")?;
     writeln!(writer, "bestmove {bestmove}")
+}
+
+fn format_score(score: i32) -> String {
+    score_to_uci_mate(score).map_or_else(
+        || format!("cp {}", clamp_centipawn_score(score)),
+        |moves| format!("mate {moves}"),
+    )
+}
+
+fn format_pv(position: &Position, pv: &[mf_core::Move], chess960: bool) -> String {
+    let mut replay = position.clone();
+    let mut notation = Vec::with_capacity(pv.len());
+    for &mv in pv {
+        notation.push(format_uci_move(&replay, mv, chess960));
+        replay.make_move(mv);
+    }
+    notation.join(" ")
 }
 
 fn write_perft<W: Write>(
@@ -451,6 +549,7 @@ fn perft_help() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use mf_core::generate_legal_moves;
     use mf_search::{Bound, EntryData};
 
     use super::*;

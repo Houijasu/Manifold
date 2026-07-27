@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 fn run_uci(commands: &[&str]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -46,6 +47,24 @@ fn bestmoves(output: &Output) -> Vec<&str> {
         .into_iter()
         .filter_map(|line| line.strip_prefix("bestmove "))
         .collect()
+}
+
+fn search_info_lines(output: &Output) -> Vec<&str> {
+    stdout_lines(output)
+        .into_iter()
+        .filter(|line| line.starts_with("info depth "))
+        .collect()
+}
+
+fn field(line: &str, name: &str) -> u64 {
+    let tokens: Vec<_> = line.split_whitespace().collect();
+    let index = tokens
+        .iter()
+        .position(|token| *token == name)
+        .unwrap_or_else(|| panic!("missing field '{name}' in '{line}'"));
+    tokens[index + 1]
+        .parse()
+        .unwrap_or_else(|_| panic!("non-numeric field '{name}' in '{line}'"))
 }
 
 #[test]
@@ -393,14 +412,148 @@ fn fixed_depth_and_node_budget_go_forms_emit_deterministic_legal_bestmoves() {
     assert_eq!(first_moves, bestmoves(&second));
 
     let first_lines = stdout_lines(&first);
+    let infos: Vec<_> = first_lines
+        .iter()
+        .copied()
+        .filter(|line| line.starts_with("info depth "))
+        .collect();
+    assert!(infos.iter().any(|line| field(line, "depth") == 4));
+    assert_eq!(field(infos.last().unwrap(), "nodes"), 1000);
+}
+
+#[test]
+fn iterative_search_emits_well_formed_monotone_info_and_legal_pv() {
+    let output = run_uci(&["position startpos", "go depth 6", "quit"]);
+    assert!(output.status.success());
+
+    let infos = search_info_lines(&output);
+    assert_eq!(infos.len(), 6);
+    let mut previous_nodes = 0;
+    for (index, line) in infos.iter().enumerate() {
+        assert_eq!(field(line, "depth"), index as u64 + 1);
+        assert!(field(line, "seldepth") >= field(line, "depth"));
+        assert!(field(line, "nodes") > previous_nodes);
+        previous_nodes = field(line, "nodes");
+        for required in ["score", "nodes", "nps", "time", "pv"] {
+            assert!(
+                line.split_whitespace().any(|token| token == required),
+                "missing '{required}' in '{line}'"
+            );
+        }
+    }
+
+    let last = infos.last().unwrap();
+    let pv = last.split(" pv ").nth(1).expect("PV field should exist");
+    let pv_moves: Vec<_> = pv.split_whitespace().collect();
+    assert!(pv_moves.len() >= 2);
+    assert_eq!(bestmoves(&output), [pv_moves[0]]);
+
+    for prefix_len in 1..=pv_moves.len() {
+        let command = format!(
+            "position startpos moves {}",
+            pv_moves[..prefix_len].join(" ")
+        );
+        let replay = run_uci(&[&command, "go perft 1", "quit"]);
+        assert!(
+            replay.status.success(),
+            "PV prefix should replay: {command}"
+        );
+        assert!(
+            stdout_lines(&replay)
+                .iter()
+                .any(|line| { line.starts_with("Nodes searched: ") })
+        );
+    }
+}
+
+#[test]
+fn node_limited_search_is_repeatable_at_exact_budget() {
+    let commands = [
+        "setoption name Threads value 1",
+        "position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "go nodes 20000 wtime 1 btime 1",
+        "go nodes 20000 wtime 1 btime 1",
+        "quit",
+    ];
+    let output = run_uci(&commands);
+
+    assert!(output.status.success());
+    let moves = bestmoves(&output);
+    assert_eq!(moves.len(), 2);
+    assert_eq!(moves[0], moves[1]);
+    let exact_budget_lines: Vec<_> = search_info_lines(&output)
+        .into_iter()
+        .filter(|line| field(line, "nodes") == 20_000)
+        .collect();
+    assert_eq!(exact_budget_lines.len(), 2);
+}
+
+#[test]
+fn movetime_and_clock_go_forms_honor_bounded_budgets() {
+    let started = Instant::now();
+    let movetime = run_uci(&["position startpos", "go movetime 80", "quit"]);
+    let movetime_elapsed = started.elapsed();
+    assert!(movetime.status.success());
+    assert_eq!(bestmoves(&movetime).len(), 1);
+    assert!(movetime_elapsed >= Duration::from_millis(40));
+    assert!(movetime_elapsed <= Duration::from_millis(500));
+
+    let fast_started = Instant::now();
+    let fast = run_uci(&[
+        "position startpos",
+        "go wtime 1000 btime 1000 movestogo 40",
+        "quit",
+    ]);
+    let fast_elapsed = fast_started.elapsed();
+
+    let slow_started = Instant::now();
+    let slow = run_uci(&[
+        "position startpos",
+        "go wtime 1000 btime 1000 movestogo 2",
+        "quit",
+    ]);
+    let slow_elapsed = slow_started.elapsed();
+
+    assert!(fast.status.success());
+    assert!(slow.status.success());
+    assert_eq!(bestmoves(&fast).len(), 1);
+    assert_eq!(bestmoves(&slow).len(), 1);
     assert!(
-        first_lines
-            .iter()
-            .any(|line| line.starts_with("info depth 4 ") && line.contains(" nodes 197281"))
+        slow_elapsed > fast_elapsed + Duration::from_millis(100),
+        "movestogo=2 ({slow_elapsed:?}) must budget more than movestogo=40 ({fast_elapsed:?})"
     );
-    assert!(
-        first_lines
-            .iter()
-            .any(|line| line.starts_with("info depth ") && line.contains(" nodes 1000"))
-    );
+}
+
+#[test]
+fn mate_scores_use_uci_sign_and_move_count_conventions() {
+    let cases = [
+        ("6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1", 8, "mate 1"),
+        ("k7/7R/1K6/8/8/8/8/8 b - - 0 1", 10, "mate -1"),
+        ("8/8/8/8/8/6K1/6R1/6Rk w - - 0 1", 12, "mate 2"),
+    ];
+
+    for (fen, depth, expected) in cases {
+        let position = format!("position fen {fen}");
+        let go = format!("go depth {depth}");
+        let output = run_uci(&[&position, &go, "quit"]);
+        assert!(output.status.success());
+        let line = search_info_lines(&output)
+            .last()
+            .copied()
+            .expect("mate search should emit info");
+        assert!(
+            line.contains(&format!(" score {expected} ")),
+            "expected score {expected} for {fen}, got {line}"
+        );
+        let pv = line
+            .split(" pv ")
+            .nth(1)
+            .expect("mate line should contain a PV");
+        assert_eq!(
+            bestmoves(&output),
+            [pv.split_whitespace()
+                .next()
+                .expect("PV should be non-empty")]
+        );
+    }
 }

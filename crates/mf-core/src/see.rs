@@ -4,6 +4,7 @@ use crate::{
 };
 
 const PIECE_KIND_COUNT: usize = 6;
+#[cfg(test)]
 const PROMOTIONS: [PieceKind; 4] = [
     PieceKind::Knight,
     PieceKind::Bishop,
@@ -16,6 +17,53 @@ const PROMOTIONS: [PieceKind; 4] = [
 /// Values are measured from the moving side's perspective with pawn = 100. Castling is not
 /// an exchange and is therefore outside this function's domain.
 pub fn static_exchange_evaluation(position: &Position, mv: Move) -> i32 {
+    static_exchange_evaluation_greedy(position, mv)
+}
+
+fn static_exchange_evaluation_greedy(position: &Position, mv: Move) -> i32 {
+    let (mut state, mover, initial_gain) = prepare_exchange(position, mv);
+    let mut gains = [0; 32];
+    gains[0] = initial_gain;
+    let mut depth = 0usize;
+    let mut side = !mover.color();
+
+    while depth + 1 < gains.len() {
+        let Some(next) = state.best_greedy_recapture(mv.to(), side) else {
+            break;
+        };
+        let victim = state
+            .piece_at(mv.to())
+            .expect("a recapture sequence must have a victim on the target");
+        depth += 1;
+        let exchange_value = piece_value(victim.kind()) + next.promotion_gain;
+        gains[depth] = if depth.is_multiple_of(2) {
+            gains[depth - 1] + exchange_value
+        } else {
+            gains[depth - 1] - exchange_value
+        };
+        state = next.state;
+        side = !side;
+    }
+
+    let mut result = gains[depth];
+    while depth > 0 {
+        result = if depth.is_multiple_of(2) {
+            gains[depth - 1].max(result)
+        } else {
+            gains[depth - 1].min(result)
+        };
+        depth -= 1;
+    }
+    result
+}
+
+#[cfg(test)]
+fn static_exchange_evaluation_exhaustive(position: &Position, mv: Move) -> i32 {
+    let (state, mover, initial_gain) = prepare_exchange(position, mv);
+    initial_gain - state.best_recapture(mv.to(), !mover.color())
+}
+
+fn prepare_exchange(position: &Position, mv: Move) -> (SeeState, Piece, i32) {
     assert!(
         !mv.flag().is_castling(),
         "static exchange evaluation does not accept castling"
@@ -66,7 +114,7 @@ pub fn static_exchange_evaluation(position: &Position, mv: Move) -> i32 {
         .promotion()
         .map_or(0, |kind| piece_value(kind) - piece_value(PieceKind::Pawn));
 
-    capture_gain + promotion_gain - state.best_recapture(mv.to(), !mover.color())
+    (state, mover, capture_gain + promotion_gain)
 }
 
 #[derive(Clone)]
@@ -128,11 +176,162 @@ impl SeeState {
         }
     }
 
+    fn least_valuable_legal_recapture(
+        &self,
+        target: Square,
+        side: Color,
+    ) -> Option<LegalRecapture> {
+        let victim = self.piece_at(target)?;
+        if victim.color() == side || victim.kind() == PieceKind::King {
+            return None;
+        }
+
+        let attackers = self.attackers_to(target, side);
+        for from in attackers & self.pieces[side.index()][PieceKind::King.index()] {
+            if let Some(recapture) = self.legal_recapture_from(target, side, from, PieceKind::King)
+            {
+                return Some(recapture);
+            }
+        }
+        for kind in PieceKind::ALL {
+            if kind == PieceKind::King {
+                continue;
+            }
+            for from in attackers & self.pieces[side.index()][kind.index()] {
+                let placed_kind = if kind == PieceKind::Pawn && target.rank() == (!side).back_rank()
+                {
+                    PieceKind::Queen
+                } else {
+                    kind
+                };
+                if let Some(recapture) = self.legal_recapture_from(target, side, from, placed_kind)
+                {
+                    return Some(recapture);
+                }
+            }
+        }
+        None
+    }
+
+    /// Selects the best current recapture using an LVA swap loop for each continuation.
+    ///
+    /// The normal path is the classic single-attacker LVA choice. When several pieces can
+    /// recapture now, choosing only the cheapest can diverge after pins and x-rays change, so
+    /// each current alternative is scored by one bounded LVA continuation. Candidate branches
+    /// are not expanded recursively.
+    fn best_greedy_recapture(&self, target: Square, side: Color) -> Option<LegalRecapture> {
+        let victim = self.piece_at(target)?;
+        if victim.color() == side || victim.kind() == PieceKind::King {
+            return None;
+        }
+
+        let attackers = self.attackers_to(target, side);
+        let lva = self.least_valuable_legal_recapture(target, side)?;
+        if attackers.count() == 1 {
+            return Some(lva);
+        }
+
+        let mut best = None;
+        let mut best_gain = i32::MIN;
+        for kind in PieceKind::ALL {
+            for from in attackers & self.pieces[side.index()][kind.index()] {
+                let placed_kind = if kind == PieceKind::Pawn && target.rank() == (!side).back_rank()
+                {
+                    PieceKind::Queen
+                } else {
+                    kind
+                };
+                let Some(recapture) = self.legal_recapture_from(target, side, from, placed_kind)
+                else {
+                    continue;
+                };
+                let gain = piece_value(victim.kind()) + recapture.promotion_gain
+                    - recapture.state.greedy_lva_recapture_gain(target, !side);
+                if gain > best_gain {
+                    best_gain = gain;
+                    best = Some(recapture);
+                }
+            }
+        }
+        best
+    }
+
+    fn greedy_lva_recapture_gain(&self, target: Square, side: Color) -> i32 {
+        let mut state = self.clone();
+        let mut gains = [0; 32];
+        let mut depth = 0usize;
+        let mut current = side;
+
+        while depth + 1 < gains.len() {
+            let Some(next) = state.least_valuable_legal_recapture(target, current) else {
+                break;
+            };
+            let victim = state
+                .piece_at(target)
+                .expect("a recapture sequence must have a victim on the target");
+            depth += 1;
+            let exchange_value = piece_value(victim.kind()) + next.promotion_gain;
+            gains[depth] = if depth.is_multiple_of(2) {
+                gains[depth - 1] - exchange_value
+            } else {
+                gains[depth - 1] + exchange_value
+            };
+            state = next.state;
+            current = !current;
+        }
+
+        let mut result = gains[depth];
+        while depth > 0 {
+            result = if depth.is_multiple_of(2) {
+                gains[depth - 1].min(result)
+            } else {
+                gains[depth - 1].max(result)
+            };
+            depth -= 1;
+        }
+        result
+    }
+
+    fn legal_recapture_from(
+        &self,
+        target: Square,
+        side: Color,
+        from: Square,
+        placed_kind: PieceKind,
+    ) -> Option<LegalRecapture> {
+        let attacker = self
+            .piece_at(from)
+            .expect("recapture source must contain an attacker");
+        let mut state = self.clone();
+        state
+            .remove(target)
+            .expect("recapture target must contain a victim");
+        state
+            .remove(from)
+            .expect("recapture source must contain an attacker");
+        state.place(target, Piece::new(side, placed_kind));
+
+        if state.is_attacked(state.kings[side.index()], !side) {
+            return None;
+        }
+        let promotion_gain = if attacker.kind() == PieceKind::Pawn && placed_kind != PieceKind::Pawn
+        {
+            piece_value(placed_kind) - piece_value(PieceKind::Pawn)
+        } else {
+            0
+        };
+        Some(LegalRecapture {
+            state,
+            promotion_gain,
+        })
+    }
+
+    #[cfg(test)]
     fn best_recapture(&self, target: Square, side: Color) -> i32 {
         let Some(victim) = self.piece_at(target) else {
             return 0;
         };
-        if victim.color() == side {
+        if victim.color() == side || victim.kind() == PieceKind::King {
             return 0;
         }
 
@@ -153,6 +352,7 @@ impl SeeState {
         best
     }
 
+    #[cfg(test)]
     fn recapture_gain(
         &self,
         from: Square,
@@ -201,6 +401,11 @@ impl SeeState {
     }
 }
 
+struct LegalRecapture {
+    state: SeeState,
+    promotion_gain: i32,
+}
+
 #[inline]
 const fn piece_value(kind: PieceKind) -> i32 {
     match kind {
@@ -210,5 +415,93 @@ const fn piece_value(kind: PieceKind) -> i32 {
         PieceKind::Rook => 500,
         PieceKind::Queen => 900,
         PieceKind::King => 20_000,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{generate_legal_moves, parse_uci_move};
+
+    use super::*;
+
+    fn next_random(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    #[test]
+    fn greedy_see_matches_exhaustive_oracle_on_random_reachable_positions() {
+        let mut compared = 0usize;
+
+        for seed in [0x5eed, 0xcafe, 0xd00d, 0xfade] {
+            let mut position = Position::startpos();
+            let mut random = seed;
+            for _ in 0..10_000 {
+                let moves = generate_legal_moves(&position);
+                for &mv in &moves {
+                    if mv.flag().is_capture() || mv.flag().promotion().is_some() {
+                        assert_eq!(
+                            static_exchange_evaluation_greedy(&position, mv),
+                            static_exchange_evaluation_exhaustive(&position, mv),
+                            "greedy SEE diverged for move {mv:?} in position {position:?}"
+                        );
+                        compared += 1;
+                    }
+                }
+
+                if moves.is_empty() {
+                    position = Position::startpos();
+                    continue;
+                }
+                let mv = moves[next_random(&mut random) as usize % moves.len()];
+                position.make_move(mv);
+                if position.halfmove_clock() >= 100 {
+                    position = Position::startpos();
+                }
+            }
+        }
+
+        assert!(
+            compared >= 40_000,
+            "random differential corpus was too capture-sparse: {compared}"
+        );
+    }
+
+    #[test]
+    fn greedy_see_matches_exhaustive_with_multiple_legal_recaptures() {
+        let position = Position::from_fen(
+            "2B2br1/2pp4/4p1qn/p1kP1P1R/P2n2P1/RPBK3N/2P1QP2/1N6 w - - 17 35",
+            false,
+        )
+        .expect("regression FEN should parse");
+        let mv = parse_uci_move(&position, "d5e6", false).expect("capture should be legal");
+        let greedy = static_exchange_evaluation_greedy(&position, mv);
+
+        assert_eq!(greedy, 0);
+        assert_eq!(greedy, static_exchange_evaluation_exhaustive(&position, mv));
+    }
+
+    #[test]
+    fn greedy_see_prioritizes_a_legal_king_capture_that_ends_the_exchange() {
+        let position =
+            Position::from_fen("n7/6r1/3k2rp/2pPqp2/2p3QP/6P1/5KN1/5B1R b - - 1 51", false)
+                .expect("regression FEN should parse");
+        let mv = parse_uci_move(&position, "e5g3", false).expect("capture should be legal");
+        let (state, mover, _) = prepare_exchange(&position, mv);
+
+        let recapture = state
+            .least_valuable_legal_recapture(mv.to(), !mover.color())
+            .expect("white king on f2 can capture on g3");
+        assert_eq!(
+            recapture.state.piece_at(mv.to()),
+            Some(Piece::new(Color::White, PieceKind::King))
+        );
+        assert_eq!(static_exchange_evaluation_greedy(&position, mv), -800);
+        assert_eq!(
+            static_exchange_evaluation_greedy(&position, mv),
+            static_exchange_evaluation_exhaustive(&position, mv)
+        );
     }
 }

@@ -80,7 +80,7 @@ impl<'a> IntoIterator for &'a MoveList {
 /// Generates all legal moves for the side to move.
 pub fn generate_legal_moves(position: &Position) -> MoveList {
     let mut pseudo = MoveList::new();
-    generate_pseudo_legal_moves(position, &mut pseudo);
+    generate_pseudo_legal_moves_into(position, &mut pseudo);
 
     let mover = position.side_to_move();
     let mut scratch = position.clone();
@@ -95,7 +95,14 @@ pub fn generate_legal_moves(position: &Position) -> MoveList {
     legal
 }
 
-fn generate_pseudo_legal_moves(position: &Position, moves: &mut MoveList) {
+/// Generates moves that obey piece movement but may leave the moving king in check.
+pub fn generate_pseudo_legal_moves(position: &Position) -> MoveList {
+    let mut moves = MoveList::new();
+    generate_pseudo_legal_moves_into(position, &mut moves);
+    moves
+}
+
+fn generate_pseudo_legal_moves_into(position: &Position, moves: &mut MoveList) {
     let us = position.side_to_move();
     let them = !us;
     let friends = position.color_occupancy(us);

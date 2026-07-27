@@ -19,7 +19,7 @@ pub use bitboard::{Bitboard, BitboardIter, Square};
 pub use castling::{CastlingRights, CastlingSide};
 pub use chess_move::{Move, MoveFlag};
 pub use fen::FenError;
-pub use movegen::{MoveList, generate_legal_moves};
+pub use movegen::{MoveList, generate_legal_moves, generate_pseudo_legal_moves};
 pub use notation::{format_uci_move, parse_uci_move};
 pub use perft::{perft, perft_divide};
 pub use piece::{Color, Piece, PieceKind};
