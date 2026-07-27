@@ -1,6 +1,9 @@
-use mf_core::{Move, PieceKind, Position, generate_pseudo_legal_moves, static_exchange_evaluation};
+use mf_core::{
+    Move, PieceKind, Position, generate_pseudo_legal_moves, material_value,
+    static_exchange_evaluation,
+};
 
-use crate::evaluation::{piece_square_value, piece_value};
+use crate::evaluation::piece_square_value;
 
 pub(crate) struct MovePicker {
     tt_move: Option<Move>,
@@ -131,11 +134,11 @@ fn capture_score(position: &Position, mv: Move) -> i32 {
         .piece_at(mv.from())
         .expect("ordered move must have an attacker")
         .kind();
-    let promotion = mv
-        .flag()
-        .promotion()
-        .map_or(0, |kind| piece_value(kind) - piece_value(PieceKind::Pawn));
-    static_exchange_evaluation(position, mv) * 32 + piece_value(victim) * 16 - piece_value(attacker)
+    let promotion = mv.flag().promotion().map_or(0, |kind| {
+        material_value(kind) - material_value(PieceKind::Pawn)
+    });
+    static_exchange_evaluation(position, mv) * 32 + material_value(victim) * 16
+        - material_value(attacker)
         + promotion
 }
 

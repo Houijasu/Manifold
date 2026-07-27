@@ -8,6 +8,8 @@ use crate::{Bound, EntryData, TranspositionTable};
 
 pub const MATE_SCORE: i32 = 30_000;
 pub const MAX_SEARCH_PLY: usize = 128;
+/// Marks a TT entry whose static evaluation was intentionally not computed.
+pub const UNEVALUATED_STATIC_EVAL: i16 = i16::MIN;
 const INFINITY: i32 = MATE_SCORE + 1;
 const ASPIRATION_INITIAL_DELTA: i32 = 25;
 const DEFAULT_MAX_DEPTH: u32 = 64;
@@ -273,7 +275,9 @@ fn root_search(
         EntryData {
             best_move: best_pv.first().copied(),
             score: best_score as i16,
-            static_eval: evaluate(&position) as i16,
+            // Static evaluation is not probed by the M2 search. Avoid recomputing the full HCE
+            // solely to populate a field that becomes useful with M3 pruning.
+            static_eval: UNEVALUATED_STATIC_EVAL,
             depth: depth.min(u32::from(u8::MAX)) as u8,
             bound,
             age: 0,
@@ -417,7 +421,9 @@ fn pvs(
         EntryData {
             best_move,
             score: score_to_tt(best_score, ply) as i16,
-            static_eval: evaluate(position) as i16,
+            // Static evaluation is not probed by the M2 search. Avoid recomputing the full HCE
+            // solely to populate a field that becomes useful with M3 pruning.
+            static_eval: UNEVALUATED_STATIC_EVAL,
             depth: depth.min(i32::from(u8::MAX)) as u8,
             bound,
             age: 0,

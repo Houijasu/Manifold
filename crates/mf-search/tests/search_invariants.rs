@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use mf_core::{Position, generate_legal_moves};
-use mf_search::{MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, TranspositionTable, search};
+use mf_search::{
+    MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, TranspositionTable, UNEVALUATED_STATIC_EVAL, search,
+};
 
 const MATE_CASES: [(&str, i32); 12] = [
     ("7k/8/6QK/8/8/8/8/8 w - - 0 1", 1),
@@ -152,6 +154,19 @@ fn deterministic_single_thread() {
     assert_eq!(second.nodes, first.nodes);
     assert_eq!(first.score, second.score);
     assert_eq!(first.pv, second.pv);
+}
+
+#[test]
+fn m2_tt_marks_static_evaluation_as_unavailable() {
+    let position = Position::startpos();
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+
+    search(&position, &table, limits(2));
+
+    let entry = table
+        .probe(position.zobrist().main())
+        .expect("root search should store a TT entry");
+    assert_eq!(entry.static_eval, UNEVALUATED_STATIC_EVAL);
 }
 
 #[test]

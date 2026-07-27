@@ -22,7 +22,7 @@ pub use fen::FenError;
 pub use movegen::{MoveList, generate_legal_moves, generate_pseudo_legal_moves};
 pub use notation::{format_uci_move, parse_uci_move};
 pub use perft::{perft, perft_divide};
-pub use piece::{Color, Piece, PieceKind};
+pub use piece::{Color, Piece, PieceKind, material_value};
 pub use position::{Position, Undo};
 pub use see::static_exchange_evaluation;
 pub use sliding::{

@@ -1,6 +1,7 @@
 use crate::attacks::{king_attacks, knight_attacks, pawn_attacks};
 use crate::{
-    Bitboard, Color, Move, Piece, PieceKind, Position, Square, bishop_attacks, rook_attacks,
+    Bitboard, Color, Move, Piece, PieceKind, Position, Square, bishop_attacks, material_value,
+    rook_attacks,
 };
 
 const PIECE_KIND_COUNT: usize = 6;
@@ -35,7 +36,7 @@ fn static_exchange_evaluation_greedy(position: &Position, mv: Move) -> i32 {
             .piece_at(mv.to())
             .expect("a recapture sequence must have a victim on the target");
         depth += 1;
-        let exchange_value = piece_value(victim.kind()) + next.promotion_gain;
+        let exchange_value = exchange_value(victim.kind()) + next.promotion_gain;
         gains[depth] = if depth.is_multiple_of(2) {
             gains[depth - 1] + exchange_value
         } else {
@@ -105,14 +106,13 @@ fn prepare_exchange(position: &Position, mv: Move) -> (SeeState, Piece, i32) {
     state.place(mv.to(), placed);
 
     let capture_gain = if mv.flag().is_capture() {
-        piece_value(captured.kind())
+        exchange_value(captured.kind())
     } else {
         0
     };
-    let promotion_gain = mv
-        .flag()
-        .promotion()
-        .map_or(0, |kind| piece_value(kind) - piece_value(PieceKind::Pawn));
+    let promotion_gain = mv.flag().promotion().map_or(0, |kind| {
+        exchange_value(kind) - exchange_value(PieceKind::Pawn)
+    });
 
     (state, mover, capture_gain + promotion_gain)
 }
@@ -245,7 +245,7 @@ impl SeeState {
                 else {
                     continue;
                 };
-                let gain = piece_value(victim.kind()) + recapture.promotion_gain
+                let gain = exchange_value(victim.kind()) + recapture.promotion_gain
                     - recapture.state.greedy_lva_recapture_gain(target, !side);
                 if gain > best_gain {
                     best_gain = gain;
@@ -270,7 +270,7 @@ impl SeeState {
                 .piece_at(target)
                 .expect("a recapture sequence must have a victim on the target");
             depth += 1;
-            let exchange_value = piece_value(victim.kind()) + next.promotion_gain;
+            let exchange_value = exchange_value(victim.kind()) + next.promotion_gain;
             gains[depth] = if depth.is_multiple_of(2) {
                 gains[depth - 1] - exchange_value
             } else {
@@ -316,7 +316,7 @@ impl SeeState {
         }
         let promotion_gain = if attacker.kind() == PieceKind::Pawn && placed_kind != PieceKind::Pawn
         {
-            piece_value(placed_kind) - piece_value(PieceKind::Pawn)
+            exchange_value(placed_kind) - exchange_value(PieceKind::Pawn)
         } else {
             0
         };
@@ -375,11 +375,11 @@ impl SeeState {
 
         let promotion_gain = if attacker.kind() == PieceKind::Pawn && placed_kind != PieceKind::Pawn
         {
-            piece_value(placed_kind) - piece_value(PieceKind::Pawn)
+            exchange_value(placed_kind) - exchange_value(PieceKind::Pawn)
         } else {
             0
         };
-        piece_value(victim.kind()) + promotion_gain - next.best_recapture(target, !side)
+        exchange_value(victim.kind()) + promotion_gain - next.best_recapture(target, !side)
     }
 
     fn attackers_to(&self, target: Square, side: Color) -> Bitboard {
@@ -407,14 +407,11 @@ struct LegalRecapture {
 }
 
 #[inline]
-const fn piece_value(kind: PieceKind) -> i32 {
-    match kind {
-        PieceKind::Pawn => 100,
-        PieceKind::Knight => 320,
-        PieceKind::Bishop => 330,
-        PieceKind::Rook => 500,
-        PieceKind::Queen => 900,
-        PieceKind::King => 20_000,
+const fn exchange_value(kind: PieceKind) -> i32 {
+    if matches!(kind, PieceKind::King) {
+        20_000
+    } else {
+        material_value(kind)
     }
 }
 

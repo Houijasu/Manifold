@@ -81,6 +81,19 @@ impl PieceKind {
     }
 }
 
+/// Returns the engine's canonical material value in centipawns.
+#[inline]
+pub const fn material_value(kind: PieceKind) -> i32 {
+    match kind {
+        PieceKind::Pawn => 100,
+        PieceKind::Knight => 320,
+        PieceKind::Bishop => 330,
+        PieceKind::Rook => 500,
+        PieceKind::Queen => 900,
+        PieceKind::King => 0,
+    }
+}
+
 /// A colored chess piece.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Piece {
