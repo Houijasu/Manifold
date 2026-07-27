@@ -310,6 +310,38 @@ fn setoption_name_and_boolean_value_are_case_insensitive() {
 }
 
 #[test]
+fn hash_option_resizes_case_insensitively_and_rejects_extremes_without_crashing() {
+    let output = run_uci(&[
+        "SeToPtIoN NaMe hAsH VaLuE 3",
+        "setoption name Hash value 0",
+        "setoption name Hash value -5",
+        "setoption name Hash value banana",
+        "setoption name Hash value 99999999999",
+        "isready",
+        "position startpos",
+        "go depth 2",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let lines = stdout_lines(&output);
+    assert!(lines.contains(&"info string hash resized to 3 MB"));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("info string invalid Hash value"))
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("info string unable to allocate Hash"))
+    );
+    assert!(lines.contains(&"readyok"));
+    assert_eq!(bestmoves(&output).len(), 1);
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn ucinewgame_resets_position_but_preserves_options() {
     let output = run_uci(&[
         "setoption name UCI_Chess960 value TRUE",

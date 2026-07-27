@@ -6,7 +6,11 @@ use std::time::Instant;
 use mf_core::{
     Position, format_uci_move, generate_legal_moves, parse_uci_move, perft, perft_divide,
 };
+use mf_search::TranspositionTable;
 
+const DEFAULT_HASH_MIB: usize = 16;
+const MIN_HASH_MIB: i128 = 1;
+const MAX_HASH_MIB: i128 = 1_048_576;
 const UCI_RESPONSE: &[&str] = &[
     "id name Manifold",
     "id author Manifold contributors",
@@ -45,6 +49,7 @@ const NODE_SEARCH_MAX_PLY: u32 = 64;
 struct EngineState {
     position: Position,
     chess960: bool,
+    transposition_table: TranspositionTable,
 }
 
 impl Default for EngineState {
@@ -52,6 +57,8 @@ impl Default for EngineState {
         Self {
             position: Position::startpos(),
             chess960: false,
+            transposition_table: TranspositionTable::new(DEFAULT_HASH_MIB)
+                .expect("the default transposition table should allocate"),
         }
     }
 }
@@ -59,6 +66,7 @@ impl Default for EngineState {
 impl EngineState {
     fn new_game(&mut self) {
         self.position = Position::startpos();
+        self.transposition_table.clear();
     }
 }
 
@@ -88,7 +96,7 @@ pub fn run<R: BufRead, W: Write>(reader: R, mut writer: W) -> io::Result<()> {
         } else if keyword.eq_ignore_ascii_case("ucinewgame") {
             state.new_game();
         } else if keyword.eq_ignore_ascii_case("setoption") {
-            handle_setoption(command, &mut state);
+            handle_setoption(command, &mut state, &mut writer)?;
         } else if keyword.eq_ignore_ascii_case("position") {
             let _ = handle_position(command, &mut state);
         } else if keyword.eq_ignore_ascii_case("go") {
@@ -187,20 +195,24 @@ where
     writeln!(writer, "NPS: {nps}").map_err(|error| error.to_string())
 }
 
-fn handle_setoption(command: &str, state: &mut EngineState) {
+fn handle_setoption<W: Write>(
+    command: &str,
+    state: &mut EngineState,
+    writer: &mut W,
+) -> io::Result<()> {
     let tokens: Vec<_> = command.split_whitespace().collect();
     if tokens.len() < 5
         || !tokens[0].eq_ignore_ascii_case("setoption")
         || !tokens[1].eq_ignore_ascii_case("name")
     {
-        return;
+        return Ok(());
     }
     let Some(value_index) = tokens[2..]
         .iter()
         .position(|token| token.eq_ignore_ascii_case("value"))
         .map(|index| index + 2)
     else {
-        return;
+        return Ok(());
     };
     let name = tokens[2..value_index].join(" ");
     let value = tokens[value_index + 1..].join(" ");
@@ -211,7 +223,34 @@ fn handle_setoption(command: &str, state: &mut EngineState) {
         } else if value.eq_ignore_ascii_case("false") {
             state.chess960 = false;
         }
+    } else if name.eq_ignore_ascii_case("Hash") {
+        let Ok(requested) = value.parse::<i128>() else {
+            writeln!(writer, "info string invalid Hash value '{value}'")?;
+            return Ok(());
+        };
+        if requested < MIN_HASH_MIB {
+            writeln!(
+                writer,
+                "info string invalid Hash value '{value}': minimum is {MIN_HASH_MIB}"
+            )?;
+            return Ok(());
+        }
+
+        let clamped = requested.min(MAX_HASH_MIB) as usize;
+        match TranspositionTable::new(clamped) {
+            Ok(table) => {
+                state.transposition_table = table;
+                writeln!(writer, "info string hash resized to {clamped} MB")?;
+            }
+            Err(error) => {
+                writeln!(
+                    writer,
+                    "info string unable to allocate Hash {clamped} MB: {error}"
+                )?;
+            }
+        }
     }
+    Ok(())
 }
 
 fn handle_position(command: &str, state: &mut EngineState) -> Result<(), String> {
@@ -281,12 +320,24 @@ fn handle_go<W: Write>(command: &str, writer: &mut W, state: &mut EngineState) -
         }
     } else if kind.eq_ignore_ascii_case("depth") {
         if let Ok(depth) = value.parse::<u32>() {
-            write_depth_search(writer, &mut state.position, depth, state.chess960)?;
+            write_depth_search(
+                writer,
+                &mut state.position,
+                depth,
+                state.chess960,
+                &state.transposition_table,
+            )?;
         }
     } else if kind.eq_ignore_ascii_case("nodes")
         && let Ok(nodes) = value.parse::<u64>()
     {
-        write_node_search(writer, &mut state.position, nodes, state.chess960)?;
+        write_node_search(
+            writer,
+            &mut state.position,
+            nodes,
+            state.chess960,
+            &state.transposition_table,
+        )?;
     }
     Ok(())
 }
@@ -296,7 +347,10 @@ fn write_depth_search<W: Write>(
     position: &mut Position,
     depth: u32,
     chess960: bool,
+    transposition_table: &TranspositionTable,
 ) -> io::Result<()> {
+    let zobrist_key = position.zobrist().main();
+    transposition_table.prefetch(zobrist_key);
     let nodes = perft(position, depth);
     write_search_result(writer, position, depth, nodes, chess960)
 }
@@ -306,7 +360,10 @@ fn write_node_search<W: Write>(
     position: &mut Position,
     budget: u64,
     chess960: bool,
+    transposition_table: &TranspositionTable,
 ) -> io::Result<()> {
+    let zobrist_key = position.zobrist().main();
+    transposition_table.prefetch(zobrist_key);
     let mut max_ply = 0;
     let nodes = consume_nodes(position, budget, 0, &mut max_ply);
     write_search_result(writer, position, max_ply, nodes, chess960)
@@ -390,4 +447,76 @@ fn perft_help() -> &'static str {
        manifold perft 6\n\
        manifold perft 5 --fen \"r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1\"\n\
        manifold perft 4 --chess960 --fen \"rk6/8/8/8/8/8/8/RK6 w Aa - 0 1\""
+}
+
+#[cfg(test)]
+mod tests {
+    use mf_search::{Bound, EntryData};
+
+    use super::*;
+
+    #[test]
+    fn ucinewgame_clears_the_transposition_table_without_changing_its_size() {
+        let mut state = EngineState::default();
+        let key = state.position.zobrist().main();
+        let allocated_bytes = state.transposition_table.allocated_bytes();
+        let data = EntryData {
+            best_move: generate_legal_moves(&state.position).first().copied(),
+            score: 31,
+            static_eval: 18,
+            depth: 12,
+            bound: Bound::Exact,
+            age: 3,
+            pv: true,
+        };
+        state.transposition_table.store(key, data);
+        assert_eq!(state.transposition_table.probe(key), Some(data));
+
+        state.new_game();
+
+        assert_eq!(state.transposition_table.probe(key), None);
+        assert_eq!(state.transposition_table.allocated_bytes(), allocated_bytes);
+    }
+
+    #[test]
+    fn failed_hash_resize_preserves_the_existing_usable_table() {
+        let mut state = EngineState::default();
+        let original_bytes = state.transposition_table.allocated_bytes();
+        let mut output = Vec::new();
+
+        handle_setoption("setoption name Hash value 1048576", &mut state, &mut output)
+            .expect("setoption output should be writable");
+
+        assert_eq!(state.transposition_table.allocated_bytes(), original_bytes);
+        assert!(
+            String::from_utf8(output)
+                .expect("protocol output should be UTF-8")
+                .contains("unable to allocate Hash 1048576 MB")
+        );
+    }
+
+    #[test]
+    fn successful_hash_resize_replaces_the_table_and_starts_empty() {
+        let mut state = EngineState::default();
+        let key = state.position.zobrist().main();
+        state.transposition_table.store(
+            key,
+            EntryData {
+                best_move: None,
+                score: 1,
+                static_eval: 2,
+                depth: 3,
+                bound: Bound::Lower,
+                age: 4,
+                pv: false,
+            },
+        );
+        let mut output = Vec::new();
+
+        handle_setoption("setoption name Hash value 3", &mut state, &mut output)
+            .expect("setoption output should be writable");
+
+        assert_eq!(state.transposition_table.allocated_bytes(), 3 * 1024 * 1024);
+        assert_eq!(state.transposition_table.probe(key), None);
+    }
 }
