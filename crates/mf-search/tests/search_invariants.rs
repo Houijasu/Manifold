@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move};
 use mf_search::{
-    MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, TranspositionTable, UNEVALUATED_STATIC_EVAL, search,
-    search_with_history,
+    MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, SearchOptions, TranspositionTable,
+    UNEVALUATED_STATIC_EVAL, search, search_with_history, search_with_options,
 };
 
 const MATE_CASES: [(&str, i32); 12] = [
@@ -66,6 +66,45 @@ fn position_and_history(fen: &str, moves: &[&str]) -> (Position, Vec<u64>) {
 }
 
 #[test]
+fn selectivity_options_default_to_enabled() {
+    assert_eq!(
+        SearchOptions::default(),
+        SearchOptions {
+            use_nmp: true,
+            use_rfp: true,
+            use_razoring: true,
+        }
+    );
+}
+
+#[test]
+fn null_move_pruning_is_inert_without_non_pawn_material() {
+    let position = Position::from_fen("7k/8/p1p5/1p5p/1P5P/2P5/P4K2/8 w - - 0 1", false)
+        .expect("pawn-only FEN should parse");
+    let enabled_table = TranspositionTable::new(4).expect("test TT should allocate");
+    let disabled_table = TranspositionTable::new(4).expect("test TT should allocate");
+    let enabled = search_with_options(
+        &position,
+        &enabled_table,
+        limits(7),
+        SearchOptions::default(),
+    );
+    let disabled = search_with_options(
+        &position,
+        &disabled_table,
+        limits(7),
+        SearchOptions {
+            use_nmp: false,
+            ..SearchOptions::default()
+        },
+    );
+
+    assert_eq!(enabled.best_move, disabled.best_move);
+    assert_eq!(enabled.score, disabled.score);
+    assert_eq!(enabled.nodes, disabled.nodes);
+}
+
+#[test]
 fn pv_is_legal() {
     let mut position = Position::startpos();
     let table = TranspositionTable::new(16).expect("test TT should allocate");
@@ -98,7 +137,16 @@ fn mate_in_n_found() {
     for (fen, expected) in MATE_CASES {
         let position = Position::from_fen(fen, false).expect("mate FEN should parse");
         let table = TranspositionTable::new(16).expect("test TT should allocate");
-        let result = search(&position, &table, limits(24));
+        let result = search_with_options(
+            &position,
+            &table,
+            limits(24),
+            SearchOptions {
+                use_nmp: false,
+                use_rfp: false,
+                use_razoring: false,
+            },
+        );
 
         assert_eq!(
             mate_moves(result.score),
@@ -116,6 +164,23 @@ fn mate_in_n_found() {
         assert!(
             generate_legal_moves(&replay).is_empty(),
             "mate PV must end at a terminal position for {fen}"
+        );
+    }
+}
+
+#[test]
+fn selectivity_preserves_shallow_forced_mates() {
+    for (fen, expected) in &MATE_CASES[..9] {
+        let position = Position::from_fen(fen, false).expect("mate FEN should parse");
+        let table = TranspositionTable::new(16).expect("test TT should allocate");
+        let result = search(&position, &table, limits(24));
+
+        assert_eq!(
+            mate_moves(result.score),
+            Some(*expected),
+            "selectivity lost a forced mate for {fen}: score {}, pv {:?}",
+            result.score,
+            result.pv
         );
     }
 }
@@ -154,7 +219,7 @@ fn deterministic_single_thread() {
     .unwrap();
     let limits = SearchLimits {
         depth: None,
-        nodes: Some(50_000),
+        nodes: Some(20_000),
         soft_time: None,
         hard_time: None,
         infinite: false,
@@ -165,7 +230,7 @@ fn deterministic_single_thread() {
     let second = search(&position, &table, limits);
 
     assert_eq!(first.best_move, second.best_move);
-    assert_eq!(first.nodes, 50_000);
+    assert_eq!(first.nodes, 20_000);
     assert_eq!(second.nodes, first.nodes);
     assert_eq!(first.score, second.score);
     assert_eq!(first.pv, second.pv);

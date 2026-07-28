@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use mf_core::{Position, format_uci_move, parse_uci_move, perft_divide};
 use mf_search::{
-    IterationInfo, SearchLimits, SearchResult, TranspositionTable, clamp_centipawn_score,
-    score_to_uci_mate, search, search_with_history_callback,
+    IterationInfo, SearchLimits, SearchOptions, SearchResult, TranspositionTable,
+    clamp_centipawn_score, score_to_uci_mate, search_with_history_callback_options,
+    search_with_options,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
@@ -21,6 +22,9 @@ const UCI_RESPONSE: &[&str] = &[
     "option name Hash type spin default 16 min 1 max 1048576",
     "option name Threads type spin default 1 min 1 max 256",
     "option name UCI_Chess960 type check default false",
+    "option name UseNMP type check default true",
+    "option name UseRFP type check default true",
+    "option name UseRazoring type check default true",
     "option name EvalFile type string default <empty>",
     "uciok",
 ];
@@ -43,6 +47,7 @@ struct EngineState {
     position_history: Vec<u64>,
     chess960: bool,
     threads: usize,
+    search_options: SearchOptions,
     transposition_table: Arc<TranspositionTable>,
 }
 
@@ -54,6 +59,7 @@ impl Default for EngineState {
             position,
             chess960: false,
             threads: 1,
+            search_options: SearchOptions::default(),
             transposition_table: Arc::new(
                 TranspositionTable::new(DEFAULT_HASH_MIB)
                     .expect("the default transposition table should allocate"),
@@ -128,7 +134,7 @@ where
             let mut writer = writer
                 .lock()
                 .expect("UCI writer lock should not be poisoned");
-            write_bench(&mut *writer).map_err(io::Error::other)?;
+            write_bench(&mut *writer, state.search_options).map_err(io::Error::other)?;
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("setoption") {
             stop_active_search(&mut active_search);
@@ -159,6 +165,7 @@ where
                         state.position_history.clone(),
                         Arc::clone(&state.transposition_table),
                         parameters.search_limits(&state.position),
+                        state.search_options,
                         state.chess960,
                         Arc::clone(&writer),
                         true,
@@ -170,6 +177,7 @@ where
                         state.position_history.clone(),
                         Arc::clone(&state.transposition_table),
                         parameters.search_limits(&state.position),
+                        state.search_options,
                         state.chess960,
                         Arc::clone(&writer),
                         false,
@@ -189,11 +197,13 @@ fn stop_active_search(active_search: &mut Option<ActiveSearch>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_search<W>(
     position: Position,
     position_history: Vec<u64>,
     transposition_table: Arc<TranspositionTable>,
     limits: SearchLimits,
+    options: SearchOptions,
     chess960: bool,
     writer: Arc<Mutex<W>>,
     wait_for_stop: bool,
@@ -204,11 +214,12 @@ where
     let stop = Arc::new(AtomicBool::new(false));
     let search_stop = Arc::clone(&stop);
     let handle = thread::spawn(move || {
-        let result = search_with_history_callback(
+        let result = search_with_history_callback_options(
             &position,
             &position_history,
             &transposition_table,
             limits,
+            options,
             &search_stop,
             |iteration| {
                 if let Ok(mut writer) = writer.lock() {
@@ -285,10 +296,10 @@ where
         return Err(bench_usage("bench does not accept arguments"));
     }
 
-    write_bench(&mut writer)
+    write_bench(&mut writer, SearchOptions::default())
 }
 
-fn write_bench<W: Write>(writer: &mut W) -> Result<(), String> {
+fn write_bench<W: Write>(writer: &mut W, options: SearchOptions) -> Result<(), String> {
     let positions = BENCH_CASES
         .iter()
         .map(|fen| {
@@ -303,13 +314,14 @@ fn write_bench<W: Write>(writer: &mut W) -> Result<(), String> {
     let mut total = 0u64;
     for position in &positions {
         transposition_table.clear();
-        let result = search(
+        let result = search_with_options(
             position,
             &transposition_table,
             SearchLimits {
                 depth: Some(BENCH_DEPTH),
                 ..SearchLimits::default()
             },
+            options,
         );
         total = total
             .checked_add(result.nodes)
@@ -348,10 +360,20 @@ fn handle_setoption<W: Write>(
     let value = tokens[value_index + 1..].join(" ");
 
     if name.eq_ignore_ascii_case("UCI_Chess960") {
-        if value.eq_ignore_ascii_case("true") {
-            state.chess960 = true;
-        } else if value.eq_ignore_ascii_case("false") {
-            state.chess960 = false;
+        if let Some(enabled) = parse_check_option(&value) {
+            state.chess960 = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseNMP") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_nmp = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseRFP") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_rfp = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseRazoring") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_razoring = enabled;
         }
     } else if name.eq_ignore_ascii_case("Hash") {
         let Ok(requested) = value.parse::<i128>() else {
@@ -385,6 +407,16 @@ fn handle_setoption<W: Write>(
         state.threads = requested.clamp(1, 256);
     }
     Ok(())
+}
+
+fn parse_check_option(value: &str) -> Option<bool> {
+    if value.eq_ignore_ascii_case("true") {
+        Some(true)
+    } else if value.eq_ignore_ascii_case("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn handle_position(command: &str, state: &mut EngineState) -> Result<(), String> {
@@ -758,6 +790,29 @@ mod tests {
 
         assert_eq!(state.transposition_table.allocated_bytes(), 3 * 1024 * 1024);
         assert_eq!(state.transposition_table.probe(key), None);
+    }
+
+    #[test]
+    fn selectivity_options_parse_case_insensitively_and_survive_new_game() {
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+
+        handle_setoption("SeToPtIoN NaMe uSeNmP VaLuE FaLsE", &mut state, &mut output)
+            .expect("setoption output should be writable");
+        handle_setoption("setoption name UseRFP value FALSE", &mut state, &mut output)
+            .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseRazoring value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+
+        state.new_game();
+
+        assert!(!state.search_options.use_nmp);
+        assert!(!state.search_options.use_rfp);
+        assert!(!state.search_options.use_razoring);
     }
 
     #[test]

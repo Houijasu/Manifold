@@ -28,6 +28,12 @@ pub struct Undo {
     previous: ReversibleState,
 }
 
+/// Information required to restore a position after [`Position::make_null_move`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NullUndo {
+    previous: ReversibleState,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ReversibleState {
     side_to_move: Color,
@@ -385,6 +391,28 @@ impl Position {
             }
         }
 
+        self.restore_reversible_state(undo.previous);
+    }
+
+    /// Passes the turn without moving a piece for search-only null-move pruning.
+    ///
+    /// Null moves are not legal chess moves and must never be exposed through move generation or
+    /// notation. They preserve all pieces and castling rights, clear en-passant state, advance the
+    /// clocks as a reversible quiet move would, and toggle the side-to-move Zobrist component.
+    pub fn make_null_move(&mut self) -> NullUndo {
+        let previous = self.reversible_state();
+        let mover = self.side_to_move;
+        self.set_en_passant(None);
+        self.halfmove_clock = self.halfmove_clock.saturating_add(1);
+        if mover == Color::Black {
+            self.fullmove_number = self.fullmove_number.saturating_add(1);
+        }
+        self.set_side_to_move(!mover);
+        NullUndo { previous }
+    }
+
+    /// Restores the exact state that preceded [`Position::make_null_move`].
+    pub fn unmake_null_move(&mut self, undo: NullUndo) {
         self.restore_reversible_state(undo.previous);
     }
 

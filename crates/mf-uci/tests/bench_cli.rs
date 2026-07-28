@@ -3,8 +3,8 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const BENCH_NODE_COUNT: u64 = 3_840_238;
-const BENCH_NODES: &str = "Nodes searched: 3840238";
+const BENCH_NODE_COUNT: u64 = 751_286;
+const BENCH_NODES: &str = "Nodes searched: 751286";
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -73,6 +73,53 @@ fn run_uci_bench_session() -> Output {
         .expect("UCI bench output should be readable")
 }
 
+fn run_uci_bench_ablation_session() -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_manifold"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("manifold binary should start");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin should be piped");
+        write!(
+            stdin,
+            "bench\n\
+             setoption name UseNMP value false\n\
+             bench\n\
+             setoption name UseNMP value true\n\
+             setoption name UseRFP value FALSE\n\
+             bench\n\
+             setoption name UseRFP value true\n\
+             SeToPtIoN NaMe uSeRaZoRiNg VaLuE FaLsE\n\
+             bench\n\
+             quit\n"
+        )
+        .expect("UCI commands should be written");
+        stdin.flush().expect("UCI commands should be flushed");
+    }
+    drop(child.stdin.take());
+
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        if child
+            .try_wait()
+            .expect("process status should be readable")
+            .is_some()
+        {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("UCI bench ablation session did not exit within 120 seconds");
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    child
+        .wait_with_output()
+        .expect("UCI bench ablation output should be readable")
+}
+
 #[test]
 fn bench_reports_deterministic_nodes_time_and_nps() {
     let first = run(&["bench"]);
@@ -134,6 +181,28 @@ fn uci_bench_matches_cli_and_clears_all_search_state() {
             .expect("CLI node count should be an integer"),
         BENCH_NODE_COUNT
     );
+}
+
+#[test]
+fn each_selectivity_toggle_changes_the_bench_node_count_by_two_percent() {
+    let output = run_uci_bench_ablation_session();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 4);
+    let baseline = nodes[0];
+    for (name, disabled) in ["UseNMP", "UseRFP", "UseRazoring"]
+        .into_iter()
+        .zip(&nodes[1..])
+    {
+        let difference = baseline.abs_diff(*disabled);
+        assert!(
+            difference.saturating_mul(100) >= baseline.saturating_mul(2),
+            "{name} changed bench nodes by less than 2%: base={baseline}, disabled={disabled}"
+        );
+    }
 }
 
 #[test]

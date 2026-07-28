@@ -92,6 +92,27 @@ fn make_unmake_restores_every_special_move_bit_for_bit() {
 }
 
 #[test]
+fn null_move_round_trip_restores_reversible_state_and_hashes() {
+    let mut position = Position::from_fen("4k3/8/8/8/3pP3/8/8/4K3 b - e3 17 42", false).unwrap();
+    let before = position.clone();
+    let before_occupancy = position.occupancy();
+
+    let undo = position.make_null_move();
+
+    assert_eq!(position.side_to_move(), Color::White);
+    assert_eq!(position.en_passant(), None);
+    assert_eq!(position.halfmove_clock(), 18);
+    assert_eq!(position.fullmove_number(), 43);
+    assert_eq!(position.occupancy(), before_occupancy);
+    assert_eq!(position.zobrist(), position.recompute_zobrist());
+
+    position.unmake_null_move(undo);
+
+    assert_eq!(position, before);
+    assert_eq!(position.zobrist(), position.recompute_zobrist());
+}
+
+#[test]
 fn orthodox_and_chess960_castling_round_trip_overlapping_destinations() {
     let mut orthodox = Position::empty(Color::White);
     orthodox.place_piece(square(4), Piece::new(Color::White, PieceKind::King));
