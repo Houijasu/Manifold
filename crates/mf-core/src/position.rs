@@ -1,5 +1,6 @@
 use crate::{
-    Bitboard, CastlingRights, CastlingSide, Color, Move, Piece, PieceKind, Square, ZobristKeys,
+    Bitboard, CastlingRights, CastlingSide, Color, Move, MoveFlag, Piece, PieceKind, Square,
+    ZobristKeys, is_in_check, pawn_attacks,
 };
 
 const COLOR_COUNT: usize = 2;
@@ -219,6 +220,64 @@ impl Position {
     #[inline]
     pub const fn zobrist(&self) -> ZobristKeys {
         self.zobrist
+    }
+
+    /// Returns the position identity used by repetition detection.
+    ///
+    /// An en-passant target contributes only when the side to move has a legal
+    /// en-passant capture. FIDE repetition identity is based on available moves,
+    /// not the raw target field retained by FEN and move state.
+    pub fn repetition_key(&self) -> u64 {
+        let Some(en_passant) = self.en_passant else {
+            return self.zobrist.main();
+        };
+        if self.has_legal_en_passant_capture(en_passant) {
+            return self.zobrist.main();
+        }
+
+        let mut keys = self.zobrist;
+        keys.toggle_en_passant(en_passant);
+        keys.main()
+    }
+
+    /// Returns whether no legal sequence can end in checkmate from this material.
+    pub fn is_insufficient_material(&self) -> bool {
+        for color in Color::ALL {
+            if !self.pieces(color, PieceKind::Pawn).is_empty()
+                || !self.pieces(color, PieceKind::Rook).is_empty()
+                || !self.pieces(color, PieceKind::Queen).is_empty()
+            {
+                return false;
+            }
+        }
+
+        let knights = Color::ALL
+            .into_iter()
+            .map(|color| self.pieces(color, PieceKind::Knight).count())
+            .sum::<u32>();
+        let bishops = Color::ALL
+            .into_iter()
+            .map(|color| self.pieces(color, PieceKind::Bishop).count())
+            .sum::<u32>();
+
+        if knights + bishops <= 1 {
+            return true;
+        }
+        if knights != 0 {
+            return false;
+        }
+
+        let mut square_color = None;
+        for color in Color::ALL {
+            for square in self.pieces(color, PieceKind::Bishop) {
+                let color = (square.file() + square.rank()) & 1;
+                if square_color.is_some_and(|previous| previous != color) {
+                    return false;
+                }
+                square_color = Some(color);
+            }
+        }
+        true
     }
 
     /// Adds or replaces a piece while maintaining all bitboards and hashes.
@@ -493,6 +552,24 @@ impl Position {
         self.halfmove_clock = state.halfmove_clock;
         self.fullmove_number = state.fullmove_number;
         self.zobrist = state.zobrist;
+    }
+
+    fn has_legal_en_passant_capture(&self, target: Square) -> bool {
+        let mover = self.side_to_move;
+        for from in self.pieces(mover, PieceKind::Pawn) {
+            if !pawn_attacks(from, mover).contains(target) {
+                continue;
+            }
+            let mv = Move::new(from, target, MoveFlag::EN_PASSANT);
+            let mut position = self.clone();
+            let undo = position.make_move(mv);
+            let legal = !is_in_check(&position, mover);
+            position.unmake_move(mv, undo);
+            if legal {
+                return true;
+            }
+        }
+        false
     }
 }
 

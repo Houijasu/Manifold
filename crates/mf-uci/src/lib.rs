@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use mf_core::{Position, format_uci_move, parse_uci_move, perft, perft_divide};
 use mf_search::{
     IterationInfo, SearchLimits, SearchResult, TranspositionTable, clamp_centipawn_score,
-    score_to_uci_mate, search_with_callback,
+    score_to_uci_mate, search_with_history_callback,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
@@ -54,6 +54,7 @@ const NULL_BESTMOVE: &str = "0000";
 
 struct EngineState {
     position: Position,
+    position_history: Vec<u64>,
     chess960: bool,
     threads: usize,
     transposition_table: Arc<TranspositionTable>,
@@ -61,8 +62,10 @@ struct EngineState {
 
 impl Default for EngineState {
     fn default() -> Self {
+        let position = Position::startpos();
         Self {
-            position: Position::startpos(),
+            position_history: vec![position.repetition_key()],
+            position,
             chess960: false,
             threads: 1,
             transposition_table: Arc::new(
@@ -76,6 +79,7 @@ impl Default for EngineState {
 impl EngineState {
     fn new_game(&mut self) {
         self.position = Position::startpos();
+        self.position_history = vec![self.position.repetition_key()];
         self.transposition_table.clear();
     }
 }
@@ -159,6 +163,7 @@ where
                 GoRequest::Search(parameters) if parameters.infinite => {
                     active_search = Some(start_search(
                         state.position.clone(),
+                        state.position_history.clone(),
                         Arc::clone(&state.transposition_table),
                         parameters.search_limits(&state.position),
                         state.chess960,
@@ -169,6 +174,7 @@ where
                 GoRequest::Search(parameters) => {
                     active_search = Some(start_search(
                         state.position.clone(),
+                        state.position_history.clone(),
                         Arc::clone(&state.transposition_table),
                         parameters.search_limits(&state.position),
                         state.chess960,
@@ -192,6 +198,7 @@ fn stop_active_search(active_search: &mut Option<ActiveSearch>) {
 
 fn start_search<W>(
     position: Position,
+    position_history: Vec<u64>,
     transposition_table: Arc<TranspositionTable>,
     limits: SearchLimits,
     chess960: bool,
@@ -204,8 +211,9 @@ where
     let stop = Arc::new(AtomicBool::new(false));
     let search_stop = Arc::clone(&stop);
     let handle = thread::spawn(move || {
-        let result = search_with_callback(
+        let result = search_with_history_callback(
             &position,
+            &position_history,
             &transposition_table,
             limits,
             &search_stop,
@@ -404,6 +412,7 @@ fn handle_position(command: &str, state: &mut EngineState) -> Result<(), String>
         return Err(format!("unknown position type '{kind}'"));
     };
 
+    let mut position_history = vec![position.repetition_key()];
     if let Some(separator) = tokens.next() {
         if !separator.eq_ignore_ascii_case("moves") {
             return Err(format!("unexpected position argument '{separator}'"));
@@ -412,10 +421,12 @@ fn handle_position(command: &str, state: &mut EngineState) -> Result<(), String>
             let mv = parse_uci_move(&position, notation, state.chess960)
                 .ok_or_else(|| format!("illegal move '{notation}'"))?;
             position.make_move(mv);
+            position_history.push(position.repetition_key());
         }
     }
 
     state.position = position;
+    state.position_history = position_history;
     Ok(())
 }
 

@@ -95,6 +95,24 @@ pub fn generate_legal_moves(position: &Position) -> MoveList {
     legal
 }
 
+/// Returns whether the side to move has at least one legal move.
+pub fn has_legal_move(position: &Position) -> bool {
+    let mut pseudo = MoveList::new();
+    generate_pseudo_legal_moves_into(position, &mut pseudo);
+
+    let mover = position.side_to_move();
+    let mut scratch = position.clone();
+    for &mv in &pseudo {
+        let undo = scratch.make_move(mv);
+        let legal = !is_in_check(&scratch, mover);
+        scratch.unmake_move(mv, undo);
+        if legal {
+            return true;
+        }
+    }
+    false
+}
+
 /// Generates moves that obey piece movement but may leave the moving king in check.
 pub fn generate_pseudo_legal_moves(position: &Position) -> MoveList {
     let mut moves = MoveList::new();

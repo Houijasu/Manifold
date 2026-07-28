@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use mf_core::{Move, Position, generate_legal_moves, is_in_check};
+use mf_core::{Move, Position, generate_legal_moves, has_legal_move, is_in_check};
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
 use crate::move_ordering::{MovePicker, quiescence_moves};
@@ -51,12 +51,51 @@ pub fn search(
     transposition_table: &TranspositionTable,
     limits: SearchLimits,
 ) -> SearchResult {
+    let history = [position.repetition_key()];
+    search_with_history(position, &history, transposition_table, limits)
+}
+
+pub fn search_with_history(
+    position: &Position,
+    history: &[u64],
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+) -> SearchResult {
     let stop = AtomicBool::new(false);
-    search_with_callback(position, transposition_table, limits, &stop, |_| {})
+    search_with_history_callback(
+        position,
+        history,
+        transposition_table,
+        limits,
+        &stop,
+        |_| {},
+    )
 }
 
 pub fn search_with_callback<F>(
     position: &Position,
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+    stop: &AtomicBool,
+    on_iteration: F,
+) -> SearchResult
+where
+    F: FnMut(&IterationInfo),
+{
+    let history = [position.repetition_key()];
+    search_with_history_callback(
+        position,
+        &history,
+        transposition_table,
+        limits,
+        stop,
+        on_iteration,
+    )
+}
+
+pub fn search_with_history_callback<F>(
+    position: &Position,
+    history: &[u64],
     transposition_table: &TranspositionTable,
     limits: SearchLimits,
     stop: &AtomicBool,
@@ -71,7 +110,14 @@ where
     } else {
         limits.depth.unwrap_or(DEFAULT_MAX_DEPTH).max(1)
     };
-    let mut context = SearchContext::new(transposition_table, limits, started, stop);
+    let mut context = SearchContext::new(
+        transposition_table,
+        limits,
+        started,
+        stop,
+        position,
+        history,
+    );
     let root_moves = generate_legal_moves(position);
 
     if root_moves.is_empty() {
@@ -93,6 +139,18 @@ where
     }
 
     let fallback_move = root_moves[0];
+    if context.is_rule_draw(position) {
+        return SearchResult {
+            best_move: Some(fallback_move),
+            score: 0,
+            depth: 0,
+            seldepth: 0,
+            nodes: 0,
+            elapsed: started.elapsed(),
+            pv: vec![fallback_move],
+            iterations: Vec::new(),
+        };
+    }
     let mut completed = None;
     let mut previous_score = 0;
 
@@ -187,7 +245,7 @@ fn root_search(
     context: &mut SearchContext<'_>,
 ) -> Option<(i32, Vec<Move>)> {
     let mut position = position.clone();
-    let key = position.zobrist().main();
+    let key = tt_key(&position, depth as i32);
     context.transposition_table.prefetch(key);
     let original_alpha = alpha;
     let tt_move = context
@@ -216,6 +274,7 @@ fn root_search(
             position.unmake_move(mv, undo);
             continue;
         }
+        context.push_position(&position);
         let mut child_pv = Vec::new();
         let score = if searched == 0 {
             pvs(
@@ -260,6 +319,7 @@ fn root_search(
                 }
             })
         };
+        context.pop_position();
         position.unmake_move(mv, undo);
         let score = score?;
         searched += 1;
@@ -322,6 +382,9 @@ fn pvs(
     if !context.visit_node(ply) {
         return None;
     }
+    if context.is_rule_draw(position) {
+        return Some(0);
+    }
     if ply >= MAX_SEARCH_PLY {
         return Some(evaluate(position));
     }
@@ -329,7 +392,7 @@ fn pvs(
         return quiescence(position, alpha, beta, ply, false, context, pv);
     }
 
-    let key = position.zobrist().main();
+    let key = tt_key(position, depth);
     context.transposition_table.prefetch(key);
     let original_alpha = alpha;
     let mut tt_move = None;
@@ -358,6 +421,7 @@ fn pvs(
             position.unmake_move(mv, undo);
             continue;
         }
+        context.push_position(position);
         child_pv.clear();
         let score = if searched == 0 {
             pvs(
@@ -402,6 +466,7 @@ fn pvs(
                 }
             })
         };
+        context.pop_position();
         position.unmake_move(mv, undo);
         let score = score?;
         searched += 1;
@@ -467,6 +532,9 @@ fn quiescence(
         return None;
     }
     context.seldepth = context.seldepth.max(ply as u32);
+    if context.is_rule_draw(position) {
+        return Some(0);
+    }
     if ply >= MAX_SEARCH_PLY {
         return Some(evaluate(position));
     }
@@ -479,7 +547,11 @@ fn quiescence(
     };
     if !in_check {
         if best_score >= beta {
-            return Some(best_score);
+            return Some(if has_legal_move(position) {
+                best_score
+            } else {
+                0
+            });
         }
         alpha = alpha.max(best_score);
     }
@@ -498,6 +570,7 @@ fn quiescence(
             position.unmake_move(mv, undo);
             continue;
         }
+        context.push_position(position);
         child_pv.clear();
         let score = quiescence(
             position,
@@ -509,6 +582,7 @@ fn quiescence(
             &mut child_pv,
         )
         .map(|score| -score);
+        context.pop_position();
         position.unmake_move(mv, undo);
         let score = score?;
         searched += 1;
@@ -525,10 +599,15 @@ fn quiescence(
         }
     }
 
-    if in_check && searched == 0 {
+    if searched != 0 {
+        return Some(best_score);
+    }
+    if in_check {
         Some(-MATE_SCORE + ply as i32)
-    } else {
+    } else if has_legal_move(position) {
         Some(best_score)
+    } else {
+        Some(0)
     }
 }
 
@@ -540,6 +619,18 @@ fn score_to_tt(score: i32, ply: usize) -> i32 {
     } else {
         score
     }
+}
+
+fn tt_key(position: &Position, depth: i32) -> u64 {
+    const RULE50_SALT: u64 = 0x6a09_e667_f3bc_c909;
+
+    if i32::from(position.halfmove_clock()) + depth < 100 {
+        return position.zobrist().main();
+    }
+    let mut value = u64::from(position.halfmove_clock()).wrapping_add(RULE50_SALT);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    position.zobrist().main() ^ (value ^ (value >> 31))
 }
 
 fn score_from_tt(score: i32, ply: usize) -> i32 {
@@ -561,6 +652,7 @@ struct SearchContext<'a> {
     seldepth: u32,
     iterations: Vec<IterationInfo>,
     killers: [[Option<Move>; 2]; MAX_SEARCH_PLY],
+    position_history: Vec<u64>,
     stopped: bool,
 }
 
@@ -570,7 +662,20 @@ impl<'a> SearchContext<'a> {
         limits: SearchLimits,
         started: Instant,
         stop: &'a AtomicBool,
+        position: &Position,
+        history: &[u64],
     ) -> Self {
+        let root_key = position.repetition_key();
+        let position_history = if history.is_empty() {
+            vec![root_key]
+        } else {
+            assert_eq!(
+                history.last().copied(),
+                Some(root_key),
+                "search history must end at the root position"
+            );
+            history.to_vec()
+        };
         Self {
             transposition_table,
             stop,
@@ -580,6 +685,7 @@ impl<'a> SearchContext<'a> {
             seldepth: 0,
             iterations: Vec::new(),
             killers: [[None; 2]; MAX_SEARCH_PLY],
+            position_history,
             stopped: false,
         }
     }
@@ -623,6 +729,36 @@ impl<'a> SearchContext<'a> {
         self.killers[ply][1] = self.killers[ply][0];
         self.killers[ply][0] = Some(mv);
     }
+
+    fn push_position(&mut self, position: &Position) {
+        self.position_history.push(position.repetition_key());
+    }
+
+    fn pop_position(&mut self) {
+        self.position_history
+            .pop()
+            .expect("search position history must contain the root");
+    }
+
+    fn is_rule_draw(&self, position: &Position) -> bool {
+        if position.is_insufficient_material() || self.is_threefold_repetition(position) {
+            return true;
+        }
+        position.halfmove_clock() >= 100
+            && (!is_in_check(position, position.side_to_move()) || has_legal_move(position))
+    }
+
+    fn is_threefold_repetition(&self, position: &Position) -> bool {
+        let key = position.repetition_key();
+        self.position_history
+            .iter()
+            .rev()
+            .step_by(2)
+            .filter(|&&previous| previous == key)
+            .take(3)
+            .count()
+            == 3
+    }
 }
 
 pub fn is_mate_score(score: i32) -> bool {
@@ -641,4 +777,19 @@ pub fn score_to_uci_mate(score: i32) -> Option<i32> {
 
 pub fn clamp_centipawn_score(score: i32) -> i32 {
     score.clamp(-EVALUATION_LIMIT, EVALUATION_LIMIT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tt_key_distinguishes_every_halfmove_clock() {
+        let clock_92 = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 92 1", false).unwrap();
+        let clock_95 = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 95 1", false).unwrap();
+
+        assert_ne!(tt_key(&clock_92, 5), tt_key(&clock_95, 5));
+        assert_eq!(tt_key(&clock_92, 5), clock_92.zobrist().main());
+        assert_ne!(tt_key(&clock_92, 8), clock_92.zobrist().main());
+    }
 }

@@ -1106,3 +1106,95 @@ fn mate_scores_use_uci_sign_and_move_count_conventions() {
         );
     }
 }
+
+#[test]
+fn fifty_move_and_pawn_reset_state_are_observable_through_uci() {
+    let claimable = run_uci(&[
+        "position fen 7k/8/8/8/8/8/P1q5/K7 w - - 100 1",
+        "go depth 6",
+        "quit",
+    ]);
+    let near_draw = run_uci(&[
+        "position fen 8/8/8/4k3/8/8/8/K1Q5 w - - 98 1",
+        "go depth 6",
+        "quit",
+    ]);
+    let fresh = run_uci(&[
+        "position fen 8/8/8/4k3/8/8/8/K1Q5 w - - 0 1",
+        "go depth 6",
+        "quit",
+    ]);
+    let reset = run_uci(&[
+        "position fen 8/8/8/4k3/8/8/P7/K1Q5 w - - 99 1 moves a2a4",
+        "go depth 6",
+        "quit",
+    ]);
+
+    assert!(
+        search_info_lines(&claimable)
+            .last()
+            .is_some_and(|line| line.contains(" score cp 0 "))
+    );
+    assert!(
+        search_info_lines(&near_draw)
+            .last()
+            .is_some_and(|line| line.contains(" score cp 0 "))
+    );
+    assert!(
+        search_info_lines(&fresh)
+            .last()
+            .is_some_and(|line| line.contains(" score cp ") && !line.contains(" score cp 0 "))
+    );
+    assert!(
+        search_info_lines(&reset)
+            .last()
+            .is_some_and(|line| line.contains(" score cp -"))
+    );
+}
+
+#[test]
+fn position_moves_history_survives_into_repetition_aware_search() {
+    let output = run_uci(&[
+        "position fen 1q5k/8/8/8/8/8/8/R5K1 w - - 0 1 moves a1a2 b8b7 a2a1 b7b8 a1a2 b8b7 a2a1 b7b8 a1a2 b8b7",
+        "go depth 6",
+        "quit",
+    ]);
+
+    assert!(output.status.success());
+    assert!(
+        search_info_lines(&output)
+            .last()
+            .is_some_and(|line| line.contains(" score cp 0 "))
+    );
+    assert_eq!(bestmoves(&output), ["a2a1"]);
+}
+
+#[test]
+fn insufficient_material_and_stalemate_resources_are_scored_as_draws() {
+    for fen in [
+        "8/8/8/4k3/8/8/8/4K3 w - - 0 1",
+        "8/8/8/4k3/8/8/8/4KB2 w - - 0 1",
+        "8/8/8/4k3/8/8/8/4KN2 w - - 0 1",
+    ] {
+        let position = format!("position fen {fen}");
+        let output = run_uci(&[&position, "go depth 4", "quit"]);
+        assert!(
+            search_info_lines(&output)
+                .last()
+                .is_some_and(|line| line.contains(" score cp 0 ")),
+            "{fen} should be scored as a draw"
+        );
+    }
+
+    let stalemate = run_uci(&[
+        "position fen 1r5k/7p/8/8/8/8/1r6/K6Q w - - 0 1",
+        "go depth 4",
+        "quit",
+    ]);
+    assert!(
+        search_info_lines(&stalemate)
+            .last()
+            .is_some_and(|line| line.contains(" score cp 0 "))
+    );
+    assert_eq!(bestmoves(&stalemate), ["h1h7"]);
+}

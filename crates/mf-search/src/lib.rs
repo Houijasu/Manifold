@@ -11,6 +11,7 @@ pub use evaluation::{
 pub use search::{
     IterationInfo, MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, SearchResult, UNEVALUATED_STATIC_EVAL,
     clamp_centipawn_score, is_mate_score, score_to_uci_mate, search, search_with_callback,
+    search_with_history, search_with_history_callback,
 };
 pub use transposition_table::{
     AllocationError, Bound, CACHE_LINE_BYTES, CLUSTER_ALIGNMENT, CLUSTER_BYTES,

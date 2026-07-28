@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use mf_core::{Position, generate_legal_moves};
+use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move};
 use mf_search::{
     MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, TranspositionTable, UNEVALUATED_STATIC_EVAL, search,
+    search_with_history,
 };
 
 const MATE_CASES: [(&str, i32); 12] = [
@@ -50,6 +51,18 @@ fn mate_moves(score: i32) -> Option<i32> {
     } else {
         None
     }
+}
+
+fn position_and_history(fen: &str, moves: &[&str]) -> (Position, Vec<u64>) {
+    let mut position = Position::from_fen(fen, false).expect("test FEN should parse");
+    let mut history = vec![position.repetition_key()];
+    for notation in moves {
+        let mv = parse_uci_move(&position, notation, false)
+            .unwrap_or_else(|| panic!("test move {notation} should be legal"));
+        position.make_move(mv);
+        history.push(position.repetition_key());
+    }
+    (position, history)
 }
 
 #[test]
@@ -190,4 +203,99 @@ fn time_limits_are_observed_without_returning_immediately() {
     assert!(result.elapsed >= Duration::from_millis(15));
     assert!(result.elapsed <= Duration::from_millis(200));
     assert!(result.best_move.is_some());
+}
+
+#[test]
+fn fifty_move_rule_draws_at_the_boundary_but_not_from_a_fresh_clock() {
+    let near_draw = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 98 1", false).unwrap();
+    let fresh = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 0 1", false).unwrap();
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+
+    assert_eq!(search(&near_draw, &table, limits(6)).score, 0);
+
+    let fresh_parent = Position::from_fen("8/8/4k3/8/8/8/8/K1Q5 b - - 0 1", false).unwrap();
+    assert!(
+        search(&fresh_parent, &table, limits(6)).score <= -400,
+        "a parent must not reuse a draw cached for the same child board at clock 98"
+    );
+    assert!(
+        search(&fresh, &table, limits(6)).score >= 400,
+        "positions with different halfmove clocks must not share TT scores"
+    );
+}
+
+#[test]
+fn already_claimable_fifty_move_draw_is_scored_at_the_root() {
+    let position = Position::from_fen("7k/8/8/8/8/8/P1q5/K7 w - - 100 1", false).unwrap();
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+    let result = search(&position, &table, limits(6));
+
+    assert_eq!(result.score, 0);
+    assert!(result.best_move.is_some());
+}
+
+#[test]
+fn supplied_history_detects_threefold_repetition_and_selects_the_drawing_move() {
+    let fen = "1q5k/8/8/8/8/8/8/R5K1 w - - 0 1";
+    let moves = [
+        "a1a2", "b8b7", "a2a1", "b7b8", "a1a2", "b8b7", "a2a1", "b7b8", "a1a2", "b8b7",
+    ];
+    let (position, history) = position_and_history(fen, &moves);
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+    let result = search_with_history(&position, &history, &table, limits(6));
+
+    assert_eq!(result.score, 0);
+    assert_eq!(
+        result
+            .best_move
+            .map(|mv| format_uci_move(&position, mv, false)),
+        Some("a2a1".to_string())
+    );
+}
+
+#[test]
+fn winning_side_avoids_completing_a_threefold_repetition() {
+    let fen = "8/8/8/4k3/8/8/8/K1Q5 w - - 0 1";
+    let moves = ["c1c2", "e5e6", "c2c1", "e6e5", "c1c2", "e5e6"];
+    let (position, history) = position_and_history(fen, &moves);
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+    let result = search_with_history(&position, &history, &table, limits(6));
+    let best_move = result
+        .best_move
+        .map(|mv| format_uci_move(&position, mv, false));
+
+    assert!(result.score >= 300, "winning score was {}", result.score);
+    assert_ne!(best_move.as_deref(), Some("c2c1"));
+}
+
+#[test]
+fn insufficient_material_is_scored_as_a_draw_without_masking_two_bishops() {
+    for fen in [
+        "8/8/8/4k3/8/8/8/4K3 w - - 0 1",
+        "8/8/8/4k3/8/8/8/4KB2 w - - 0 1",
+        "8/8/8/4k3/8/8/8/4KN2 w - - 0 1",
+    ] {
+        let position = Position::from_fen(fen, false).unwrap();
+        let table = TranspositionTable::new(4).expect("test TT should allocate");
+        assert_eq!(search(&position, &table, limits(4)).score, 0, "{fen}");
+    }
+
+    let position = Position::from_fen("8/8/8/4k3/8/8/8/2B1KB2 w - - 0 1", false).unwrap();
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+    assert!(search(&position, &table, limits(4)).score >= 100);
+}
+
+#[test]
+fn stalemate_resource_is_visible_through_quiescence() {
+    let position = Position::from_fen("1r5k/7p/8/8/8/8/1r6/K6Q w - - 0 1", false).unwrap();
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+    let result = search(&position, &table, limits(4));
+
+    assert_eq!(result.score, 0);
+    assert_eq!(
+        result
+            .best_move
+            .map(|mv| format_uci_move(&position, mv, false)),
+        Some("h1h7".to_string())
+    );
 }
