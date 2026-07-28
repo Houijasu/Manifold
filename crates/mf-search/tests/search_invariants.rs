@@ -73,6 +73,9 @@ fn selectivity_options_default_to_enabled() {
             use_nmp: true,
             use_rfp: true,
             use_razoring: true,
+            use_lmr: true,
+            use_lmp: true,
+            use_futility: true,
         }
     );
 }
@@ -145,6 +148,9 @@ fn mate_in_n_found() {
                 use_nmp: false,
                 use_rfp: false,
                 use_razoring: false,
+                use_lmr: false,
+                use_lmp: false,
+                use_futility: false,
             },
         );
 
@@ -225,15 +231,20 @@ fn deterministic_single_thread() {
         infinite: false,
     };
 
-    let table = TranspositionTable::new(16).expect("test TT should allocate");
-    let first = search(&position, &table, limits);
-    let second = search(&position, &table, limits);
+    let first_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let second_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let first = search(&position, &first_table, limits);
+    let second = search(&position, &second_table, limits);
 
     assert_eq!(first.best_move, second.best_move);
     assert_eq!(first.nodes, 20_000);
     assert_eq!(second.nodes, first.nodes);
     assert_eq!(first.score, second.score);
     assert_eq!(first.pv, second.pv);
+
+    let warm = search(&position, &first_table, limits);
+    assert_eq!(warm.best_move, first.best_move);
+    assert_eq!(warm.nodes, first.nodes);
 }
 
 #[test]

@@ -3,8 +3,8 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const BENCH_NODE_COUNT: u64 = 751_286;
-const BENCH_NODES: &str = "Nodes searched: 751286";
+const BENCH_NODE_COUNT: u64 = 152_210;
+const BENCH_NODES: &str = "Nodes searched: 152210";
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -84,14 +84,29 @@ fn run_uci_bench_ablation_session() -> Output {
         let stdin = child.stdin.as_mut().expect("stdin should be piped");
         write!(
             stdin,
-            "bench\n\
-             setoption name UseNMP value false\n\
+            "setoption name UseNMP value false\n\
+             setoption name UseRFP value false\n\
+             setoption name UseRazoring value false\n\
+             setoption name UseLMR value false\n\
+             setoption name UseLMP value false\n\
+             setoption name UseFutility value false\n\
              bench\n\
              setoption name UseNMP value true\n\
-             setoption name UseRFP value FALSE\n\
              bench\n\
+             setoption name UseNMP value false\n\
              setoption name UseRFP value true\n\
-             SeToPtIoN NaMe uSeRaZoRiNg VaLuE FaLsE\n\
+             bench\n\
+             setoption name UseRFP value false\n\
+             setoption name UseRazoring value true\n\
+             bench\n\
+             setoption name UseRazoring value false\n\
+             setoption name UseLMR value true\n\
+             bench\n\
+             setoption name UseLMR value false\n\
+             setoption name UseLMP value true\n\
+             bench\n\
+             setoption name UseLMP value false\n\
+             SeToPtIoN NaMe UsEfUtIlItY VaLuE TrUe\n\
              bench\n\
              quit\n"
         )
@@ -184,23 +199,34 @@ fn uci_bench_matches_cli_and_clears_all_search_state() {
 }
 
 #[test]
-fn each_selectivity_toggle_changes_the_bench_node_count_by_two_percent() {
+fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
     let output = run_uci_bench_ablation_session();
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
 
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
     let nodes = metrics(stdout, "Nodes searched: ");
-    assert_eq!(nodes.len(), 4);
+    assert_eq!(nodes.len(), 7);
     let baseline = nodes[0];
-    for (name, disabled) in ["UseNMP", "UseRFP", "UseRazoring"]
-        .into_iter()
-        .zip(&nodes[1..])
+    assert_eq!(
+        baseline, 3_840_238,
+        "all selectivity disabled must reproduce the M3-F0 search signature"
+    );
+    for (name, enabled) in [
+        "UseNMP",
+        "UseRFP",
+        "UseRazoring",
+        "UseLMR",
+        "UseLMP",
+        "UseFutility",
+    ]
+    .into_iter()
+    .zip(&nodes[1..])
     {
-        let difference = baseline.abs_diff(*disabled);
+        let difference = baseline.abs_diff(*enabled);
         assert!(
             difference.saturating_mul(100) >= baseline.saturating_mul(2),
-            "{name} changed bench nodes by less than 2%: base={baseline}, disabled={disabled}"
+            "{name} changed bench nodes by less than 2%: base={baseline}, enabled={enabled}"
         );
     }
 }

@@ -25,6 +25,9 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseNMP type check default true",
     "option name UseRFP type check default true",
     "option name UseRazoring type check default true",
+    "option name UseLMR type check default true",
+    "option name UseLMP type check default true",
+    "option name UseFutility type check default true",
     "option name EvalFile type string default <empty>",
     "uciok",
 ];
@@ -374,6 +377,18 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UseRazoring") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_razoring = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseLMR") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_lmr = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseLMP") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_lmp = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseFutility") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_futility = enabled;
         }
     } else if name.eq_ignore_ascii_case("Hash") {
         let Ok(requested) = value.parse::<i128>() else {
@@ -807,12 +822,25 @@ mod tests {
             &mut output,
         )
         .expect("setoption output should be writable");
+        handle_setoption("setoption name UseLMR value false", &mut state, &mut output)
+            .expect("setoption output should be writable");
+        handle_setoption("setoption name UseLMP value FALSE", &mut state, &mut output)
+            .expect("setoption output should be writable");
+        handle_setoption(
+            "SeToPtIoN NaMe UsEfUtIlItY VaLuE FaLsE",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
 
         state.new_game();
 
         assert!(!state.search_options.use_nmp);
         assert!(!state.search_options.use_rfp);
         assert!(!state.search_options.use_razoring);
+        assert!(!state.search_options.use_lmr);
+        assert!(!state.search_options.use_lmp);
+        assert!(!state.search_options.use_futility);
     }
 
     #[test]

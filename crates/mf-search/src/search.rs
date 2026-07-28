@@ -1,7 +1,11 @@
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use mf_core::{Move, PieceKind, Position, generate_legal_moves, has_legal_move, is_in_check};
+use mf_core::{
+    Bitboard, CastlingSide, Color, Move, PieceKind, Position, bishop_attacks, generate_legal_moves,
+    has_legal_move, is_in_check, king_attacks, knight_attacks, pawn_attacks, rook_attacks,
+};
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
 use crate::move_ordering::{MovePicker, quiescence_moves};
@@ -17,6 +21,11 @@ const DEFAULT_MAX_DEPTH: u32 = 64;
 const NMP_MIN_DEPTH: i32 = 3;
 const NMP_VERIFICATION_DEPTH: i32 = 6;
 const RFP_MAX_DEPTH: i32 = 3;
+const LMP_MAX_DEPTH: i32 = 8;
+const FUTILITY_MAX_EFFECTIVE_DEPTH: i32 = 3;
+const HISTORY_MAX: i32 = 16_384;
+const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
+const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SearchLimits {
@@ -32,6 +41,9 @@ pub struct SearchOptions {
     pub use_nmp: bool,
     pub use_rfp: bool,
     pub use_razoring: bool,
+    pub use_lmr: bool,
+    pub use_lmp: bool,
+    pub use_futility: bool,
 }
 
 impl Default for SearchOptions {
@@ -40,6 +52,9 @@ impl Default for SearchOptions {
             use_nmp: true,
             use_rfp: true,
             use_razoring: true,
+            use_lmr: true,
+            use_lmp: true,
+            use_futility: true,
         }
     }
 }
@@ -523,6 +538,17 @@ fn pvs(
     let static_eval = tt_entry
         .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
         .map_or_else(|| evaluate(position), |entry| i32::from(entry.static_eval));
+    let uses_improving = context.options.use_lmr || context.options.use_lmp;
+    let mut improving = true;
+    if uses_improving {
+        context.static_evals[ply] = (!in_check).then_some(static_eval);
+        improving = is_improving(
+            static_eval,
+            ply.checked_sub(2)
+                .and_then(|previous_ply| context.static_evals[previous_ply]),
+        );
+    }
+    let tt_pv = tt_entry.is_some_and(|entry| entry.pv);
     if !in_check && !pv_node {
         if context.options.use_razoring
             && !is_mate_score(alpha)
@@ -603,15 +629,73 @@ fn pvs(
                 }
             }
         }
+        if uses_improving {
+            improving |= static_eval >= beta;
+        }
     }
 
     let mut best_score = -INFINITY;
     let mut best_move = None;
     let mut searched = 0usize;
     let mut child_pv = Vec::new();
+    let mut searched_quiets = Vec::new();
+    let checks_quiet_moves =
+        context.options.use_lmr || context.options.use_lmp || context.options.use_futility;
 
     for mv in MovePicker::new(position, tt_move, context.killers[ply]) {
         let mover = position.side_to_move();
+        let quiet = !mv.flag().is_capture() && mv.flag().promotion().is_none();
+        let mover_has_non_pawn_material = quiet
+            && (context.options.use_lmp || context.options.use_futility)
+            && has_non_pawn_material_for(position, mover);
+        let gives_check = quiet && checks_quiet_moves && move_gives_check(position, mv);
+        let move_count = searched + 1;
+        let history_score = if quiet && context.options.use_lmr {
+            context.quiet_history_score(mover, mv)
+        } else {
+            0
+        };
+        let reduction = if context.options.use_lmr && quiet && !gives_check {
+            late_move_reduction(depth, move_count, improving, cut_node, tt_pv, history_score)
+        } else {
+            0
+        };
+        let new_depth = depth - 1;
+        let effective_depth = (new_depth - reduction / 1024).max(0);
+
+        if context.options.use_lmp
+            && !pv_node
+            && !in_check
+            && quiet
+            && !gives_check
+            && depth <= LMP_MAX_DEPTH
+            && move_count >= late_move_pruning_threshold(depth, improving)
+            && best_move.is_some()
+            && shallow_pruning_allowed(best_score)
+            && mover_has_non_pawn_material
+        {
+            continue;
+        }
+
+        if context.options.use_futility
+            && !pv_node
+            && !in_check
+            && quiet
+            && !gives_check
+            && effective_depth <= FUTILITY_MAX_EFFECTIVE_DEPTH
+            && best_move.is_some()
+            && shallow_pruning_allowed(best_score)
+            && !is_mate_score(alpha)
+            && eval_pruning_rule50_safe(position, depth)
+            && mover_has_non_pawn_material
+        {
+            let futility_value = static_eval + frontier_futility_margin(effective_depth);
+            if futility_value <= alpha {
+                best_score = best_score.max(futility_value);
+                continue;
+            }
+        }
+
         let undo = position.make_move(mv);
         if is_in_check(position, mover) {
             position.unmake_move(mv, undo);
@@ -622,7 +706,7 @@ fn pvs(
         let score = if searched == 0 {
             pvs(
                 position,
-                depth - 1,
+                new_depth,
                 -beta,
                 -alpha,
                 ply + 1,
@@ -635,14 +719,23 @@ fn pvs(
             )
             .map(|score| -score)
         } else {
+            let reduced_depth = if context.options.use_lmr && depth >= 2 && quiet && !gives_check {
+                (new_depth - reduction / 1024).clamp(1, new_depth)
+            } else {
+                new_depth
+            };
             let scout = pvs(
                 position,
-                depth - 1,
+                reduced_depth,
                 -alpha - 1,
                 -alpha,
                 ply + 1,
                 false,
-                !cut_node,
+                if reduced_depth < new_depth {
+                    true
+                } else {
+                    !cut_node
+                },
                 true,
                 false,
                 context,
@@ -650,11 +743,30 @@ fn pvs(
             )
             .map(|score| -score);
             scout.and_then(|score| {
+                let score = if score > alpha && reduced_depth < new_depth {
+                    child_pv.clear();
+                    pvs(
+                        position,
+                        new_depth,
+                        -alpha - 1,
+                        -alpha,
+                        ply + 1,
+                        false,
+                        !cut_node,
+                        true,
+                        false,
+                        context,
+                        &mut child_pv,
+                    )
+                    .map(|score| -score)?
+                } else {
+                    score
+                };
                 if score > alpha && score < beta {
                     child_pv.clear();
                     pvs(
                         position,
-                        depth - 1,
+                        new_depth,
                         -beta,
                         -alpha,
                         ply + 1,
@@ -685,10 +797,20 @@ fn pvs(
         }
         alpha = alpha.max(score);
         if alpha >= beta {
-            if !mv.flag().is_capture() && mv.flag().promotion().is_none() {
+            if quiet {
                 context.record_killer(ply, mv);
+                if context.options.use_lmr {
+                    context.update_quiet_history(mover, mv, quiet_history_bonus(depth));
+                    let malus = -quiet_history_bonus(depth);
+                    for &previous in &searched_quiets {
+                        context.update_quiet_history(mover, previous, malus);
+                    }
+                }
             }
             break;
+        }
+        if quiet {
+            searched_quiets.push(mv);
         }
     }
 
@@ -838,6 +960,130 @@ fn reverse_futility_margin(depth: i32, tt_hit: bool) -> i32 {
 }
 
 #[inline]
+fn is_improving(static_eval: i32, same_side_previous_eval: Option<i32>) -> bool {
+    same_side_previous_eval.is_none_or(|previous| static_eval > previous)
+}
+
+const fn build_lmp_table() -> [[usize; LMP_MAX_DEPTH as usize + 1]; 2] {
+    let mut table = [[0; LMP_MAX_DEPTH as usize + 1]; 2];
+    let mut improving = 0;
+    while improving < table.len() {
+        let mut depth = 1;
+        while depth < table[improving].len() {
+            table[improving][depth] = (3 + depth * depth) / (2 - improving);
+            depth += 1;
+        }
+        improving += 1;
+    }
+    table
+}
+
+#[inline]
+fn late_move_pruning_threshold(depth: i32, improving: bool) -> usize {
+    let depth = depth.clamp(1, LMP_MAX_DEPTH) as usize;
+    LMP_TABLE[usize::from(improving)][depth]
+}
+
+fn lmr_table() -> &'static [i32; LMR_TABLE_SIZE] {
+    static TABLE: OnceLock<[i32; LMR_TABLE_SIZE]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = [0; LMR_TABLE_SIZE];
+        for (index, reduction) in table.iter_mut().enumerate().skip(1) {
+            *reduction = (2872.0 / 128.0 * (index as f64).ln()) as i32;
+        }
+        table
+    })
+}
+
+#[inline]
+fn late_move_reduction(
+    depth: i32,
+    move_count: usize,
+    improving: bool,
+    cut_node: bool,
+    tt_pv: bool,
+    history_score: i32,
+) -> i32 {
+    let table = lmr_table();
+    let depth_index = depth.clamp(1, MAX_SEARCH_PLY as i32) as usize;
+    let move_index = move_count.clamp(1, MAX_SEARCH_PLY);
+    let scale = table[depth_index] * table[move_index];
+    let mut reduction = scale + 982;
+    if !improving {
+        reduction += scale * 197 / 512;
+    }
+    if cut_node {
+        reduction += 1024;
+    }
+    if tt_pv {
+        reduction -= 1024;
+    }
+    reduction -= history_score * 439 / 4096;
+    reduction.max(0)
+}
+
+#[inline]
+fn frontier_futility_margin(effective_depth: i32) -> i32 {
+    39 + 119 * effective_depth.max(0)
+}
+
+#[inline]
+fn shallow_pruning_allowed(best_score: i32) -> bool {
+    !(best_score < 0 && is_mate_score(best_score))
+}
+
+#[inline]
+fn move_gives_check(position: &Position, mv: Move) -> bool {
+    let moved = position
+        .piece_at(mv.from())
+        .expect("candidate move must have a moving piece");
+    let color = moved.color();
+    let Some(enemy_king) = position.pieces(!color, PieceKind::King).first() else {
+        return false;
+    };
+    let mut occupancy = position.occupancy();
+    let mut pieces = [Bitboard::EMPTY; 6];
+    for kind in PieceKind::ALL {
+        pieces[kind.index()] = position.pieces(color, kind);
+    }
+
+    if mv.flag().is_castling() {
+        let side = CastlingSide::from_rook_origin(mv.from(), mv.to());
+        let king_destination = side.king_destination(color);
+        let rook_destination = side.rook_destination(color);
+        occupancy.clear(mv.from());
+        occupancy.clear(mv.to());
+        occupancy.set(king_destination);
+        occupancy.set(rook_destination);
+        pieces[PieceKind::King.index()].clear(mv.from());
+        pieces[PieceKind::King.index()].set(king_destination);
+        pieces[PieceKind::Rook.index()].clear(mv.to());
+        pieces[PieceKind::Rook.index()].set(rook_destination);
+    } else {
+        occupancy.clear(mv.from());
+        occupancy.set(mv.to());
+        pieces[moved.kind().index()].clear(mv.from());
+        let placed_kind = mv.flag().promotion().unwrap_or(moved.kind());
+        pieces[placed_kind.index()].set(mv.to());
+    }
+
+    !(pawn_attacks(enemy_king, !color) & pieces[PieceKind::Pawn.index()]).is_empty()
+        || !(knight_attacks(enemy_king) & pieces[PieceKind::Knight.index()]).is_empty()
+        || !(king_attacks(enemy_king) & pieces[PieceKind::King.index()]).is_empty()
+        || !(bishop_attacks(enemy_king, occupancy)
+            & (pieces[PieceKind::Bishop.index()] | pieces[PieceKind::Queen.index()]))
+        .is_empty()
+        || !(rook_attacks(enemy_king, occupancy)
+            & (pieces[PieceKind::Rook.index()] | pieces[PieceKind::Queen.index()]))
+        .is_empty()
+}
+
+#[inline]
+fn quiet_history_bonus(depth: i32) -> i32 {
+    (32 * depth * depth).clamp(32, 2_048)
+}
+
+#[inline]
 fn null_move_reduction(depth: i32, static_eval: i32, beta: i32) -> i32 {
     5 + depth / 3 + ((static_eval - beta).max(0) / 200).min(3)
 }
@@ -859,9 +1105,13 @@ fn eval_pruning_rule50_safe(position: &Position, depth: i32) -> bool {
 }
 
 fn has_non_pawn_material(position: &Position) -> bool {
+    has_non_pawn_material_for(position, position.side_to_move())
+}
+
+fn has_non_pawn_material_for(position: &Position, color: Color) -> bool {
     PieceKind::NON_PAWN_MATERIAL
         .into_iter()
-        .any(|kind| !position.pieces(position.side_to_move(), kind).is_empty())
+        .any(|kind| !position.pieces(color, kind).is_empty())
 }
 
 fn tt_key(position: &Position, depth: i32) -> u64 {
@@ -896,6 +1146,8 @@ struct SearchContext<'a> {
     seldepth: u32,
     iterations: Vec<IterationInfo>,
     killers: [[Option<Move>; 2]; MAX_SEARCH_PLY],
+    static_evals: [Option<i32>; MAX_SEARCH_PLY],
+    quiet_history: Box<[[[i16; 64]; 64]; 2]>,
     position_history: Vec<Option<u64>>,
     nmp_min_ply: usize,
     stopped: bool,
@@ -932,6 +1184,8 @@ impl<'a> SearchContext<'a> {
             seldepth: 0,
             iterations: Vec::new(),
             killers: [[None; 2]; MAX_SEARCH_PLY],
+            static_evals: [None; MAX_SEARCH_PLY],
+            quiet_history: Box::new([[[0; 64]; 64]; 2]),
             position_history,
             nmp_min_ply: 0,
             stopped: false,
@@ -976,6 +1230,22 @@ impl<'a> SearchContext<'a> {
         }
         self.killers[ply][1] = self.killers[ply][0];
         self.killers[ply][0] = Some(mv);
+    }
+
+    fn quiet_history_score(&self, color: Color, mv: Move) -> i32 {
+        i32::from(
+            self.quiet_history[color.index()][usize::from(mv.from().index())]
+                [usize::from(mv.to().index())],
+        )
+    }
+
+    fn update_quiet_history(&mut self, color: Color, mv: Move, bonus: i32) {
+        let entry = &mut self.quiet_history[color.index()][usize::from(mv.from().index())]
+            [usize::from(mv.to().index())];
+        let current = i32::from(*entry);
+        let bonus = bonus.clamp(-HISTORY_MAX, HISTORY_MAX);
+        let updated = current + bonus - current * bonus.abs() / HISTORY_MAX;
+        *entry = updated.clamp(-HISTORY_MAX, HISTORY_MAX) as i16;
     }
 
     fn push_position(&mut self, position: &Position) {
@@ -1124,5 +1394,84 @@ mod tests {
         assert!(context.is_threefold_repetition(&position));
         context.push_null_position();
         assert!(!context.is_threefold_repetition(&position));
+    }
+
+    #[test]
+    fn improving_uses_the_same_side_static_evaluation_from_two_plies_ago() {
+        assert!(is_improving(25, Some(24)));
+        assert!(!is_improving(24, Some(24)));
+        assert!(!is_improving(23, Some(24)));
+        assert!(is_improving(0, None));
+    }
+
+    #[test]
+    fn lmp_movecount_table_is_indexed_by_depth_and_improving() {
+        assert_eq!(late_move_pruning_threshold(1, false), 2);
+        assert_eq!(late_move_pruning_threshold(1, true), 4);
+        assert_eq!(late_move_pruning_threshold(4, false), 9);
+        assert_eq!(late_move_pruning_threshold(4, true), 19);
+        assert!(late_move_pruning_threshold(6, false) > late_move_pruning_threshold(5, false));
+    }
+
+    #[test]
+    fn lmr_base_table_and_adjustments_move_reduction_in_the_expected_direction() {
+        let baseline = late_move_reduction(8, 8, true, false, false, 0);
+
+        assert!(late_move_reduction(12, 8, true, false, false, 0) > baseline);
+        assert!(late_move_reduction(8, 12, true, false, false, 0) > baseline);
+        assert!(late_move_reduction(8, 8, false, false, false, 0) > baseline);
+        assert!(late_move_reduction(8, 8, true, true, false, 0) > baseline);
+        assert!(late_move_reduction(8, 8, true, false, true, 0) < baseline);
+        assert!(late_move_reduction(8, 8, true, false, false, 4_000) < baseline);
+        assert!(late_move_reduction(8, 8, true, false, false, -4_000) > baseline);
+    }
+
+    #[test]
+    fn frontier_futility_margin_grows_with_effective_depth() {
+        assert_eq!(frontier_futility_margin(0), 39);
+        assert_eq!(frontier_futility_margin(1), 158);
+        assert_eq!(frontier_futility_margin(3), 396);
+    }
+
+    #[test]
+    fn losing_mate_score_disables_lmp_and_futility_pruning() {
+        assert!(!shallow_pruning_allowed(-MATE_SCORE + 5));
+        assert!(shallow_pruning_allowed(-500));
+        assert!(shallow_pruning_allowed(MATE_SCORE - 5));
+    }
+
+    #[test]
+    fn quiet_check_detection_matches_make_move_for_direct_discovered_and_castling_checks() {
+        let mut positions = vec![
+            Position::startpos(),
+            Position::from_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", false).unwrap(),
+            Position::from_fen("4k3/8/8/8/8/8/4B3/4R1K1 w - - 0 1", false).unwrap(),
+        ];
+        let mut random_walk = Position::startpos();
+        for sample in 0..64 {
+            positions.push(random_walk.clone());
+            let moves = generate_legal_moves(&random_walk);
+            if moves.is_empty() {
+                random_walk = Position::startpos();
+            } else {
+                random_walk.make_move(moves[(sample * 17 + 3) % moves.len()]);
+            }
+        }
+
+        for position in positions {
+            for mv in generate_legal_moves(&position)
+                .iter()
+                .copied()
+                .filter(|mv| !mv.flag().is_capture())
+            {
+                let mut after = position.clone();
+                after.make_move(mv);
+                assert_eq!(
+                    move_gives_check(&position, mv),
+                    is_in_check(&after, after.side_to_move()),
+                    "{position:?} {mv:?}"
+                );
+            }
+        }
     }
 }

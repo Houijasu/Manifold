@@ -306,6 +306,9 @@ fn uci_handshake_is_ordered_and_well_formed() {
     assert!(lines[..uciok].contains(&"option name UseNMP type check default true"));
     assert!(lines[..uciok].contains(&"option name UseRFP type check default true"));
     assert!(lines[..uciok].contains(&"option name UseRazoring type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseLMR type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseLMP type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseFutility type check default true"));
     assert!(lines[..uciok].contains(&"option name EvalFile type string default <empty>"));
     assert_eq!(lines.iter().filter(|line| **line == "uciok").count(), 1);
     assert!(
