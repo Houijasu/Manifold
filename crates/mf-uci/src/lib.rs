@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use mf_core::{Position, format_uci_move, parse_uci_move, perft, perft_divide};
+use mf_core::{Position, format_uci_move, parse_uci_move, perft_divide};
 use mf_search::{
     IterationInfo, SearchLimits, SearchResult, TranspositionTable, clamp_centipawn_score,
-    score_to_uci_mate, search_with_history_callback,
+    score_to_uci_mate, search, search_with_history_callback,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
@@ -24,30 +24,16 @@ const UCI_RESPONSE: &[&str] = &[
     "option name EvalFile type string default <empty>",
     "uciok",
 ];
-const BENCH_CASES: [(&str, u64); 6] = [
-    (
-        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-        197_281,
-    ),
-    (
-        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
-        4_085_603,
-    ),
-    ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 43_238),
-    (
-        "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
-        422_333,
-    ),
-    (
-        "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
-        2_103_487,
-    ),
-    (
-        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
-        3_894_594,
-    ),
+const BENCH_CASES: [&str; 6] = [
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+    "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+    "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+    "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
 ];
-const BENCH_DEPTH: u32 = 4;
+const BENCH_DEPTH: u32 = 7;
+const BENCH_HASH_MIB: usize = 16;
 const DEFAULT_MOVES_TO_GO: u64 = 30;
 const TIME_OVERHEAD_MILLIS: u64 = 10;
 const NULL_BESTMOVE: &str = "0000";
@@ -137,6 +123,13 @@ where
         } else if keyword.eq_ignore_ascii_case("ucinewgame") && has_no_arguments {
             stop_active_search(&mut active_search);
             state.new_game();
+        } else if keyword.eq_ignore_ascii_case("bench") && has_no_arguments {
+            stop_active_search(&mut active_search);
+            let mut writer = writer
+                .lock()
+                .expect("UCI writer lock should not be poisoned");
+            write_bench(&mut *writer).map_err(io::Error::other)?;
+            writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("setoption") {
             stop_active_search(&mut active_search);
             let mut writer = writer
@@ -280,7 +273,7 @@ where
     write_perft(&mut writer, &mut position, depth, chess960).map_err(|error| error.to_string())
 }
 
-/// Runs the deterministic standalone `bench` subcommand.
+/// Runs the deterministic standalone search `bench` subcommand.
 pub fn run_bench_subcommand<I, S, W>(arguments: I, mut writer: W) -> Result<(), String>
 where
     I: IntoIterator<Item = S>,
@@ -292,25 +285,35 @@ where
         return Err(bench_usage("bench does not accept arguments"));
     }
 
-    let mut positions = BENCH_CASES
+    write_bench(&mut writer)
+}
+
+fn write_bench<W: Write>(writer: &mut W) -> Result<(), String> {
+    let positions = BENCH_CASES
         .iter()
-        .map(|(fen, expected)| {
+        .map(|fen| {
             Position::from_fen(fen, false)
-                .map(|position| (position, *expected))
                 .map_err(|error| format!("invalid built-in bench FEN: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let transposition_table = TranspositionTable::new(BENCH_HASH_MIB)
+        .map_err(|error| format!("unable to allocate bench Hash: {error}"))?;
 
     let started = Instant::now();
     let mut total = 0u64;
-    for (position, expected) in &mut positions {
-        let nodes = perft(position, BENCH_DEPTH);
-        if nodes != *expected {
-            return Err(format!(
-                "bench self-check failed: expected {expected} nodes, found {nodes}"
-            ));
-        }
-        total += nodes;
+    for position in &positions {
+        transposition_table.clear();
+        let result = search(
+            position,
+            &transposition_table,
+            SearchLimits {
+                depth: Some(BENCH_DEPTH),
+                ..SearchLimits::default()
+            },
+        );
+        total = total
+            .checked_add(result.nodes)
+            .ok_or_else(|| "bench node count overflowed u64".to_string())?;
     }
     let elapsed = started.elapsed();
     let nanos = elapsed.as_nanos().max(1);
