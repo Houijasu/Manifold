@@ -309,6 +309,10 @@ fn uci_handshake_is_ordered_and_well_formed() {
     assert!(lines[..uciok].contains(&"option name UseLMR type check default true"));
     assert!(lines[..uciok].contains(&"option name UseLMP type check default true"));
     assert!(lines[..uciok].contains(&"option name UseFutility type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseSEEPruning type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseSingularExt type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseIIR type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseProbCut type check default true"));
     assert!(lines[..uciok].contains(&"option name EvalFile type string default <empty>"));
     assert_eq!(lines.iter().filter(|line| **line == "uciok").count(), 1);
     assert!(
@@ -653,12 +657,13 @@ fn iterative_search_emits_well_formed_monotone_info_and_legal_pv() {
         assert!(field(line, "seldepth") >= field(line, "depth"));
         assert!(field(line, "nodes") > previous_nodes);
         previous_nodes = field(line, "nodes");
-        for required in ["score", "nodes", "nps", "time", "pv"] {
+        for required in ["score", "nodes", "nps", "hashfull", "time", "pv"] {
             assert!(
                 line.split_whitespace().any(|token| token == required),
                 "missing '{required}' in '{line}'"
             );
         }
+        assert!(field(line, "hashfull") <= 1_000);
     }
 
     let last = infos.last().unwrap();
@@ -683,6 +688,30 @@ fn iterative_search_emits_well_formed_monotone_info_and_legal_pv() {
                 .any(|line| { line.starts_with("Nodes searched: ") })
         );
     }
+}
+
+#[test]
+fn hashfull_is_monotone_and_reported_in_per_mille() {
+    let output = run_uci(&[
+        "setoption name Hash value 1",
+        "ucinewgame",
+        "position startpos",
+        "go depth 7",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let hashfull: Vec<_> = search_info_lines(&output)
+        .iter()
+        .map(|line| field(line, "hashfull"))
+        .collect();
+    assert!(hashfull.len() >= 7);
+    assert!(hashfull.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert!(hashfull.iter().all(|value| *value <= 1_000));
+    assert!(
+        hashfull.last().copied().unwrap_or(0) > 0,
+        "a depth-7 search with Hash=1 should occupy sampled TT entries"
+    );
 }
 
 #[test]

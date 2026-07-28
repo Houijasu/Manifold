@@ -3,8 +3,8 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const BENCH_NODE_COUNT: u64 = 152_210;
-const BENCH_NODES: &str = "Nodes searched: 152210";
+const BENCH_NODE_COUNT: u64 = 174_415;
+const BENCH_NODES: &str = "Nodes searched: 174415";
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -90,6 +90,10 @@ fn run_uci_bench_ablation_session() -> Output {
              setoption name UseLMR value false\n\
              setoption name UseLMP value false\n\
              setoption name UseFutility value false\n\
+             setoption name UseSEEPruning value false\n\
+             setoption name UseSingularExt value false\n\
+             setoption name UseIIR value false\n\
+             setoption name UseProbCut value false\n\
              bench\n\
              setoption name UseNMP value true\n\
              bench\n\
@@ -107,6 +111,23 @@ fn run_uci_bench_ablation_session() -> Output {
              bench\n\
              setoption name UseLMP value false\n\
              SeToPtIoN NaMe UsEfUtIlItY VaLuE TrUe\n\
+             bench\n\
+             setoption name UseFutility value false\n\
+             setoption name UseSEEPruning value true\n\
+             bench\n\
+             setoption name UseSEEPruning value false\n\
+             setoption name UseSingularExt value true\n\
+             bench\n\
+             setoption name UseSingularExt value false\n\
+             setoption name UseRFP value true\n\
+             setoption name UseSingularExt value true\n\
+             bench\n\
+             setoption name UseIIR value true\n\
+             bench\n\
+             setoption name UseIIR value false\n\
+             setoption name UseRFP value false\n\
+             setoption name UseSingularExt value false\n\
+             SeToPtIoN NaMe UsEpRoBcUt VaLuE TrUe\n\
              bench\n\
              quit\n"
         )
@@ -206,7 +227,7 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
 
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
     let nodes = metrics(stdout, "Nodes searched: ");
-    assert_eq!(nodes.len(), 7);
+    assert_eq!(nodes.len(), 12);
     let baseline = nodes[0];
     assert_eq!(
         baseline, 3_840_238,
@@ -219,9 +240,11 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
         "UseLMR",
         "UseLMP",
         "UseFutility",
+        "UseSEEPruning",
+        "UseSingularExt",
     ]
     .into_iter()
-    .zip(&nodes[1..])
+    .zip(&nodes[1..=8])
     {
         let difference = baseline.abs_diff(*enabled);
         assert!(
@@ -229,6 +252,21 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
             "{name} changed bench nodes by less than 2%: base={baseline}, enabled={enabled}"
         );
     }
+
+    let iir_baseline = nodes[9];
+    let iir_enabled = nodes[10];
+    assert!(
+        iir_baseline.abs_diff(iir_enabled).saturating_mul(100) >= iir_baseline.saturating_mul(2),
+        "UseIIR changed bench nodes by less than 2% in its isolated context: \
+         base={iir_baseline}, enabled={iir_enabled}"
+    );
+
+    let probcut_enabled = nodes[11];
+    assert!(
+        baseline.abs_diff(probcut_enabled).saturating_mul(100) >= baseline.saturating_mul(2),
+        "UseProbCut changed bench nodes by less than 2%: \
+         base={baseline}, enabled={probcut_enabled}"
+    );
 }
 
 #[test]

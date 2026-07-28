@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mf_core::{
-    Bitboard, CastlingSide, Color, Move, PieceKind, Position, bishop_attacks, generate_legal_moves,
-    has_legal_move, is_in_check, king_attacks, knight_attacks, pawn_attacks, rook_attacks,
+    Bitboard, CastlingSide, Color, Move, PieceKind, Position, Square, bishop_attacks,
+    generate_legal_moves, has_legal_move, is_in_check, king_attacks, knight_attacks, pawn_attacks,
+    rook_attacks, static_exchange_evaluation,
 };
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
@@ -23,6 +24,12 @@ const NMP_VERIFICATION_DEPTH: i32 = 6;
 const RFP_MAX_DEPTH: i32 = 3;
 const LMP_MAX_DEPTH: i32 = 8;
 const FUTILITY_MAX_EFFECTIVE_DEPTH: i32 = 3;
+const SINGULAR_MIN_DEPTH: i32 = 6;
+const IIR_MIN_DEPTH: i32 = 6;
+const PROBCUT_MIN_DEPTH: i32 = 3;
+const PROBCUT_BASE_MARGIN: i32 = 241;
+const PROBCUT_IMPROVING_MARGIN: i32 = 64;
+const QSEARCH_SEE_THRESHOLD: i32 = -74;
 const HISTORY_MAX: i32 = 16_384;
 const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
 const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
@@ -44,6 +51,10 @@ pub struct SearchOptions {
     pub use_lmr: bool,
     pub use_lmp: bool,
     pub use_futility: bool,
+    pub use_see_pruning: bool,
+    pub use_singular_ext: bool,
+    pub use_iir: bool,
+    pub use_probcut: bool,
 }
 
 impl Default for SearchOptions {
@@ -55,6 +66,10 @@ impl Default for SearchOptions {
             use_lmr: true,
             use_lmp: true,
             use_futility: true,
+            use_see_pruning: true,
+            use_singular_ext: true,
+            use_iir: true,
+            use_probcut: true,
         }
     }
 }
@@ -65,6 +80,7 @@ pub struct IterationInfo {
     pub seldepth: u32,
     pub score: i32,
     pub nodes: u64,
+    pub hashfull: u16,
     pub elapsed: Duration,
     pub pv: Vec<Move>,
 }
@@ -76,6 +92,7 @@ pub struct SearchResult {
     pub depth: u32,
     pub seldepth: u32,
     pub nodes: u64,
+    pub hashfull: u16,
     pub elapsed: Duration,
     pub pv: Vec<Move>,
     pub iterations: Vec<IterationInfo>,
@@ -244,6 +261,7 @@ where
             depth: 0,
             seldepth: 0,
             nodes: 0,
+            hashfull: transposition_table.hashfull_per_mille(),
             elapsed: started.elapsed(),
             pv: Vec::new(),
             iterations: Vec::new(),
@@ -258,6 +276,7 @@ where
             depth: 0,
             seldepth: 0,
             nodes: 0,
+            hashfull: transposition_table.hashfull_per_mille(),
             elapsed: started.elapsed(),
             pv: vec![fallback_move],
             iterations: Vec::new(),
@@ -285,6 +304,7 @@ where
             seldepth: context.seldepth.max(depth),
             score,
             nodes: context.nodes,
+            hashfull: context.transposition_table.hashfull_per_mille(),
             elapsed,
             pv,
         };
@@ -306,6 +326,7 @@ where
         seldepth: 0,
         score: evaluate(position),
         nodes: context.nodes,
+        hashfull: context.transposition_table.hashfull_per_mille(),
         elapsed: started.elapsed(),
         pv: vec![fallback_move],
     });
@@ -317,6 +338,7 @@ where
         depth: completed.depth,
         seldepth: completed.seldepth,
         nodes: context.nodes,
+        hashfull: completed.hashfull,
         elapsed: started.elapsed(),
         pv: completed.pv,
         iterations: context.iterations,
@@ -399,6 +421,7 @@ fn root_search(
                 false,
                 true,
                 false,
+                None,
                 context,
                 &mut child_pv,
             )
@@ -414,6 +437,7 @@ fn root_search(
                 true,
                 true,
                 false,
+                None,
                 context,
                 &mut child_pv,
             )
@@ -431,6 +455,7 @@ fn root_search(
                         false,
                         true,
                         false,
+                        None,
                         context,
                         &mut child_pv,
                     )
@@ -492,7 +517,7 @@ fn root_search(
 #[allow(clippy::too_many_arguments)]
 fn pvs(
     position: &mut Position,
-    depth: i32,
+    mut depth: i32,
     mut alpha: i32,
     beta: i32,
     ply: usize,
@@ -500,6 +525,7 @@ fn pvs(
     cut_node: bool,
     allow_null: bool,
     verification_node: bool,
+    excluded_move: Option<Move>,
     context: &mut SearchContext<'_>,
     pv: &mut Vec<Move>,
 ) -> Option<i32> {
@@ -520,7 +546,7 @@ fn pvs(
     context.transposition_table.prefetch(key);
     let original_alpha = alpha;
     let mut tt_move = None;
-    let tt_entry = context.transposition_table.probe(key);
+    let tt_entry = tt_entry_for_node(context.transposition_table, key, verification_node);
     if let Some(entry) = tt_entry {
         tt_move = entry.best_move;
         if !pv_node && !verification_node && i32::from(entry.depth) >= depth {
@@ -533,12 +559,16 @@ fn pvs(
             }
         }
     }
+    if excluded_move.is_some() {
+        tt_move = None;
+    }
 
     let in_check = is_in_check(position, position.side_to_move());
     let static_eval = tt_entry
         .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
         .map_or_else(|| evaluate(position), |entry| i32::from(entry.static_eval));
-    let uses_improving = context.options.use_lmr || context.options.use_lmp;
+    let uses_improving =
+        context.options.use_lmr || context.options.use_lmp || context.options.use_probcut;
     let mut improving = true;
     if uses_improving {
         context.static_evals[ply] = (!in_check).then_some(static_eval);
@@ -549,7 +579,7 @@ fn pvs(
         );
     }
     let tt_pv = tt_entry.is_some_and(|entry| entry.pv);
-    if !in_check && !pv_node {
+    if !in_check && !pv_node && excluded_move.is_none() {
         if context.options.use_razoring
             && !is_mate_score(alpha)
             && eval_pruning_rule50_safe(position, depth)
@@ -593,6 +623,7 @@ fn pvs(
                 false,
                 false,
                 false,
+                None,
                 context,
                 &mut null_pv,
             )
@@ -619,6 +650,7 @@ fn pvs(
                     false,
                     true,
                     true,
+                    None,
                     context,
                     &mut verification_pv,
                 );
@@ -634,21 +666,121 @@ fn pvs(
         }
     }
 
+    if context.options.use_iir {
+        depth -= internal_iterative_reduction(
+            depth,
+            pv_node,
+            cut_node,
+            in_check,
+            tt_move,
+            excluded_move,
+        );
+    }
+
+    if context.options.use_probcut
+        && excluded_move.is_none()
+        && !in_check
+        && !pv_node
+        && depth >= PROBCUT_MIN_DEPTH
+        && !is_mate_score(beta)
+        && eval_pruning_rule50_safe(position, depth)
+    {
+        let probcut_beta = probcut_beta(beta, improving);
+        let tt_score = tt_entry.map(|entry| score_from_tt(i32::from(entry.score), ply));
+        if tt_score.is_none_or(|score| score >= probcut_beta) {
+            let probcut_depth = probcut_depth(depth, improving);
+            let see_threshold = probcut_beta - static_eval;
+            for mv in MovePicker::new(position, tt_move, context.killers[ply])
+                .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
+            {
+                if static_exchange_evaluation(position, mv) < see_threshold {
+                    continue;
+                }
+                let mover = position.side_to_move();
+                let undo = position.make_move(mv);
+                if is_in_check(position, mover) {
+                    position.unmake_move(mv, undo);
+                    continue;
+                }
+                context.push_position(position);
+                let mut probcut_pv = Vec::new();
+                let mut value = quiescence(
+                    position,
+                    -probcut_beta,
+                    -probcut_beta + 1,
+                    ply + 1,
+                    true,
+                    context,
+                    &mut probcut_pv,
+                )
+                .map(|score| -score);
+                if value.is_some_and(|score| score >= probcut_beta) && probcut_depth > 0 {
+                    probcut_pv.clear();
+                    value = pvs(
+                        position,
+                        probcut_depth,
+                        -probcut_beta,
+                        -probcut_beta + 1,
+                        ply + 1,
+                        false,
+                        !cut_node,
+                        true,
+                        false,
+                        None,
+                        context,
+                        &mut probcut_pv,
+                    )
+                    .map(|score| -score);
+                }
+                context.pop_position();
+                position.unmake_move(mv, undo);
+                let value = value?;
+                if value >= probcut_beta {
+                    if !verification_node {
+                        context.transposition_table.store(
+                            key,
+                            EntryData {
+                                best_move: Some(mv),
+                                score: score_to_tt(value, ply) as i16,
+                                static_eval: static_eval as i16,
+                                depth: (probcut_depth + 1).clamp(0, i32::from(u8::MAX)) as u8,
+                                bound: Bound::Lower,
+                                age: 0,
+                                pv: false,
+                            },
+                        );
+                    }
+                    if let Some(cutoff_value) = probcut_cutoff_value(value, beta, probcut_beta) {
+                        return Some(cutoff_value);
+                    }
+                }
+            }
+        }
+    }
+
     let mut best_score = -INFINITY;
     let mut best_move = None;
     let mut searched = 0usize;
     let mut child_pv = Vec::new();
     let mut searched_quiets = Vec::new();
-    let checks_quiet_moves =
-        context.options.use_lmr || context.options.use_lmp || context.options.use_futility;
+    let checks_moves = context.options.use_lmr
+        || context.options.use_lmp
+        || context.options.use_futility
+        || context.options.use_see_pruning
+        || context.options.use_singular_ext;
 
     for mv in MovePicker::new(position, tt_move, context.killers[ply]) {
+        if excluded_move == Some(mv) {
+            continue;
+        }
         let mover = position.side_to_move();
         let quiet = !mv.flag().is_capture() && mv.flag().promotion().is_none();
-        let mover_has_non_pawn_material = quiet
-            && (context.options.use_lmp || context.options.use_futility)
-            && has_non_pawn_material_for(position, mover);
-        let gives_check = quiet && checks_quiet_moves && move_gives_check(position, mv);
+        let needs_non_pawn_material = (quiet
+            && (context.options.use_lmp || context.options.use_futility))
+            || context.options.use_see_pruning;
+        let mover_has_non_pawn_material =
+            needs_non_pawn_material && has_non_pawn_material_for(position, mover);
+        let gives_check = checks_moves && move_gives_check(position, mv);
         let move_count = searched + 1;
         let history_score = if quiet && context.options.use_lmr {
             context.quiet_history_score(mover, mv)
@@ -696,6 +828,75 @@ fn pvs(
             }
         }
 
+        if context.options.use_see_pruning
+            && !pv_node
+            && !in_check
+            && !gives_check
+            && !mv.flag().is_castling()
+            && best_move.is_some()
+            && shallow_pruning_allowed(best_score)
+            && eval_pruning_rule50_safe(position, depth)
+            && mover_has_non_pawn_material
+        {
+            let threshold = if quiet {
+                quiet_see_threshold(effective_depth)
+            } else {
+                capture_see_threshold(depth)
+            };
+            if static_exchange_evaluation(position, mv) < threshold
+                && (quiet || alpha >= 0 || has_other_non_pawn_material(position, mover, mv))
+            {
+                continue;
+            }
+        }
+
+        let mut extension = 0;
+        if context.options.use_singular_ext
+            && excluded_move.is_none()
+            && Some(mv) == tt_move
+            && depth >= SINGULAR_MIN_DEPTH + i32::from(tt_pv)
+            && tt_entry.is_some_and(|entry| {
+                matches!(entry.bound, Bound::Lower | Bound::Exact)
+                    && i32::from(entry.depth) >= depth - 3
+                    && !is_mate_score(score_from_tt(i32::from(entry.score), ply))
+            })
+        {
+            let tt_score = score_from_tt(
+                i32::from(tt_entry.expect("singular candidate has TT entry").score),
+                ply,
+            );
+            let singular_beta = singular_beta(tt_score, depth, tt_pv, pv_node);
+            let singular_depth = (new_depth / 2).max(1);
+            let mut singular_pv = Vec::new();
+            let singular_value = pvs(
+                position,
+                singular_depth,
+                singular_beta - 1,
+                singular_beta,
+                ply,
+                false,
+                cut_node,
+                true,
+                true,
+                Some(mv),
+                context,
+                &mut singular_pv,
+            )?;
+            extension = singular_extension(
+                singular_value,
+                singular_beta,
+                pv_node,
+                mv.flag().is_capture(),
+                cut_node,
+                tt_score,
+                beta,
+            );
+        }
+        if context.options.use_singular_ext {
+            extension = check_extension(gives_check, extension);
+        }
+
+        let child_depth = (new_depth + extension).max(0);
         let undo = position.make_move(mv);
         if is_in_check(position, mover) {
             position.unmake_move(mv, undo);
@@ -706,7 +907,7 @@ fn pvs(
         let score = if searched == 0 {
             pvs(
                 position,
-                new_depth,
+                child_depth,
                 -beta,
                 -alpha,
                 ply + 1,
@@ -714,15 +915,16 @@ fn pvs(
                 if pv_node { false } else { !cut_node },
                 true,
                 false,
+                None,
                 context,
                 &mut child_pv,
             )
             .map(|score| -score)
         } else {
             let reduced_depth = if context.options.use_lmr && depth >= 2 && quiet && !gives_check {
-                (new_depth - reduction / 1024).clamp(1, new_depth)
+                (child_depth - reduction / 1024).clamp(1, child_depth.max(1))
             } else {
-                new_depth
+                child_depth
             };
             let scout = pvs(
                 position,
@@ -731,23 +933,24 @@ fn pvs(
                 -alpha,
                 ply + 1,
                 false,
-                if reduced_depth < new_depth {
+                if reduced_depth < child_depth {
                     true
                 } else {
                     !cut_node
                 },
                 true,
                 false,
+                None,
                 context,
                 &mut child_pv,
             )
             .map(|score| -score);
             scout.and_then(|score| {
-                let score = if score > alpha && reduced_depth < new_depth {
+                let score = if score > alpha && reduced_depth < child_depth {
                     child_pv.clear();
                     pvs(
                         position,
-                        new_depth,
+                        child_depth,
                         -alpha - 1,
                         -alpha,
                         ply + 1,
@@ -755,6 +958,7 @@ fn pvs(
                         !cut_node,
                         true,
                         false,
+                        None,
                         context,
                         &mut child_pv,
                     )
@@ -766,7 +970,7 @@ fn pvs(
                     child_pv.clear();
                     pvs(
                         position,
-                        new_depth,
+                        child_depth,
                         -beta,
                         -alpha,
                         ply + 1,
@@ -774,6 +978,7 @@ fn pvs(
                         if pv_node { false } else { !cut_node },
                         true,
                         false,
+                        None,
                         context,
                         &mut child_pv,
                     )
@@ -815,7 +1020,9 @@ fn pvs(
     }
 
     if searched == 0 {
-        return Some(if is_in_check(position, position.side_to_move()) {
+        return Some(if excluded_move.is_some() {
+            alpha
+        } else if is_in_check(position, position.side_to_move()) {
             -MATE_SCORE + ply as i32
         } else {
             0
@@ -886,7 +1093,10 @@ fn quiescence(
     let moves: Vec<_> = if in_check {
         MovePicker::new(position, None, [None, None]).collect()
     } else {
-        quiescence_moves(position)
+        quiescence_moves(
+            position,
+            qsearch_see_threshold(context.options.use_see_pruning),
+        )
     };
     let mut searched = 0usize;
     let mut child_pv = Vec::new();
@@ -945,6 +1155,19 @@ fn score_to_tt(score: i32, ply: usize) -> i32 {
         score - ply as i32
     } else {
         score
+    }
+}
+
+#[inline]
+fn tt_entry_for_node(
+    transposition_table: &TranspositionTable,
+    key: u64,
+    verification_node: bool,
+) -> Option<EntryData> {
+    if verification_node {
+        None
+    } else {
+        transposition_table.probe(key)
     }
 }
 
@@ -1028,8 +1251,104 @@ fn frontier_futility_margin(effective_depth: i32) -> i32 {
 }
 
 #[inline]
+fn quiet_see_threshold(effective_depth: i32) -> i32 {
+    -23 * effective_depth.max(0).pow(2)
+}
+
+#[inline]
+fn capture_see_threshold(depth: i32) -> i32 {
+    -177 * depth.max(0)
+}
+
+#[inline]
+const fn qsearch_see_threshold(enabled: bool) -> i32 {
+    if enabled { QSEARCH_SEE_THRESHOLD } else { 0 }
+}
+
+#[inline]
+fn internal_iterative_reduction(
+    depth: i32,
+    pv_node: bool,
+    cut_node: bool,
+    in_check: bool,
+    tt_move: Option<Move>,
+    excluded_move: Option<Move>,
+) -> i32 {
+    i32::from(
+        depth >= IIR_MIN_DEPTH
+            && !pv_node
+            && cut_node
+            && !in_check
+            && tt_move.is_none()
+            && excluded_move.is_none(),
+    )
+}
+
+#[inline]
+fn probcut_beta(beta: i32, improving: bool) -> i32 {
+    beta + PROBCUT_BASE_MARGIN - PROBCUT_IMPROVING_MARGIN * i32::from(improving)
+}
+
+#[inline]
+fn probcut_depth(depth: i32, improving: bool) -> i32 {
+    depth - if improving { 5 } else { 3 }
+}
+
+#[inline]
+fn probcut_cutoff_value(value: i32, beta: i32, probcut_beta: i32) -> Option<i32> {
+    (!is_mate_score(value)).then_some(value - (probcut_beta - beta))
+}
+
+#[inline]
+fn singular_beta(tt_score: i32, depth: i32, tt_pv: bool, pv_node: bool) -> i32 {
+    tt_score - (59 + 66 * i32::from(tt_pv && !pv_node)) * depth / 63
+}
+
+#[inline]
+fn singular_extension(
+    value: i32,
+    singular_beta: i32,
+    pv_node: bool,
+    tt_capture: bool,
+    cut_node: bool,
+    tt_score: i32,
+    beta: i32,
+) -> i32 {
+    if value < singular_beta {
+        let double_margin = 16 + 16 * i32::from(pv_node) + 8 * i32::from(!tt_capture);
+        1 + i32::from(value < singular_beta - double_margin)
+    } else if tt_score >= beta && !is_mate_score(value) {
+        -3
+    } else if cut_node {
+        -2
+    } else {
+        0
+    }
+}
+
+#[inline]
+fn check_extension(gives_check: bool, extension: i32) -> i32 {
+    if gives_check {
+        extension.max(1)
+    } else {
+        extension
+    }
+}
+
+#[inline]
 fn shallow_pruning_allowed(best_score: i32) -> bool {
     !(best_score < 0 && is_mate_score(best_score))
+}
+
+fn has_other_non_pawn_material(position: &Position, color: Color, mv: Move) -> bool {
+    let moved_kind = position
+        .piece_at(mv.from())
+        .expect("candidate move must have a moving piece")
+        .kind();
+    PieceKind::NON_PAWN_MATERIAL.into_iter().any(|kind| {
+        let count = position.pieces(color, kind).count();
+        count > u32::from(kind == moved_kind)
+    })
 }
 
 #[inline]
@@ -1061,6 +1380,12 @@ fn move_gives_check(position: &Position, mv: Move) -> bool {
         pieces[PieceKind::Rook.index()].set(rook_destination);
     } else {
         occupancy.clear(mv.from());
+        if mv.flag().is_en_passant() {
+            let capture_offset = if color == Color::White { -8 } else { 8 };
+            let capture_square = Square::new((i16::from(mv.to().index()) + capture_offset) as u8)
+                .expect("en-passant capture square must be on the board");
+            occupancy.clear(capture_square);
+        }
         occupancy.set(mv.to());
         pieces[moved.kind().index()].clear(mv.from());
         let placed_kind = mv.flag().promotion().unwrap_or(moved.kind());
@@ -1434,6 +1759,178 @@ mod tests {
     }
 
     #[test]
+    fn see_pruning_uses_separate_main_search_and_qsearch_thresholds() {
+        assert_eq!(quiet_see_threshold(0), 0);
+        assert_eq!(quiet_see_threshold(3), -207);
+        assert_eq!(capture_see_threshold(3), -531);
+        assert_eq!(qsearch_see_threshold(true), -74);
+        assert_eq!(qsearch_see_threshold(false), 0);
+    }
+
+    #[test]
+    fn iir_reduces_only_deep_tt_move_less_expected_cut_nodes() {
+        let tt_move = generate_legal_moves(&Position::startpos())[0];
+
+        assert_eq!(
+            internal_iterative_reduction(5, false, true, false, None, None),
+            0
+        );
+        assert_eq!(
+            internal_iterative_reduction(6, true, true, false, None, None),
+            0
+        );
+        assert_eq!(
+            internal_iterative_reduction(6, false, false, false, None, None),
+            0
+        );
+        assert_eq!(
+            internal_iterative_reduction(6, false, true, false, Some(tt_move), None),
+            0
+        );
+        assert_eq!(
+            internal_iterative_reduction(6, false, true, false, None, Some(tt_move)),
+            0
+        );
+        assert_eq!(
+            internal_iterative_reduction(6, false, true, true, None, None),
+            0
+        );
+        assert_eq!(
+            internal_iterative_reduction(6, false, true, false, None, None),
+            1
+        );
+    }
+
+    #[test]
+    fn probcut_margin_and_depth_follow_the_reference_formulas() {
+        assert_eq!(probcut_beta(100, false), 341);
+        assert_eq!(probcut_beta(100, true), 277);
+        assert_eq!(probcut_depth(8, false), 5);
+        assert_eq!(probcut_depth(8, true), 3);
+    }
+
+    #[test]
+    fn probcut_does_not_adjust_or_return_decisive_scores() {
+        assert_eq!(probcut_cutoff_value(500, 100, 341), Some(259));
+        assert_eq!(probcut_cutoff_value(MATE_SCORE - 5, 100, 341), None);
+    }
+
+    #[test]
+    fn singular_extensions_support_single_double_negative_and_check_extensions() {
+        let singular_beta = singular_beta(200, 8, false, false);
+        assert_eq!(singular_beta, 193);
+        assert_eq!(
+            singular_extension(192, singular_beta, false, true, false, 200, 300),
+            1
+        );
+        assert_eq!(
+            singular_extension(150, singular_beta, true, true, false, 200, 300),
+            2
+        );
+        assert_eq!(
+            singular_extension(210, singular_beta, false, true, false, 400, 300),
+            -3
+        );
+        assert_eq!(
+            singular_extension(210, singular_beta, false, true, true, 200, 300),
+            -2
+        );
+        assert_eq!(check_extension(true, 0), 1);
+        assert_eq!(check_extension(false, 0), 0);
+    }
+
+    #[test]
+    fn singular_verification_does_not_probe_or_overwrite_the_parent_tt_entry() {
+        let position = Position::startpos();
+        let depth = 6;
+        let key = tt_key(&position, depth);
+        let tt_move = generate_legal_moves(&position)[0];
+        let original = EntryData {
+            best_move: Some(tt_move),
+            score: 100,
+            static_eval: evaluate(&position) as i16,
+            depth: depth as u8,
+            bound: Bound::Lower,
+            age: 0,
+            pv: false,
+        };
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        table.store(key, original);
+        assert_eq!(tt_entry_for_node(&table, key, false), Some(original));
+        assert_eq!(tt_entry_for_node(&table, key, true), None);
+        let stop = AtomicBool::new(false);
+        let history = [position.repetition_key()];
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits::default(),
+            Instant::now(),
+            &stop,
+            &position,
+            &history,
+            SearchOptions::default(),
+        );
+        let mut searched = position.clone();
+        let mut pv = Vec::new();
+
+        let result = pvs(
+            &mut searched,
+            depth / 2,
+            49,
+            50,
+            1,
+            false,
+            true,
+            true,
+            true,
+            Some(tt_move),
+            &mut context,
+            &mut pv,
+        );
+
+        assert!(result.is_some());
+        assert_eq!(table.probe(key), Some(original));
+    }
+
+    #[test]
+    fn excluded_move_search_without_alternatives_returns_alpha_not_draw() {
+        let position = Position::from_fen("8/8/8/8/8/k7/8/KQ6 b - - 0 1", false).unwrap();
+        let legal_moves = generate_legal_moves(&position);
+        assert_eq!(legal_moves.len(), 1);
+        let excluded_move = legal_moves[0];
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let history = [position.repetition_key()];
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits::default(),
+            Instant::now(),
+            &stop,
+            &position,
+            &history,
+            SearchOptions::default(),
+        );
+        let mut searched = position.clone();
+        let mut pv = Vec::new();
+
+        let result = pvs(
+            &mut searched,
+            2,
+            -100,
+            -99,
+            1,
+            false,
+            true,
+            true,
+            true,
+            Some(excluded_move),
+            &mut context,
+            &mut pv,
+        );
+
+        assert_eq!(result, Some(-100));
+    }
+
+    #[test]
     fn losing_mate_score_disables_lmp_and_futility_pruning() {
         assert!(!shallow_pruning_allowed(-MATE_SCORE + 5));
         assert!(shallow_pruning_allowed(-500));
@@ -1473,5 +1970,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn check_detection_handles_en_passant_discovered_checks() {
+        let position = Position::from_fen("8/8/8/R2pP2k/8/8/8/K7 w - d6 0 1", false).unwrap();
+        let mv = generate_legal_moves(&position)
+            .into_iter()
+            .copied()
+            .find(|mv| mv.flag().is_en_passant())
+            .expect("test position should contain an en-passant capture");
+        let mut after = position.clone();
+        after.make_move(mv);
+
+        assert!(is_in_check(&after, after.side_to_move()));
+        assert!(move_gives_check(&position, mv));
     }
 }

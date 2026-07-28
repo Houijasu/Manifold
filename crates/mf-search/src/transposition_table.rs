@@ -198,6 +198,20 @@ impl TranspositionTable {
         }
     }
 
+    /// Returns sampled table occupancy in per-mille, matching the UCI `hashfull` unit.
+    pub fn hashfull_per_mille(&self) -> u16 {
+        const SAMPLE_CLUSTERS: usize = 1_000;
+
+        let sampled_clusters = self.clusters.len().min(SAMPLE_CLUSTERS);
+        let sampled_entries = sampled_clusters * ENTRIES_PER_CLUSTER;
+        let occupied = self.clusters[..sampled_clusters]
+            .iter()
+            .flat_map(|cluster| &cluster.entries)
+            .filter(|entry| entry.data.load(Ordering::Relaxed) != 0)
+            .count();
+        ((occupied * 1_000) / sampled_entries) as u16
+    }
+
     #[inline]
     pub fn probe(&self, key: u64) -> Option<EntryData> {
         self.cluster(key)

@@ -387,6 +387,32 @@ fn clear_makes_previously_stored_probe_miss() {
 }
 
 #[test]
+fn hashfull_reports_sampled_occupancy_in_per_mille() {
+    let table = TranspositionTable::new(1).expect("test TT should allocate");
+    assert_eq!(table.hashfull_per_mille(), 0);
+
+    for index in 0..128u64 {
+        table.store(
+            index.wrapping_mul(0x9e37_79b9_7f4a_7c15),
+            EntryData {
+                best_move: None,
+                score: index as i16,
+                static_eval: 0,
+                depth: 1,
+                bound: Bound::Exact,
+                age: 0,
+                pv: false,
+            },
+        );
+    }
+
+    let hashfull = table.hashfull_per_mille();
+    assert!((1..=1_000).contains(&hashfull));
+    table.clear();
+    assert_eq!(table.hashfull_per_mille(), 0);
+}
+
+#[test]
 fn prefetch_is_safe_for_arbitrary_keys() {
     let table = TranspositionTable::new(1).expect("test table should allocate");
     for key in [0, 1, u64::MAX, 0x0123_4567_89ab_cdef] {

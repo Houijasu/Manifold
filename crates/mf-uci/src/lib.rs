@@ -28,6 +28,10 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseLMR type check default true",
     "option name UseLMP type check default true",
     "option name UseFutility type check default true",
+    "option name UseSEEPruning type check default true",
+    "option name UseSingularExt type check default true",
+    "option name UseIIR type check default true",
+    "option name UseProbCut type check default true",
     "option name EvalFile type string default <empty>",
     "uciok",
 ];
@@ -390,6 +394,22 @@ fn handle_setoption<W: Write>(
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_futility = enabled;
         }
+    } else if name.eq_ignore_ascii_case("UseSEEPruning") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_see_pruning = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseSingularExt") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_singular_ext = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseIIR") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_iir = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseProbCut") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_probcut = enabled;
+        }
     } else if name.eq_ignore_ascii_case("Hash") {
         let Ok(requested) = value.parse::<i128>() else {
             writeln!(writer, "info string invalid Hash value '{value}'")?;
@@ -621,11 +641,12 @@ fn write_search_tail<W: Write>(
         let pv = format_pv(position, &result.pv, chess960);
         writeln!(
             writer,
-            "info depth {} seldepth {} score {} nodes {} nps 0 time {} pv {}",
+            "info depth {} seldepth {} score {} nodes {} nps 0 hashfull {} time {} pv {}",
             result.depth,
             result.seldepth,
             score,
             result.nodes,
+            result.hashfull,
             result.elapsed.as_millis(),
             pv
         )?;
@@ -672,8 +693,15 @@ fn write_iteration_info<W: Write>(
     let pv = format_pv(position, &iteration.pv, chess960);
     writeln!(
         writer,
-        "info depth {} seldepth {} score {} nodes {} nps {} time {} pv {}",
-        iteration.depth, iteration.seldepth, score, iteration.nodes, nps, elapsed_millis, pv
+        "info depth {} seldepth {} score {} nodes {} nps {} hashfull {} time {} pv {}",
+        iteration.depth,
+        iteration.seldepth,
+        score,
+        iteration.nodes,
+        nps,
+        iteration.hashfull,
+        elapsed_millis,
+        pv
     )
 }
 
@@ -832,6 +860,26 @@ mod tests {
             &mut output,
         )
         .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseSEEPruning value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseSingularExt value FALSE",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+        handle_setoption("SeToPtIoN NaMe UsEiIr VaLuE FaLsE", &mut state, &mut output)
+            .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseProbCut value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
 
         state.new_game();
 
@@ -841,6 +889,10 @@ mod tests {
         assert!(!state.search_options.use_lmr);
         assert!(!state.search_options.use_lmp);
         assert!(!state.search_options.use_futility);
+        assert!(!state.search_options.use_see_pruning);
+        assert!(!state.search_options.use_singular_ext);
+        assert!(!state.search_options.use_iir);
+        assert!(!state.search_options.use_probcut);
     }
 
     #[test]

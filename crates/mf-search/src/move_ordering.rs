@@ -111,12 +111,12 @@ impl Iterator for MovePicker {
     }
 }
 
-pub(crate) fn quiescence_moves(position: &Position) -> Vec<Move> {
+pub(crate) fn quiescence_moves(position: &Position, see_threshold: i32) -> Vec<Move> {
     let mut moves: Vec<_> = generate_pseudo_legal_moves(position)
         .iter()
         .copied()
         .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
-        .filter(|&mv| static_exchange_evaluation(position, mv) >= 0)
+        .filter(|&mv| static_exchange_evaluation(position, mv) >= see_threshold)
         .collect();
     moves.sort_unstable_by_key(|&mv| core::cmp::Reverse(capture_score(position, mv)));
     moves

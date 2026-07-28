@@ -76,6 +76,10 @@ fn selectivity_options_default_to_enabled() {
             use_lmr: true,
             use_lmp: true,
             use_futility: true,
+            use_see_pruning: true,
+            use_singular_ext: true,
+            use_iir: true,
+            use_probcut: true,
         }
     );
 }
@@ -151,6 +155,10 @@ fn mate_in_n_found() {
                 use_lmr: false,
                 use_lmp: false,
                 use_futility: false,
+                use_see_pruning: false,
+                use_singular_ext: false,
+                use_iir: false,
+                use_probcut: false,
             },
         );
 
@@ -245,6 +253,35 @@ fn deterministic_single_thread() {
     let warm = search(&position, &first_table, limits);
     assert_eq!(warm.best_move, first.best_move);
     assert_eq!(warm.nodes, first.nodes);
+}
+
+#[test]
+fn selective_fixed_depth_search_is_reproducible_with_fresh_and_warm_tt() {
+    let position = Position::from_fen(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        false,
+    )
+    .unwrap();
+    let mut expected = None;
+
+    for _ in 0..5 {
+        let table = TranspositionTable::new(16).expect("test TT should allocate");
+        let result = search(&position, &table, limits(7));
+        let signature = (
+            result.best_move,
+            result.score,
+            result.nodes,
+            result.pv.clone(),
+        );
+        assert_eq!(
+            expected.get_or_insert_with(|| signature.clone()),
+            &signature
+        );
+
+        let warm = search(&position, &table, limits(7));
+        assert_eq!(warm.best_move, result.best_move);
+        assert_eq!(warm.score, result.score);
+    }
 }
 
 #[test]
