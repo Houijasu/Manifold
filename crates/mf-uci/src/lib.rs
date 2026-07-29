@@ -47,6 +47,10 @@ const BENCH_CASES: [&str; 6] = [
 ];
 const BENCH_DEPTH: u32 = 7;
 const BENCH_HASH_MIB: usize = 16;
+const MTBENCH_DEFAULT_THREADS: [usize; 4] = [1, 2, 4, 8];
+const MTBENCH_DEFAULT_DEPTH: u32 = 10;
+const MTBENCH_HASH_MIB: usize = 64;
+const MTBENCH_MAX_THREADS: usize = 256;
 const DEFAULT_MOVES_TO_GO: u64 = 30;
 const TIME_OVERHEAD_MILLIS: u64 = 10;
 const NULL_BESTMOVE: &str = "0000";
@@ -346,6 +350,148 @@ where
     }
 
     write_bench(&mut writer, SearchOptions::default())
+}
+
+/// Runs the standalone multi-thread search scaling benchmark.
+pub fn run_mtbench_subcommand<I, S, W>(arguments: I, mut writer: W) -> Result<(), String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+    W: Write,
+{
+    let options = parse_mtbench_arguments(arguments)?;
+    let positions = BENCH_CASES
+        .iter()
+        .map(|fen| {
+            Position::from_fen(fen, false)
+                .map_err(|error| format!("invalid built-in bench FEN: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    writeln!(writer, "Threads\tDepth\tNodes\tTime (ms)\tNPS").map_err(|error| error.to_string())?;
+    for thread_count in options.threads {
+        let pool = SearchPool::new(thread_count).map_err(|error| {
+            format!("unable to create {thread_count}-thread mtbench search pool: {error}")
+        })?;
+        let transposition_table = Arc::new(
+            TranspositionTable::new(MTBENCH_HASH_MIB)
+                .map_err(|error| format!("unable to allocate mtbench Hash: {error}"))?,
+        );
+
+        let started = Instant::now();
+        let mut total_nodes = 0u64;
+        for position in &positions {
+            pool.clear(Arc::clone(&transposition_table))
+                .map_err(|error| format!("unable to clear mtbench search state: {error}"))?;
+            let history = [position.repetition_key()];
+            let pooled = pool
+                .search_fixed_depth_smp_with_history_callback_options(
+                    position,
+                    &history,
+                    Arc::clone(&transposition_table),
+                    SearchLimits {
+                        depth: Some(options.depth),
+                        ..SearchLimits::default()
+                    },
+                    SearchOptions::default(),
+                    Arc::new(AtomicBool::new(false)),
+                    |_| {},
+                )
+                .map_err(|error| format!("mtbench search failed: {error}"))?;
+            total_nodes = total_nodes
+                .checked_add(pooled.result.nodes)
+                .ok_or_else(|| "mtbench node count overflowed u64".to_string())?;
+        }
+        let elapsed = started.elapsed();
+        let nps = ((u128::from(total_nodes) * 1_000_000_000) / elapsed.as_nanos().max(1)) as u64;
+        writeln!(
+            writer,
+            "{thread_count}\t{}\t{total_nodes}\t{}\t{nps}",
+            options.depth,
+            elapsed.as_millis()
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+struct MtbenchOptions {
+    threads: Vec<usize>,
+    depth: u32,
+}
+
+fn parse_mtbench_arguments<I, S>(arguments: I) -> Result<MtbenchOptions, String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut arguments = arguments.into_iter().map(Into::into);
+    let mut threads = None;
+    let mut depth = None;
+
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--threads" => {
+                if threads.is_some() {
+                    return Err(mtbench_usage("duplicate mtbench argument '--threads'"));
+                }
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| mtbench_usage("--threads requires a comma-separated list"))?;
+                threads = Some(parse_mtbench_thread_list(&value)?);
+            }
+            "--depth" => {
+                if depth.is_some() {
+                    return Err(mtbench_usage("duplicate mtbench argument '--depth'"));
+                }
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| mtbench_usage("--depth requires a value"))?;
+                let parsed = value
+                    .parse::<u32>()
+                    .map_err(|_| mtbench_usage(&format!("invalid mtbench depth '{value}'")))?;
+                if parsed == 0 {
+                    return Err(mtbench_usage(&format!(
+                        "invalid mtbench depth '{value}': minimum is 1"
+                    )));
+                }
+                depth = Some(parsed);
+            }
+            unknown => {
+                return Err(mtbench_usage(&format!(
+                    "unknown mtbench argument '{unknown}'"
+                )));
+            }
+        }
+    }
+
+    Ok(MtbenchOptions {
+        threads: threads.unwrap_or_else(|| MTBENCH_DEFAULT_THREADS.to_vec()),
+        depth: depth.unwrap_or(MTBENCH_DEFAULT_DEPTH),
+    })
+}
+
+fn parse_mtbench_thread_list(value: &str) -> Result<Vec<usize>, String> {
+    let mut threads = Vec::new();
+    for item in value.split(',') {
+        let thread_count = item
+            .parse::<usize>()
+            .map_err(|_| mtbench_usage(&format!("invalid mtbench thread list '{value}'")))?;
+        if !(1..=MTBENCH_MAX_THREADS).contains(&thread_count) || threads.contains(&thread_count) {
+            return Err(mtbench_usage(&format!(
+                "invalid mtbench thread list '{value}': values must be unique integers from 1 to \
+                 {MTBENCH_MAX_THREADS}"
+            )));
+        }
+        threads.push(thread_count);
+    }
+    if threads.is_empty() {
+        return Err(mtbench_usage(&format!(
+            "invalid mtbench thread list '{value}'"
+        )));
+    }
+    Ok(threads)
 }
 
 fn write_bench<W: Write>(writer: &mut W, options: SearchOptions) -> Result<(), String> {
@@ -872,6 +1018,10 @@ fn bench_usage(message: &str) -> String {
     format!("{message}\n\nUsage: manifold bench")
 }
 
+fn mtbench_usage(message: &str) -> String {
+    format!("{message}\n\nUsage: manifold mtbench [--threads 1,2,4,8] [--depth N]")
+}
+
 fn perft_help() -> &'static str {
     "Usage: manifold perft <depth> [--fen <FEN>] [--chess960]\n\
      \n\
@@ -1126,5 +1276,14 @@ mod tests {
 
         assert_eq!(limits.soft_time, Some(Duration::from_millis(100)));
         assert_eq!(limits.hard_time, Some(Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn mtbench_parser_defaults_to_depth_ten_and_standard_thread_rows() {
+        let options = parse_mtbench_arguments(std::iter::empty::<String>())
+            .expect("default mtbench arguments should parse");
+
+        assert_eq!(options.threads, [1, 2, 4, 8]);
+        assert_eq!(options.depth, 10);
     }
 }
