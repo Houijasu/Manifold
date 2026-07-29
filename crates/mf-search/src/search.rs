@@ -22,7 +22,10 @@ const INFINITY: i32 = MATE_SCORE + 1;
 const TABLEBASE_SCORE: i32 = MATE_SCORE - MAX_SEARCH_PLY as i32 - 1;
 const TABLEBASE_WIN_IN_MAX_PLY: i32 = TABLEBASE_SCORE - MAX_SEARCH_PLY as i32;
 const ASPIRATION_INITIAL_DELTA: i32 = 25;
+const ASPIRATION_JITTER_BUCKETS: usize = 8;
 const DEFAULT_MAX_DEPTH: u32 = 64;
+const TIME_CHECK_INTERVAL: u64 = 512;
+const NODE_PUBLISH_INTERVAL: u64 = 1_024;
 const NMP_MIN_DEPTH: i32 = 3;
 const NMP_VERIFICATION_DEPTH: i32 = 6;
 const RFP_MAX_DEPTH: i32 = 3;
@@ -284,7 +287,21 @@ where
     F: FnMut(&IterationInfo),
 {
     debug_assert!(worker.worker_id < worker.node_counters.len());
-    let started = Instant::now();
+    let worker_id = worker.worker_id;
+    let started = if worker_id == 0 {
+        Some(Instant::now())
+    } else {
+        None
+    };
+    let worker_limits = if worker_id == 0 {
+        limits
+    } else {
+        SearchLimits {
+            soft_time: None,
+            hard_time: None,
+            ..limits
+        }
+    };
     let maximum_depth = if limits.infinite {
         u32::MAX
     } else {
@@ -292,17 +309,20 @@ where
     };
     let mut context = SearchContext::new(
         transposition_table,
-        limits,
+        worker_limits,
         started,
         stop,
         position,
         history,
         options,
+        worker_id,
         worker.generation,
+        worker.node_counters,
     );
     let root_moves = generate_legal_moves(position);
 
     if root_moves.is_empty() {
+        context.publish_nodes();
         let score = if is_in_check(position, position.side_to_move()) {
             -MATE_SCORE
         } else {
@@ -315,7 +335,7 @@ where
             seldepth: 0,
             nodes: 0,
             hashfull: transposition_table.hashfull_per_mille(),
-            elapsed: started.elapsed(),
+            elapsed: context.elapsed(),
             pv: Vec::new(),
             iterations: Vec::new(),
         };
@@ -323,6 +343,7 @@ where
 
     let fallback_move = root_moves[0];
     if context.rule_draw_score(position, 0).is_some() {
+        context.publish_nodes();
         return SearchResult {
             best_move: Some(fallback_move),
             score: 0,
@@ -330,7 +351,7 @@ where
             seldepth: 0,
             nodes: 0,
             hashfull: transposition_table.hashfull_per_mille(),
-            elapsed: started.elapsed(),
+            elapsed: context.elapsed(),
             pv: vec![fallback_move],
             iterations: Vec::new(),
         };
@@ -351,12 +372,13 @@ where
             break;
         };
         previous_score = score;
-        let elapsed = started.elapsed();
+        context.publish_nodes();
+        let elapsed = context.elapsed();
         let info = IterationInfo {
             depth,
             seldepth: context.seldepth.max(depth),
             score,
-            nodes: context.nodes,
+            nodes: context.reported_nodes(),
             hashfull: context.transposition_table.hashfull_per_mille(),
             elapsed,
             pv,
@@ -378,12 +400,13 @@ where
         depth: 0,
         seldepth: 0,
         score: evaluate(position),
-        nodes: context.nodes,
+        nodes: context.reported_nodes(),
         hashfull: context.transposition_table.hashfull_per_mille(),
-        elapsed: started.elapsed(),
+        elapsed: context.elapsed(),
         pv: vec![fallback_move],
     });
     let best_move = completed.pv.first().copied().or(Some(fallback_move));
+    context.publish_nodes();
 
     SearchResult {
         best_move,
@@ -392,7 +415,7 @@ where
         seldepth: completed.seldepth,
         nodes: context.nodes,
         hashfull: completed.hashfull,
-        elapsed: started.elapsed(),
+        elapsed: context.elapsed(),
         pv: completed.pv,
         iterations: context.iterations,
     }
@@ -404,7 +427,7 @@ fn aspiration_search(
     previous_score: i32,
     context: &mut SearchContext<'_>,
 ) -> Option<(i32, Vec<Move>)> {
-    let mut delta = ASPIRATION_INITIAL_DELTA;
+    let mut delta = aspiration_delta(context.worker_id);
     let mut alpha = (previous_score - delta).max(-INFINITY);
     let mut beta = (previous_score + delta).min(INFINITY);
 
@@ -422,6 +445,17 @@ fn aspiration_search(
             return root_search(position, depth, alpha, beta, context);
         }
     }
+}
+
+#[inline]
+fn aspiration_delta(worker_id: usize) -> i32 {
+    ASPIRATION_INITIAL_DELTA + (worker_id % ASPIRATION_JITTER_BUCKETS) as i32
+}
+
+fn published_node_total(counters: &[AtomicU64]) -> u64 {
+    counters.iter().fold(0, |total, counter| {
+        total.saturating_add(counter.load(Ordering::Relaxed))
+    })
 }
 
 fn root_search(
@@ -1678,7 +1712,9 @@ struct SearchContext<'a> {
     stop: &'a AtomicBool,
     limits: SearchLimits,
     options: SearchOptions,
-    started: Instant,
+    started: Option<Instant>,
+    worker_id: usize,
+    node_counters: &'a [AtomicU64],
     nodes: u64,
     seldepth: u32,
     iterations: Vec<IterationInfo>,
@@ -1688,6 +1724,7 @@ struct SearchContext<'a> {
     current_moves: [Option<Move>; MAX_SEARCH_PLY],
     nmp_min_ply: usize,
     stopped: bool,
+    soft_time_reached: bool,
     generation: u8,
 }
 
@@ -1696,12 +1733,14 @@ impl<'a> SearchContext<'a> {
     fn new(
         transposition_table: &'a TranspositionTable,
         limits: SearchLimits,
-        started: Instant,
+        started: Option<Instant>,
         stop: &'a AtomicBool,
         position: &Position,
         history: &[u64],
         options: SearchOptions,
+        worker_id: usize,
         generation: u8,
+        node_counters: &'a [AtomicU64],
     ) -> Self {
         Self {
             transposition_table,
@@ -1709,6 +1748,8 @@ impl<'a> SearchContext<'a> {
             limits,
             options,
             started,
+            worker_id,
+            node_counters,
             nodes: 0,
             seldepth: 0,
             iterations: Vec::new(),
@@ -1718,6 +1759,7 @@ impl<'a> SearchContext<'a> {
             current_moves: [None; MAX_SEARCH_PLY],
             nmp_min_ply: 0,
             stopped: false,
+            soft_time_reached: false,
             generation,
         }
     }
@@ -1727,14 +1769,8 @@ impl<'a> SearchContext<'a> {
             self.stopped = true;
             return false;
         }
-        if self.limits.nodes.is_some_and(|limit| self.nodes >= limit) {
-            self.stopped = true;
-            return false;
-        }
-        if self
-            .limits
-            .hard_time
-            .is_some_and(|limit| self.started.elapsed() >= limit)
+        if self.node_counters.len() == 1
+            && self.limits.nodes.is_some_and(|limit| self.nodes >= limit)
         {
             self.stopped = true;
             return false;
@@ -1742,16 +1778,50 @@ impl<'a> SearchContext<'a> {
 
         self.nodes += 1;
         self.seldepth = self.seldepth.max(ply as u32);
+        if self.nodes.is_multiple_of(NODE_PUBLISH_INTERVAL) {
+            self.publish_nodes();
+            if self.node_counters.len() > 1
+                && self
+                    .limits
+                    .nodes
+                    .is_some_and(|limit| published_node_total(self.node_counters) >= limit)
+            {
+                self.stopped = true;
+                return false;
+            }
+        }
+        if self.worker_id == 0 && self.nodes.is_multiple_of(TIME_CHECK_INTERVAL) {
+            let elapsed = self.elapsed();
+            self.soft_time_reached = self.limits.soft_time.is_some_and(|limit| elapsed >= limit);
+            if self.limits.hard_time.is_some_and(|limit| elapsed >= limit) {
+                self.stopped = true;
+                return false;
+            }
+        }
         true
     }
 
     fn should_stop_after_iteration(&self) -> bool {
         self.stopped
             || self.limits.nodes.is_some_and(|limit| self.nodes >= limit)
-            || self
-                .limits
-                .soft_time
-                .is_some_and(|limit| self.started.elapsed() >= limit)
+            || self.soft_time_reached
+    }
+
+    fn publish_nodes(&self) {
+        self.node_counters[self.worker_id].store(self.nodes, Ordering::Relaxed);
+    }
+
+    fn reported_nodes(&self) -> u64 {
+        if self.worker_id == 0 {
+            published_node_total(self.node_counters)
+        } else {
+            self.nodes
+        }
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.started
+            .map_or(Duration::ZERO, |started| started.elapsed())
     }
 
     fn push_position(&mut self, position: &Position, ply: usize, mv: Move) {
@@ -1812,6 +1882,166 @@ pub fn clamp_centipawn_score(score: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_zero_preserves_the_original_aspiration_delta() {
+        assert_eq!(aspiration_delta(0), ASPIRATION_INITIAL_DELTA);
+    }
+
+    #[test]
+    fn helpers_receive_distinct_bounded_aspiration_deltas() {
+        let values: Vec<_> = (0..8).map(aspiration_delta).collect();
+        assert_eq!(values[0], ASPIRATION_INITIAL_DELTA);
+        assert!(values.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn aggregate_nodes_sum_published_worker_counts() {
+        let counters = [AtomicU64::new(10), AtomicU64::new(20)];
+        assert_eq!(published_node_total(&counters), 30);
+    }
+
+    #[test]
+    fn one_worker_node_limit_is_exact() {
+        let position = Position::startpos();
+        let table = TranspositionTable::new(1).unwrap();
+        let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0)];
+        let history = [position.repetition_key()];
+
+        let result = search_worker_with_history_callback_options(
+            &position,
+            &history,
+            &table,
+            SearchLimits {
+                nodes: Some(1_500),
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            WorkerParameters::new(0, 0, &counters),
+            |_| {},
+        );
+
+        assert_eq!(result.nodes, 1_500);
+        assert_eq!(counters[0].load(Ordering::Relaxed), 1_500);
+    }
+
+    #[test]
+    fn one_worker_accepts_the_limit_node_across_publication_boundary() {
+        let position = Position::startpos();
+        let table = TranspositionTable::new(1).unwrap();
+        let stop = AtomicBool::new(false);
+        let history = [position.repetition_key()];
+
+        for limit in [1_023, 1_024, 1_025] {
+            let counters = [AtomicU64::new(0)];
+            let mut context = SearchContext::new(
+                &table,
+                SearchLimits {
+                    nodes: Some(limit),
+                    ..SearchLimits::default()
+                },
+                None,
+                &stop,
+                &position,
+                &history,
+                SearchOptions::default(),
+                0,
+                0,
+                &counters,
+            );
+
+            for node in 1..=limit {
+                assert!(context.visit_node(1), "limit {limit} rejected node {node}");
+            }
+            assert!(
+                !context.visit_node(1),
+                "limit {limit} accepted a node past its budget"
+            );
+        }
+    }
+
+    #[test]
+    fn helper_uses_aggregate_published_node_limit() {
+        let position = Position::startpos();
+        let table = TranspositionTable::new(1).unwrap();
+        let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(1_000), AtomicU64::new(0)];
+        let history = [position.repetition_key()];
+
+        let result = search_worker_with_history_callback_options(
+            &position,
+            &history,
+            &table,
+            SearchLimits {
+                nodes: Some(1_500),
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            WorkerParameters::new(1, 0, &counters),
+            |_| {},
+        );
+
+        assert_eq!(result.nodes, NODE_PUBLISH_INTERVAL);
+        assert_eq!(counters[1].load(Ordering::Relaxed), NODE_PUBLISH_INTERVAL);
+    }
+
+    #[test]
+    fn helper_search_does_not_observe_clock_limits() {
+        let position = Position::startpos();
+        let table = TranspositionTable::new(1).unwrap();
+        let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0), AtomicU64::new(0)];
+        let history = [position.repetition_key()];
+
+        let result = search_worker_with_history_callback_options(
+            &position,
+            &history,
+            &table,
+            SearchLimits {
+                depth: Some(2),
+                soft_time: Some(Duration::ZERO),
+                hard_time: Some(Duration::ZERO),
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            WorkerParameters::new(1, 0, &counters),
+            |_| {},
+        );
+
+        assert_eq!(result.depth, 2);
+        assert!(result.nodes > 0);
+        assert_eq!(result.elapsed, Duration::ZERO);
+    }
+
+    #[test]
+    fn worker_zero_iteration_nodes_include_published_helpers() {
+        let position = Position::startpos();
+        let table = TranspositionTable::new(1).unwrap();
+        let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0), AtomicU64::new(37)];
+        let history = [position.repetition_key()];
+        let mut reported_nodes = None;
+
+        let result = search_worker_with_history_callback_options(
+            &position,
+            &history,
+            &table,
+            SearchLimits {
+                depth: Some(1),
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            WorkerParameters::new(0, 0, &counters),
+            |info| reported_nodes = Some(info.nodes),
+        );
+
+        assert_eq!(reported_nodes, Some(result.nodes + 37));
+    }
 
     #[test]
     fn worker_generation_is_written_to_root_tt_entries() {
@@ -2077,15 +2307,18 @@ mod tests {
         let history = [key; 6];
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0)];
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
-            Instant::now(),
+            Some(Instant::now()),
             &stop,
             &position,
             &history,
             SearchOptions::default(),
             0,
+            0,
+            &counters,
         );
 
         assert!(context.repetition_history.is_repetition(0));
@@ -2234,16 +2467,19 @@ mod tests {
         assert_eq!(tt_entry_for_node(&table, key, false), Some(original));
         assert_eq!(tt_entry_for_node(&table, key, true), None);
         let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
-            Instant::now(),
+            Some(Instant::now()),
             &stop,
             &position,
             &history,
             SearchOptions::default(),
             0,
+            0,
+            &counters,
         );
         let mut searched = position.clone();
         let mut pv = Vec::new();
@@ -2275,16 +2511,19 @@ mod tests {
         let excluded_move = legal_moves[0];
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
-            Instant::now(),
+            Some(Instant::now()),
             &stop,
             &position,
             &history,
             SearchOptions::default(),
             0,
+            0,
+            &counters,
         );
         let mut searched = position.clone();
         let mut pv = Vec::new();
