@@ -56,6 +56,8 @@ pub struct SearchOptions {
     pub use_futility: bool,
     pub use_see_pruning: bool,
     pub use_singular_ext: bool,
+    pub use_check_ext: bool,
+    pub use_multicut: bool,
     pub use_iir: bool,
     pub use_probcut: bool,
 }
@@ -71,6 +73,8 @@ impl Default for SearchOptions {
             use_futility: true,
             use_see_pruning: true,
             use_singular_ext: true,
+            use_check_ext: true,
+            use_multicut: true,
             use_iir: true,
             use_probcut: true,
         }
@@ -795,11 +799,6 @@ fn pvs(
     let mut searched = 0usize;
     let mut child_pv = Vec::new();
     let mut searched_quiets = Vec::new();
-    let checks_moves = context.options.use_lmr
-        || context.options.use_lmp
-        || context.options.use_futility
-        || context.options.use_see_pruning
-        || context.options.use_singular_ext;
 
     for mv in MovePicker::new(position, tt_move, context.killers[ply]) {
         if excluded_move == Some(mv) {
@@ -812,7 +811,7 @@ fn pvs(
             || context.options.use_see_pruning;
         let mover_has_non_pawn_material =
             needs_non_pawn_material && has_non_pawn_material_for(position, mover);
-        let gives_check = checks_moves && move_gives_check(position, mv);
+        let gives_check = move_gives_check(position, mv);
         let move_count = searched + 1;
         let history_score = if quiet && context.options.use_lmr {
             context.quiet_history_score(mover, mv)
@@ -883,7 +882,7 @@ fn pvs(
         }
 
         let mut extension = 0;
-        if context.options.use_singular_ext
+        if (context.options.use_singular_ext || context.options.use_multicut)
             && excluded_move.is_none()
             && Some(mv) == tt_move
             && depth >= SINGULAR_MIN_DEPTH + i32::from(tt_pv)
@@ -926,17 +925,25 @@ fn pvs(
                 context,
                 &mut singular_pv,
             )?;
-            extension = singular_extension(
-                singular_value,
-                singular_beta,
-                pv_node,
-                mv.flag().is_capture(),
-                cut_node,
-                tt_score,
-                beta,
-            );
+            if context.options.use_multicut
+                && let Some(multicut_value) =
+                    singular_multicut_value(singular_value, singular_beta, beta)
+            {
+                return Some(multicut_value);
+            }
+            if context.options.use_singular_ext {
+                extension = singular_extension(
+                    singular_value,
+                    singular_beta,
+                    pv_node,
+                    mv.flag().is_capture(),
+                    cut_node,
+                    tt_score,
+                    beta,
+                );
+            }
         }
-        if context.options.use_singular_ext {
+        if context.options.use_check_ext {
             extension = check_extension(gives_check, extension);
         }
 
@@ -1435,6 +1442,11 @@ fn singular_extension(
     } else {
         0
     }
+}
+
+#[inline]
+fn singular_multicut_value(value: i32, singular_beta: i32, beta: i32) -> Option<i32> {
+    (value >= singular_beta && value >= beta && !is_mate_score(value)).then_some(value)
 }
 
 #[inline]
@@ -2143,6 +2155,9 @@ mod tests {
             singular_extension(210, singular_beta, false, true, true, 200, 300),
             -2
         );
+        assert_eq!(singular_multicut_value(350, 300, 320), Some(350));
+        assert_eq!(singular_multicut_value(250, 300, 200), None);
+        assert_eq!(singular_multicut_value(MATE_SCORE - 5, 300, 320), None);
         assert_eq!(check_extension(true, 0), 1);
         assert_eq!(check_extension(false, 0), 0);
     }

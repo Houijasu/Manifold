@@ -3,8 +3,8 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const BENCH_NODE_COUNT: u64 = 177_750;
-const BENCH_NODES: &str = "Nodes searched: 177750";
+const BENCH_NODE_COUNT: u64 = 175_944;
+const BENCH_NODES: &str = "Nodes searched: 175944";
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -92,6 +92,7 @@ fn run_uci_bench_ablation_session() -> Output {
              setoption name UseFutility value false\n\
              setoption name UseSEEPruning value false\n\
              setoption name UseSingularExt value false\n\
+             setoption name UseMultiCut value false\n\
              setoption name UseIIR value false\n\
              setoption name UseProbCut value false\n\
              bench\n\
@@ -128,6 +129,12 @@ fn run_uci_bench_ablation_session() -> Output {
              setoption name UseRFP value false\n\
              setoption name UseSingularExt value false\n\
              SeToPtIoN NaMe UsEpRoBcUt VaLuE TrUe\n\
+             bench\n\
+             setoption name UseProbCut value false\n\
+             setoption name UseMultiCut value true\n\
+             bench\n\
+             setoption name UseMultiCut value false\n\
+             setoption name UseCheckExt value false\n\
              bench\n\
              quit\n"
         )
@@ -227,11 +234,11 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
 
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
     let nodes = metrics(stdout, "Nodes searched: ");
-    assert_eq!(nodes.len(), 12);
+    assert_eq!(nodes.len(), 14);
     let baseline = nodes[0];
     assert_eq!(
-        baseline, 3_768_488,
-        "all selectivity disabled must reproduce the GHI-safe search signature"
+        baseline, 4_961_681,
+        "disabling the ten named selectivity techniques must leave check extensions enabled"
     );
     for (name, enabled) in [
         "UseNMP",
@@ -266,6 +273,16 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
         baseline.abs_diff(probcut_enabled).saturating_mul(100) >= baseline.saturating_mul(2),
         "UseProbCut changed bench nodes by less than 2%: \
          base={baseline}, enabled={probcut_enabled}"
+    );
+
+    assert_ne!(
+        nodes[12], baseline,
+        "UseMultiCut must have an independently observable bench effect"
+    );
+
+    assert_eq!(
+        nodes[13], 3_768_488,
+        "UseCheckExt=false must restore the GHI-safe all-selectivity-off signature"
     );
 }
 

@@ -311,6 +311,8 @@ fn uci_handshake_is_ordered_and_well_formed() {
     assert!(lines[..uciok].contains(&"option name UseFutility type check default true"));
     assert!(lines[..uciok].contains(&"option name UseSEEPruning type check default true"));
     assert!(lines[..uciok].contains(&"option name UseSingularExt type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseCheckExt type check default true"));
+    assert!(lines[..uciok].contains(&"option name UseMultiCut type check default true"));
     assert!(lines[..uciok].contains(&"option name UseIIR type check default true"));
     assert!(lines[..uciok].contains(&"option name UseProbCut type check default true"));
     assert!(lines[..uciok].contains(&"option name EvalFile type string default <empty>"));

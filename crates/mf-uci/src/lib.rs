@@ -30,6 +30,8 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseFutility type check default true",
     "option name UseSEEPruning type check default true",
     "option name UseSingularExt type check default true",
+    "option name UseCheckExt type check default true",
+    "option name UseMultiCut type check default true",
     "option name UseIIR type check default true",
     "option name UseProbCut type check default true",
     "option name EvalFile type string default <empty>",
@@ -401,6 +403,14 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UseSingularExt") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_singular_ext = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseCheckExt") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_check_ext = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseMultiCut") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_multicut = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseIIR") {
         if let Some(enabled) = parse_check_option(&value) {
@@ -872,6 +882,18 @@ mod tests {
             &mut output,
         )
         .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseCheckExt value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseMultiCut value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
         handle_setoption("SeToPtIoN NaMe UsEiIr VaLuE FaLsE", &mut state, &mut output)
             .expect("setoption output should be writable");
         handle_setoption(
@@ -891,6 +913,8 @@ mod tests {
         assert!(!state.search_options.use_futility);
         assert!(!state.search_options.use_see_pruning);
         assert!(!state.search_options.use_singular_ext);
+        assert!(!state.search_options.use_check_ext);
+        assert!(!state.search_options.use_multicut);
         assert!(!state.search_options.use_iir);
         assert!(!state.search_options.use_probcut);
     }

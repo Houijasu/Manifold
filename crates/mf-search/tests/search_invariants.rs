@@ -78,6 +78,8 @@ fn selectivity_options_default_to_enabled() {
             use_futility: true,
             use_see_pruning: true,
             use_singular_ext: true,
+            use_check_ext: true,
+            use_multicut: true,
             use_iir: true,
             use_probcut: true,
         }
@@ -157,6 +159,8 @@ fn mate_in_n_found() {
                 use_futility: false,
                 use_see_pruning: false,
                 use_singular_ext: false,
+                use_check_ext: true,
+                use_multicut: false,
                 use_iir: false,
                 use_probcut: false,
             },
