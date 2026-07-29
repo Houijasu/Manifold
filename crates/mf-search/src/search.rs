@@ -1,5 +1,5 @@
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use mf_core::{
@@ -103,6 +103,23 @@ pub struct SearchResult {
     pub elapsed: Duration,
     pub pv: Vec<Move>,
     pub iterations: Vec<IterationInfo>,
+}
+
+pub(crate) struct WorkerParameters<'a> {
+    worker_id: usize,
+    generation: u8,
+    node_counters: &'a [AtomicU64],
+}
+
+impl<'a> WorkerParameters<'a> {
+    pub(crate) fn new(worker_id: usize, generation: u8, node_counters: &'a [AtomicU64]) -> Self {
+        assert!(worker_id < node_counters.len());
+        Self {
+            worker_id,
+            generation: generation & 31,
+            node_counters,
+        }
+    }
 }
 
 pub fn search(
@@ -234,11 +251,39 @@ pub fn search_with_history_callback_options<F>(
     limits: SearchLimits,
     options: SearchOptions,
     stop: &AtomicBool,
+    on_iteration: F,
+) -> SearchResult
+where
+    F: FnMut(&IterationInfo),
+{
+    let node_counters = [AtomicU64::new(0)];
+    search_worker_with_history_callback_options(
+        position,
+        history,
+        transposition_table,
+        limits,
+        options,
+        stop,
+        WorkerParameters::new(0, 0, &node_counters),
+        on_iteration,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn search_worker_with_history_callback_options<F>(
+    position: &Position,
+    history: &[u64],
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+    options: SearchOptions,
+    stop: &AtomicBool,
+    worker: WorkerParameters<'_>,
     mut on_iteration: F,
 ) -> SearchResult
 where
     F: FnMut(&IterationInfo),
 {
+    debug_assert!(worker.worker_id < worker.node_counters.len());
     let started = Instant::now();
     let maximum_depth = if limits.infinite {
         u32::MAX
@@ -253,6 +298,7 @@ where
         position,
         history,
         options,
+        worker.generation,
     );
     let root_moves = generate_legal_moves(position);
 
@@ -517,7 +563,7 @@ fn root_search(
             static_eval: UNEVALUATED_STATIC_EVAL,
             depth: depth.min(u32::from(u8::MAX)) as u8,
             bound,
-            age: 0,
+            age: context.generation,
             pv: true,
         },
     );
@@ -781,7 +827,7 @@ fn pvs(
                                 static_eval: static_eval as i16,
                                 depth: (probcut_depth + 1).clamp(0, i32::from(u8::MAX)) as u8,
                                 bound: Bound::Lower,
-                                age: 0,
+                                age: context.generation,
                                 pv: false,
                             },
                         );
@@ -1099,7 +1145,7 @@ fn pvs(
                 static_eval: static_eval as i16,
                 depth: depth.min(i32::from(u8::MAX)) as u8,
                 bound,
-                age: 0,
+                age: context.generation,
                 pv: pv_node,
             },
         );
@@ -1641,9 +1687,11 @@ struct SearchContext<'a> {
     current_moves: [Option<Move>; MAX_SEARCH_PLY],
     nmp_min_ply: usize,
     stopped: bool,
+    generation: u8,
 }
 
 impl<'a> SearchContext<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         transposition_table: &'a TranspositionTable,
         limits: SearchLimits,
@@ -1652,6 +1700,7 @@ impl<'a> SearchContext<'a> {
         position: &Position,
         history: &[u64],
         options: SearchOptions,
+        generation: u8,
     ) -> Self {
         Self {
             transposition_table,
@@ -1669,6 +1718,7 @@ impl<'a> SearchContext<'a> {
             current_moves: [None; MAX_SEARCH_PLY],
             nmp_min_ply: 0,
             stopped: false,
+            generation,
         }
     }
 
@@ -1786,6 +1836,31 @@ pub fn clamp_centipawn_score(score: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_generation_is_written_to_root_tt_entries() {
+        let position = Position::startpos();
+        let table = TranspositionTable::new(1).unwrap();
+        let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0)];
+        let history = [position.repetition_key()];
+
+        search_worker_with_history_callback_options(
+            &position,
+            &history,
+            &table,
+            SearchLimits {
+                depth: Some(2),
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            WorkerParameters::new(0, 9, &counters),
+            |_| {},
+        );
+
+        assert_eq!(table.probe(tt_key(&position, 2)).unwrap().age, 9);
+    }
 
     #[test]
     fn tt_key_uses_coarse_rule_fifty_shards_independent_of_depth() {
@@ -2034,6 +2109,7 @@ mod tests {
             &position,
             &history,
             SearchOptions::default(),
+            0,
         );
 
         assert!(context.repetition_history.is_repetition(0));
@@ -2191,6 +2267,7 @@ mod tests {
             &position,
             &history,
             SearchOptions::default(),
+            0,
         );
         let mut searched = position.clone();
         let mut pv = Vec::new();
@@ -2231,6 +2308,7 @@ mod tests {
             &position,
             &history,
             SearchOptions::default(),
+            0,
         );
         let mut searched = position.clone();
         let mut pv = Vec::new();
