@@ -243,6 +243,27 @@ fn search_info_lines(output: &Output) -> Vec<&str> {
         .collect()
 }
 
+fn canonical_search_lines(output: &Output) -> Vec<String> {
+    stdout_lines(output)
+        .into_iter()
+        .filter(|line| line.starts_with("info "))
+        .map(|line| {
+            let tokens: Vec<_> = line.split_whitespace().collect();
+            let mut canonical = Vec::with_capacity(tokens.len());
+            let mut index = 0;
+            while index < tokens.len() {
+                if matches!(tokens[index], "time" | "nps") {
+                    index += 2;
+                } else {
+                    canonical.push(tokens[index]);
+                    index += 1;
+                }
+            }
+            canonical.join(" ")
+        })
+        .collect()
+}
+
 fn field(line: &str, name: &str) -> u64 {
     optional_field(line, name)
         .unwrap_or_else(|| panic!("missing or non-numeric field '{name}' in '{line}'"))
@@ -577,6 +598,156 @@ fn hash_option_resizes_case_insensitively_and_rejects_extremes_without_crashing(
     assert!(lines.contains(&"readyok"));
     assert_eq!(bestmoves(&output).len(), 1);
     assert!(output.stderr.is_empty());
+}
+
+#[allow(non_snake_case)]
+mod Threads {
+    use super::*;
+
+    #[test]
+    fn four_worker_pool_stops_and_quits_cleanly() {
+        let mut engine = InteractiveUci::spawn();
+        engine.send("setoption name Threads value 4");
+        assert_eq!(
+            engine.receive_until(Duration::from_secs(2), |line| {
+                line == "info string threads set to 4"
+            }),
+            Some("info string threads set to 4".to_string())
+        );
+        engine.send("position startpos");
+        engine.send("go infinite");
+        assert!(
+            engine
+                .receive_until(Duration::from_secs(2), |line| {
+                    line.starts_with("info depth 2 ")
+                })
+                .is_some(),
+            "four-worker search should complete real iterations"
+        );
+
+        engine.send("stop");
+        let bestmove = engine
+            .receive_until(Duration::from_secs(2), |line| line.starts_with("bestmove "))
+            .expect("stop should return a bestmove");
+        assert_ne!(bestmove, "bestmove 0000");
+
+        engine.send("quit");
+        assert!(engine.wait_for_exit(Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn invalid_resize_preserves_the_existing_pool() {
+        let output = run_uci(&[
+            "setoption name Threads value 4",
+            "setoption name Threads value banana",
+            "position startpos",
+            "go depth 3",
+            "quit",
+        ]);
+
+        assert!(output.status.success());
+        let lines = stdout_lines(&output);
+        assert!(lines.contains(&"info string threads set to 4"));
+        assert!(lines.contains(&"info string invalid Threads value 'banana'"));
+        assert_eq!(search_info_lines(&output).len(), 3);
+        assert_eq!(bestmoves(&output).len(), 1);
+        assert!(output.stderr.is_empty());
+    }
+
+    #[test]
+    fn one_worker_emits_exactly_one_line_per_completed_depth() {
+        let output = run_uci(&[
+            "setoption name Threads value 1",
+            "position startpos",
+            "go depth 6",
+            "quit",
+        ]);
+
+        assert!(output.status.success());
+        let infos = search_info_lines(&output);
+        assert_eq!(infos.len(), 6);
+        assert_eq!(
+            infos
+                .iter()
+                .map(|line| field(line, "depth"))
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5, 6]
+        );
+        assert_eq!(bestmoves(&output).len(), 1);
+    }
+
+    #[test]
+    fn four_worker_fixed_depth_is_deterministic_across_fresh_processes() {
+        let commands = [
+            "setoption name Threads value 4",
+            "position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            "go depth 5",
+            "quit",
+        ];
+        let first = run_uci(&commands);
+        let second = run_uci(&commands);
+
+        assert!(first.status.success());
+        assert!(second.status.success());
+        assert_eq!(
+            canonical_search_lines(&first),
+            canonical_search_lines(&second)
+        );
+        assert_eq!(bestmoves(&first), bestmoves(&second));
+        assert_eq!(search_info_lines(&first).len(), 5);
+    }
+
+    #[test]
+    fn immediate_stop_keeps_publishing_until_pool_dispatch_finishes() {
+        let mut engine = InteractiveUci::spawn();
+        engine.send("setoption name Threads value 4");
+        assert!(
+            engine
+                .receive_until(Duration::from_secs(2), |line| {
+                    line == "info string threads set to 4"
+                })
+                .is_some()
+        );
+
+        for _ in 0..20 {
+            engine.send("position startpos");
+            engine.send("go movetime 3000");
+            engine.send("stop");
+            assert!(
+                engine
+                    .receive_until(Duration::from_secs(2), |line| {
+                        line.starts_with("bestmove ")
+                    })
+                    .is_some(),
+                "immediate stop must not lose the stop signal during pool dispatch"
+            );
+        }
+
+        engine.send("quit");
+        assert!(engine.wait_for_exit(Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn immediate_quit_does_not_hang_during_pool_dispatch() {
+        for _ in 0..10 {
+            let mut engine = InteractiveUci::spawn();
+            engine.send("setoption name Threads value 4");
+            assert!(
+                engine
+                    .receive_until(Duration::from_secs(2), |line| {
+                        line == "info string threads set to 4"
+                    })
+                    .is_some()
+            );
+            engine.send("position startpos");
+            engine.send("go infinite");
+            engine.send("quit");
+            assert!(
+                engine.wait_for_exit(Duration::from_secs(2)),
+                "immediate quit must not lose the stop signal during pool dispatch"
+            );
+        }
+    }
 }
 
 #[test]

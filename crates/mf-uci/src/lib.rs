@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use mf_core::{Position, format_uci_move, parse_uci_move, perft_divide};
+use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move, perft_divide};
 use mf_search::{
-    IterationInfo, SearchLimits, SearchOptions, SearchResult, TranspositionTable,
-    clamp_centipawn_score, score_to_uci_mate, search_with_history_callback_options,
+    IterationInfo, PoolError, PoolSearchResult, SearchLimits, SearchOptions, SearchPool,
+    SearchResult, TranspositionTable, clamp_centipawn_score, score_to_uci_mate,
     search_with_options,
 };
 
@@ -55,7 +55,7 @@ struct EngineState {
     position: Position,
     position_history: Vec<u64>,
     chess960: bool,
-    threads: usize,
+    search_pool: Arc<SearchPool>,
     search_options: SearchOptions,
     transposition_table: Arc<TranspositionTable>,
 }
@@ -67,7 +67,9 @@ impl Default for EngineState {
             position_history: vec![position.repetition_key()],
             position,
             chess960: false,
-            threads: 1,
+            search_pool: Arc::new(
+                SearchPool::new(1).expect("the default search worker should start"),
+            ),
             search_options: SearchOptions::default(),
             transposition_table: Arc::new(
                 TranspositionTable::new(DEFAULT_HASH_MIB)
@@ -78,10 +80,11 @@ impl Default for EngineState {
 }
 
 impl EngineState {
-    fn new_game(&mut self) {
+    fn new_game(&mut self) -> Result<(), PoolError> {
         self.position = Position::startpos();
         self.position_history = vec![self.position.repetition_key()];
-        self.transposition_table.clear();
+        self.search_pool
+            .clear(Arc::clone(&self.transposition_table))
     }
 }
 
@@ -92,6 +95,10 @@ struct ActiveSearch {
 
 impl ActiveSearch {
     fn stop_and_join(self) {
+        while !self.handle.is_finished() {
+            self.stop.store(true, Ordering::Relaxed);
+            thread::sleep(Duration::from_millis(1));
+        }
         self.stop.store(true, Ordering::Relaxed);
         let _ = self.handle.join();
     }
@@ -137,7 +144,13 @@ where
             break;
         } else if keyword.eq_ignore_ascii_case("ucinewgame") && has_no_arguments {
             stop_active_search(&mut active_search);
-            state.new_game();
+            if let Err(error) = state.new_game() {
+                let mut writer = writer
+                    .lock()
+                    .expect("UCI writer lock should not be poisoned");
+                writeln!(writer, "info string unable to clear Hash: {error}")?;
+                writer.flush()?;
+            }
         } else if keyword.eq_ignore_ascii_case("bench") && has_no_arguments {
             stop_active_search(&mut active_search);
             let mut writer = writer
@@ -172,24 +185,29 @@ where
                     active_search = Some(start_search(
                         state.position.clone(),
                         state.position_history.clone(),
+                        Arc::clone(&state.search_pool),
                         Arc::clone(&state.transposition_table),
                         parameters.search_limits(&state.position),
                         state.search_options,
                         state.chess960,
                         Arc::clone(&writer),
                         true,
+                        false,
                     ));
                 }
                 GoRequest::Search(parameters) => {
+                    let fixed_depth = parameters.depth.is_some();
                     active_search = Some(start_search(
                         state.position.clone(),
                         state.position_history.clone(),
+                        Arc::clone(&state.search_pool),
                         Arc::clone(&state.transposition_table),
                         parameters.search_limits(&state.position),
                         state.search_options,
                         state.chess960,
                         Arc::clone(&writer),
                         false,
+                        fixed_depth,
                     ));
                 }
             }
@@ -210,12 +228,14 @@ fn stop_active_search(active_search: &mut Option<ActiveSearch>) {
 fn start_search<W>(
     position: Position,
     position_history: Vec<u64>,
+    search_pool: Arc<SearchPool>,
     transposition_table: Arc<TranspositionTable>,
     limits: SearchLimits,
     options: SearchOptions,
     chess960: bool,
     writer: Arc<Mutex<W>>,
     wait_for_stop: bool,
+    fixed_depth: bool,
 ) -> ActiveSearch
 where
     W: Write + Send + 'static,
@@ -223,25 +243,45 @@ where
     let stop = Arc::new(AtomicBool::new(false));
     let search_stop = Arc::clone(&stop);
     let handle = thread::spawn(move || {
-        let result = search_with_history_callback_options(
-            &position,
-            &position_history,
-            &transposition_table,
-            limits,
-            options,
-            &search_stop,
-            |iteration| {
-                if let Ok(mut writer) = writer.lock() {
-                    let _ = write_iteration_info(&mut *writer, &position, iteration, chess960);
-                    let _ = writer.flush();
-                }
-            },
-        );
+        let on_iteration = |iteration: &IterationInfo| {
+            if let Ok(mut writer) = writer.lock() {
+                let _ = write_iteration_info(&mut *writer, &position, iteration, chess960);
+                let _ = writer.flush();
+            }
+        };
+        let result = if fixed_depth {
+            search_pool.search_fixed_depth_with_history_callback_options(
+                &position,
+                &position_history,
+                Arc::clone(&transposition_table),
+                limits,
+                options,
+                Arc::clone(&search_stop),
+                on_iteration,
+            )
+        } else {
+            search_pool.search_with_history_callback_options(
+                &position,
+                &position_history,
+                Arc::clone(&transposition_table),
+                limits,
+                options,
+                Arc::clone(&search_stop),
+                on_iteration,
+            )
+        };
         while wait_for_stop && !search_stop.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(1));
         }
         if let Ok(mut writer) = writer.lock() {
-            let _ = write_search_tail(&mut *writer, &position, &result, chess960);
+            match result {
+                Ok(result) => {
+                    let _ = write_pool_search_tail(&mut *writer, &position, &result, chess960);
+                }
+                Err(error) => {
+                    let _ = write_search_failure(&mut *writer, &position, error, chess960);
+                }
+            }
             let _ = writer.flush();
         }
     });
@@ -446,10 +486,24 @@ fn handle_setoption<W: Write>(
                 )?;
             }
         }
-    } else if name.eq_ignore_ascii_case("Threads")
-        && let Ok(requested) = value.parse::<usize>()
-    {
-        state.threads = requested.clamp(1, 256);
+    } else if name.eq_ignore_ascii_case("Threads") {
+        let Ok(requested) = value.parse::<i128>() else {
+            writeln!(writer, "info string invalid Threads value '{value}'")?;
+            return Ok(());
+        };
+        let thread_count = requested.clamp(1, 256) as usize;
+        match SearchPool::new(thread_count) {
+            Ok(pool) => {
+                state.search_pool = Arc::new(pool);
+                writeln!(writer, "info string threads set to {thread_count}")?;
+            }
+            Err(error) => {
+                writeln!(
+                    writer,
+                    "info string unable to create {thread_count}-thread search pool: {error}"
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -640,7 +694,21 @@ impl GoParameters {
     }
 }
 
-fn write_search_tail<W: Write>(
+fn write_pool_search_tail<W: Write>(
+    writer: &mut W,
+    position: &Position,
+    pooled: &PoolSearchResult,
+    chess960: bool,
+) -> io::Result<()> {
+    if pooled.selected_worker == 0 {
+        write_search_summary(writer, position, &pooled.result, chess960)?;
+    } else {
+        write_selected_result_info(writer, position, &pooled.result, chess960)?;
+    }
+    write_bestmove(writer, position, pooled.result.best_move, chess960)
+}
+
+fn write_search_summary<W: Write>(
     writer: &mut W,
     position: &Position,
     result: &SearchResult,
@@ -678,8 +746,48 @@ fn write_search_tail<W: Write>(
         )?;
     }
 
-    let bestmove = result
-        .best_move
+    Ok(())
+}
+
+fn write_selected_result_info<W: Write>(
+    writer: &mut W,
+    position: &Position,
+    result: &SearchResult,
+    chess960: bool,
+) -> io::Result<()> {
+    let elapsed_millis = result.elapsed.as_millis() as u64;
+    let nps = result
+        .nodes
+        .saturating_mul(1_000)
+        .checked_div(elapsed_millis.max(1))
+        .unwrap_or(0);
+    let score = format_score(result.score);
+    let pv = format_pv(position, &result.pv, chess960);
+    writeln!(
+        writer,
+        "info score {} nodes {} nps {} hashfull {} time {} pv {}",
+        score, result.nodes, nps, result.hashfull, elapsed_millis, pv
+    )
+}
+
+fn write_search_failure<W: Write>(
+    writer: &mut W,
+    position: &Position,
+    error: PoolError,
+    chess960: bool,
+) -> io::Result<()> {
+    writeln!(writer, "info string search failed: {error}")?;
+    let fallback = generate_legal_moves(position).first().copied();
+    write_bestmove(writer, position, fallback, chess960)
+}
+
+fn write_bestmove<W: Write>(
+    writer: &mut W,
+    position: &Position,
+    best_move: Option<mf_core::Move>,
+    chess960: bool,
+) -> io::Result<()> {
+    let bestmove = best_move
         .map(|mv| format_uci_move(position, mv, chess960))
         // UCI represents "no legal move" with the null-move token. `0000`
         // is accepted by strict GUIs that reject the older `(none)` spelling.
@@ -776,13 +884,18 @@ fn perft_help() -> &'static str {
 #[cfg(test)]
 mod tests {
     use mf_core::generate_legal_moves;
-    use mf_search::{Bound, EntryData};
+    use mf_search::{Bound, EntryData, PoolSearchResult};
 
     use super::*;
 
     #[test]
     fn ucinewgame_clears_the_transposition_table_without_changing_its_size() {
-        let mut state = EngineState::default();
+        let mut state = EngineState {
+            search_pool: Arc::new(
+                SearchPool::new(4).expect("four test search workers should start"),
+            ),
+            ..EngineState::default()
+        };
         let key = state.position.zobrist().main();
         let allocated_bytes = state.transposition_table.allocated_bytes();
         let data = EntryData {
@@ -797,10 +910,95 @@ mod tests {
         state.transposition_table.store(key, data);
         assert_eq!(state.transposition_table.probe(key), Some(data));
 
-        state.new_game();
+        state
+            .new_game()
+            .expect("the default search pool should clear the table");
 
         assert_eq!(state.transposition_table.probe(key), None);
         assert_eq!(state.transposition_table.allocated_bytes(), allocated_bytes);
+        assert_eq!(state.search_pool.thread_count(), 4);
+    }
+
+    #[test]
+    fn helper_selected_terminal_line_omits_depth_before_bestmove() {
+        let position = Position::startpos();
+        let best_move = generate_legal_moves(&position)[0];
+        let pooled = PoolSearchResult {
+            result: SearchResult {
+                best_move: Some(best_move),
+                score: 42,
+                depth: 5,
+                seldepth: 8,
+                nodes: 1_234,
+                hashfull: 17,
+                elapsed: Duration::from_millis(20),
+                pv: vec![best_move],
+                iterations: Vec::new(),
+            },
+            selected_worker: 2,
+        };
+        let mut output = Vec::new();
+
+        write_pool_search_tail(&mut output, &position, &pooled, false)
+            .expect("pool search tail should be writable");
+
+        let output = String::from_utf8(output).expect("protocol output should be UTF-8");
+        let lines: Vec<_> = output.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            lines[0],
+            format!(
+                "info score cp 42 nodes 1234 nps 61700 hashfull 17 time 20 pv {}",
+                format_uci_move(&position, best_move, false)
+            )
+        );
+        assert!(!lines[0].split_whitespace().any(|token| token == "depth"));
+        assert_eq!(
+            lines[1],
+            format!("bestmove {}", format_uci_move(&position, best_move, false))
+        );
+    }
+
+    #[test]
+    fn pool_failure_emits_error_and_deterministic_legal_fallback() {
+        let position = Position::startpos();
+        let expected = generate_legal_moves(&position)[0];
+        let mut output = Vec::new();
+
+        write_search_failure(&mut output, &position, PoolError::Busy, false)
+            .expect("search failure should be writable");
+
+        let output = String::from_utf8(output).expect("protocol output should be UTF-8");
+        assert_eq!(
+            output.lines().collect::<Vec<_>>(),
+            [
+                "info string search failed: search pool is already active".to_string(),
+                format!("bestmove {}", format_uci_move(&position, expected, false)),
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_threads_resize_preserves_the_existing_pool() {
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+        handle_setoption("setoption name Threads value 4", &mut state, &mut output)
+            .expect("valid Threads resize should be writable");
+        assert_eq!(state.search_pool.thread_count(), 4);
+
+        handle_setoption(
+            "setoption name Threads value banana",
+            &mut state,
+            &mut output,
+        )
+        .expect("invalid Threads diagnostic should be writable");
+
+        assert_eq!(state.search_pool.thread_count(), 4);
+        assert!(
+            String::from_utf8(output)
+                .expect("protocol output should be UTF-8")
+                .contains("info string invalid Threads value 'banana'")
+        );
     }
 
     #[test]
@@ -903,7 +1101,9 @@ mod tests {
         )
         .expect("setoption output should be writable");
 
-        state.new_game();
+        state
+            .new_game()
+            .expect("the default search pool should clear the table");
 
         assert!(!state.search_options.use_nmp);
         assert!(!state.search_options.use_rfp);

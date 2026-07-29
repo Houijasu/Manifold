@@ -39,7 +39,7 @@ fn run_uci_bench_session() -> Output {
         let stdin = child.stdin.as_mut().expect("stdin should be piped");
         write!(
             stdin,
-            "setoption name Threads value 1\n\
+            "setoption name Threads value 4\n\
              bench\n\
              bench\n\
              bench\n\
@@ -195,6 +195,11 @@ fn uci_bench_matches_cli_and_clears_all_search_state() {
     assert!(uci.stderr.is_empty());
 
     let stdout = std::str::from_utf8(&uci.stdout).expect("stdout should be UTF-8");
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line == "info string threads set to 4")
+    );
     assert_eq!(
         stdout
             .lines()
