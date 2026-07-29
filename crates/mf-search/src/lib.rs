@@ -1,6 +1,7 @@
 //! Alpha-beta search, transposition tables, and time management.
 
 mod evaluation;
+mod history;
 mod move_ordering;
 mod repetition;
 mod search;

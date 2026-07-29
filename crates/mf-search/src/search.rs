@@ -9,6 +9,7 @@ use mf_core::{
 };
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
+use crate::history::HistoryTables;
 use crate::move_ordering::{MovePicker, quiescence_moves};
 use crate::repetition::RepetitionHistory;
 use crate::{Bound, EntryData, TranspositionTable};
@@ -33,7 +34,6 @@ const PROBCUT_MIN_DEPTH: i32 = 3;
 const PROBCUT_BASE_MARGIN: i32 = 241;
 const PROBCUT_IMPROVING_MARGIN: i32 = 64;
 const QSEARCH_SEE_THRESHOLD: i32 = -74;
-const HISTORY_MAX: i32 = 16_384;
 const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
 const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
 
@@ -769,7 +769,7 @@ fn pvs(
         if tt_score.is_none_or(|score| score >= probcut_beta) {
             let probcut_depth = probcut_depth(depth, improving);
             let see_threshold = probcut_beta - static_eval;
-            for mv in MovePicker::new(position, tt_move, context.killers[ply])
+            for mv in MovePicker::new(position, tt_move, context.history_tables.killers(ply))
                 .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
             {
                 if static_exchange_evaluation(position, mv) < see_threshold {
@@ -846,7 +846,7 @@ fn pvs(
     let mut child_pv = Vec::new();
     let mut searched_quiets = Vec::new();
 
-    for mv in MovePicker::new(position, tt_move, context.killers[ply]) {
+    for mv in MovePicker::new(position, tt_move, context.history_tables.killers(ply)) {
         if excluded_move == Some(mv) {
             continue;
         }
@@ -860,7 +860,7 @@ fn pvs(
         let gives_check = move_gives_check(position, mv);
         let move_count = searched + 1;
         let history_score = if quiet && context.options.use_lmr {
-            context.quiet_history_score(mover, mv)
+            context.history_tables.quiet_score(mover, mv)
         } else {
             0
         };
@@ -1103,12 +1103,14 @@ fn pvs(
         alpha = alpha.max(score);
         if alpha >= beta {
             if quiet {
-                context.record_killer(ply, mv);
+                context.history_tables.record_killer(ply, mv);
                 if context.options.use_lmr {
-                    context.update_quiet_history(mover, mv, quiet_history_bonus(depth));
+                    context
+                        .history_tables
+                        .update_quiet(mover, mv, quiet_history_bonus(depth));
                     let malus = -quiet_history_bonus(depth);
                     for &previous in &searched_quiets {
-                        context.update_quiet_history(mover, previous, malus);
+                        context.history_tables.update_quiet(mover, previous, malus);
                     }
                 }
             }
@@ -1680,9 +1682,8 @@ struct SearchContext<'a> {
     nodes: u64,
     seldepth: u32,
     iterations: Vec<IterationInfo>,
-    killers: [[Option<Move>; 2]; MAX_SEARCH_PLY],
+    history_tables: HistoryTables,
     static_evals: [Option<i32>; MAX_SEARCH_PLY],
-    quiet_history: Box<[[[i16; 64]; 64]; 2]>,
     repetition_history: RepetitionHistory,
     current_moves: [Option<Move>; MAX_SEARCH_PLY],
     nmp_min_ply: usize,
@@ -1711,9 +1712,8 @@ impl<'a> SearchContext<'a> {
             nodes: 0,
             seldepth: 0,
             iterations: Vec::new(),
-            killers: [[None; 2]; MAX_SEARCH_PLY],
+            history_tables: HistoryTables::new(1),
             static_evals: [None; MAX_SEARCH_PLY],
-            quiet_history: Box::new([[[0; 64]; 64]; 2]),
             repetition_history: RepetitionHistory::new(position, history),
             current_moves: [None; MAX_SEARCH_PLY],
             nmp_min_ply: 0,
@@ -1752,30 +1752,6 @@ impl<'a> SearchContext<'a> {
                 .limits
                 .soft_time
                 .is_some_and(|limit| self.started.elapsed() >= limit)
-    }
-
-    fn record_killer(&mut self, ply: usize, mv: Move) {
-        if ply >= MAX_SEARCH_PLY || self.killers[ply][0] == Some(mv) {
-            return;
-        }
-        self.killers[ply][1] = self.killers[ply][0];
-        self.killers[ply][0] = Some(mv);
-    }
-
-    fn quiet_history_score(&self, color: Color, mv: Move) -> i32 {
-        i32::from(
-            self.quiet_history[color.index()][usize::from(mv.from().index())]
-                [usize::from(mv.to().index())],
-        )
-    }
-
-    fn update_quiet_history(&mut self, color: Color, mv: Move, bonus: i32) {
-        let entry = &mut self.quiet_history[color.index()][usize::from(mv.from().index())]
-            [usize::from(mv.to().index())];
-        let current = i32::from(*entry);
-        let bonus = bonus.clamp(-HISTORY_MAX, HISTORY_MAX);
-        let updated = current + bonus - current * bonus.abs() / HISTORY_MAX;
-        *entry = updated.clamp(-HISTORY_MAX, HISTORY_MAX) as i16;
     }
 
     fn push_position(&mut self, position: &Position, ply: usize, mv: Move) {
