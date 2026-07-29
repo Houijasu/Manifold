@@ -6,6 +6,7 @@ mod move_ordering;
 mod repetition;
 mod search;
 mod transposition_table;
+mod vote;
 
 pub use evaluation::{
     DEFAULT_PARAMETERS, EvaluationParameters, TaperedScore, evaluate, evaluate_with_parameters,
