@@ -1,0 +1,148 @@
+Validation status
+=================
+Status        : BLOCKED
+Reason        : The fixed-node equivalence gate found a large, statistically clear
+                8-thread regression at equal aggregate node budgets. The approved
+                LTC measurement was not run, and no M5 baseline binary was archived.
+Timestamp     : 2026-07-30T02:49:55.5163206+03:00
+
+Source
+======
+Repository    : C:\Users\Samaritan\Projects\Manifold
+Base commit   : d866f768fe8c3f02ce98d96626378779566f8dcb
+Commit date   : 2026-07-30T02:23:36+03:00
+Commit subject: Add multi-thread search benchmark
+Working tree  : Existing untracked AGENTS.md and docs/reviews/ were not touched.
+Production code changed by Task 9: no
+
+Host and toolchain
+==================
+OS            : Microsoft Windows 11 Home Single Language
+OS version    : 10.0.26200 build 26200
+CPU           : 13th Gen Intel(R) Core(TM) i9-13980HX
+Physical cores: 24
+Logical CPUs  : 32
+rustc         : rustc 1.97.1 (8bab26f4f 2026-07-14)
+Rust host     : x86_64-pc-windows-msvc
+LLVM          : 22.1.6
+cargo         : cargo 1.97.1 (c980f4866 2026-06-30)
+fastchess     : alpha 1.8.1 compiled for windows-latest 20260405-1525c4b (CI)
+
+Validated tools and inputs
+==========================
+Engine path   : C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+Engine SHA256 : 425637C97E9650216788355049D3021E58EF0E75E96012B312C7BD925B673158
+Fastchess path: C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe
+Fastchess SHA : 1A19F31E154018135EF2895849B8E1809A8D465E8FEE77DB2732338A8A924241
+Book path     : C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_Lichess_4852_v1.epd
+Book SHA256   : 7A7F6470615A69C6CF23D565417701D38732876F480AF90D67B42ABADE35644A
+
+Correctness and build validation
+================================
+1. PASS
+   cargo fmt --manifest-path 'C:\Users\Samaritan\Projects\Manifold\Cargo.toml' --all -- --check
+
+2. PASS, no warnings
+   cargo clippy --manifest-path 'C:\Users\Samaritan\Projects\Manifold\Cargo.toml' --workspace --all-targets -- -D warnings
+
+3. PASS, complete workspace suite
+   $env:CARGO_PROFILE_TEST_OPT_LEVEL='3'; cargo test --manifest-path 'C:\Users\Samaritan\Projects\Manifold\Cargo.toml' --workspace
+   Cargo reported: Finished `test` profile [optimized + debuginfo].
+   The optimized test profile retained debug assertions. A clean verbose proof build
+   showed both `-C opt-level=3` and `-C debug-assertions=on`:
+   $env:CARGO_PROFILE_TEST_OPT_LEVEL='3'; $env:CARGO_TARGET_DIR='C:\Users\Samaritan\Projects\Manifold\target\task9-profile-proof'; cargo test --manifest-path 'C:\Users\Samaritan\Projects\Manifold\Cargo.toml' -p mf-search --no-run -vv
+
+4. PASS
+   cargo test --manifest-path 'C:\Users\Samaritan\Projects\Manifold\Cargo.toml' -p mf-core --features force-magic
+
+5. PASS
+   cargo build --manifest-path 'C:\Users\Samaritan\Projects\Manifold\Cargo.toml' --release
+
+Deterministic release bench
+===========================
+Command:
+  cargo run --manifest-path 'C:\Users\Samaritan\Projects\Manifold\Cargo.toml' --release -p mf-uci --bin manifold -- bench
+
+Run 1:
+  Positions     : 6
+  Nodes searched: 175944
+  Time          : 209 ms
+  NPS           : 838121
+
+Run 2:
+  Positions     : 6
+  Nodes searched: 175944
+  Time          : 213 ms
+  NPS           : 825247
+
+Result: PASS. Both runs matched the required deterministic signature of 175944 nodes.
+
+Lazy SMP scaling
+================
+Command:
+  & 'C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe' mtbench --threads 1,2,4,8 --depth 10
+
+Threads  Depth  Nodes    Time (ms)  NPS      Speedup  Efficiency
+1        10     1989904  2400       829039   1.0000x  100.00%
+2        10     3800223  2440       1557302  1.8784x   93.92%
+4        10     7363237  2754       2673428  3.2247x   80.62%
+8        10     8638797  1676       5153062  6.2157x   77.70%
+
+Formula:
+  speedup(T) = NPS(T) / NPS(1)
+  efficiency(T) = speedup(T) / T
+
+Result: PASS. 8-thread efficiency was 77.70%, above the 60% stop threshold.
+Aspiration jitter was not tuned because scaling evidence did not require it.
+
+Fixed-node 8T-vs-1T equivalence gate
+====================================
+Node budget   : 100000 aggregate nodes per move for each engine
+Hash          : 64 MiB per engine
+Threads       : 8 versus 1
+Openings      : UHO_Lichess_4852_v1.epd, random order, paired/repeated
+Seed          : 20260729
+Games         : 100 (2 games x 50 rounds)
+Concurrency   : 1
+Affinity      : enabled
+
+Exact command:
+  & 'C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe' -engine 'cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe' 'name=Manifold-8T-fixed' 'option.Hash=64' 'option.Threads=8' 'nodes=100000' -engine 'cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe' 'name=Manifold-1T-fixed' 'option.Hash=64' 'option.Threads=1' 'nodes=100000' -each 'proto=uci' -openings 'file=C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_Lichess_4852_v1.epd' 'format=epd' 'order=random' -games 2 -rounds 50 -repeat -concurrency 1 -use-affinity -srand 20260729 -report 'penta=true' -ratinginterval 10 -pgnout 'file=C:\Users\Samaritan\Projects\Manifold\experiments\M5-smp\fixed-node-games.pgn' 'append=false' -log 'file=C:\Users\Samaritan\Projects\Manifold\experiments\M5-smp\fixed-node.log' 'level=warn' 'append=false'
+
+Result from the 8-thread engine's perspective:
+  Games         : 100
+  Wins/Losses/Draws: 10 / 81 / 9
+  Points        : 14.5 / 100 (14.50%)
+  Elo           : -308.24 +/- 116.63
+  nElo          : -317.98 +/- 68.10
+  LOS           : 0.00%
+  Draw ratio    : 6.00%
+  Pentanomial   : [35, 8, 3, 1, 3]
+  Crashes       : 0
+  Timeouts      : 0
+  Disconnects   : 0
+  Illegal moves : 0
+
+Result: FAIL/BLOCKER. This is a substantial selectivity/correctness regression at
+equal aggregate nodes. The 95% Elo interval (-424.87, -191.61) excludes parity by
+a wide margin. Fastchess completed all 100 games and printed the final report; this
+build of fastchess returned process exit code 1 after the completed non-SPRT match.
+No crash, timeout, disconnect, illegal-move, or incomplete-game pattern was found.
+
+Artifacts:
+  C:\Users\Samaritan\Projects\Manifold\experiments\M5-smp\fixed-node-console.txt
+  C:\Users\Samaritan\Projects\Manifold\experiments\M5-smp\fixed-node-games.pgn
+  C:\Users\Samaritan\Projects\Manifold\experiments\M5-smp\fixed-node.log
+
+Approved LTC measurement
+========================
+Status: NOT RUN because the fixed-node gate exposed an explicit blocking defect.
+
+Approved command retained for the post-fix rerun:
+  & 'C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe' -engine 'cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe' 'name=Manifold-8T' 'option.Hash=64' 'option.Threads=8' -engine 'cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe' 'name=Manifold-1T' 'option.Hash=64' 'option.Threads=1' -each 'proto=uci' 'tc=60+0.6' -openings 'file=C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_Lichess_4852_v1.epd' 'format=epd' 'order=random' -games 2 -rounds 100 -repeat -concurrency 1 -use-affinity -srand 20260729 -report 'penta=true' -pgnout 'file=C:\Users\Samaritan\Projects\Manifold\experiments\M5-smp\ltc-games.pgn' 'append=false' -log 'file=C:\Users\Samaritan\Projects\Manifold\experiments\M5-smp\ltc.log' 'level=warn' 'append=false'
+
+Baseline archive
+================
+Status: NOT CREATED. `baselines\M5\manifold.exe` and `baselines\M5\build-metadata.txt`
+were intentionally withheld because the candidate failed the fixed-node validation
+gate and is not a validated M5 release binary.

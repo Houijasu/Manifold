@@ -1,0 +1,236 @@
+Indexing opening suite...
+Started game 1 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 1 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 2 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 2 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 3 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 3 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 4 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 4 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 5 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 5 (Manifold-8T-fixed vs Manifold-1T-fixed): 1/2-1/2 {Draw by insufficient mating material}
+Started game 6 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 6 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 7 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 7 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 8 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 8 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 9 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 9 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 10 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 10 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 11 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 11 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 12 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 12 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 13 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 13 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 14 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 14 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 15 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 15 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 16 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 16 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 17 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 17 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 18 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 18 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 19 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 19 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 20 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 20 (Manifold-1T-fixed vs Manifold-8T-fixed): 1/2-1/2 {Draw by fifty moves rule}
+--------------------------------------------------
+Results of Manifold-8T-fixed vs Manifold-1T-fixed (100000 nodes, 8t - 1t, 64MB, UHO_Lichess_4852_v1.epd):
+Elo: -511.50 +/- nan, nElo: -1105.53 +/- 152.27
+LOS: 0.00 %, DrawRatio: 0.00 %, PairsRatio: 0.00
+Games: 20, Wins: 0, Losses: 18, Draws: 2, Points: 1.0 (5.00 %)
+Ptnml(0-2): [8, 2, 0, 0, 0], WL/DD Ratio: -nan
+--------------------------------------------------
+Started game 21 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 21 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 22 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 22 (Manifold-1T-fixed vs Manifold-8T-fixed): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 23 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 23 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 24 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 24 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 25 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 25 (Manifold-8T-fixed vs Manifold-1T-fixed): 1-0 {White mates}
+Started game 26 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 26 (Manifold-1T-fixed vs Manifold-8T-fixed): 0-1 {Black mates}
+Started game 27 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 27 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 28 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 28 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 29 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 29 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 30 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 30 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 31 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 31 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 32 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 32 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 33 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 33 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 34 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 34 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 35 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 35 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 36 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 36 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 37 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 37 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 38 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 38 (Manifold-1T-fixed vs Manifold-8T-fixed): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 39 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 39 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 40 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 40 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+--------------------------------------------------
+Results of Manifold-8T-fixed vs Manifold-1T-fixed (100000 nodes, 8t - 1t, 64MB, UHO_Lichess_4852_v1.epd):
+Elo: -381.70 +/- nan, nElo: -428.88 +/- 107.67
+LOS: 0.00 %, DrawRatio: 0.00 %, PairsRatio: 0.05
+Games: 40, Wins: 2, Losses: 34, Draws: 4, Points: 4.0 (10.00 %)
+Ptnml(0-2): [15, 4, 0, 0, 1], WL/DD Ratio: -nan
+--------------------------------------------------
+Started game 41 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 41 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 42 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 42 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 43 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 43 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 44 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 44 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 45 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 45 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 46 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 46 (Manifold-1T-fixed vs Manifold-8T-fixed): 0-1 {Black mates}
+Started game 47 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 47 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 48 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 48 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 49 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 49 (Manifold-8T-fixed vs Manifold-1T-fixed): 1/2-1/2 {Draw by insufficient mating material}
+Started game 50 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 50 (Manifold-1T-fixed vs Manifold-8T-fixed): 0-1 {Black mates}
+Started game 51 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 51 (Manifold-8T-fixed vs Manifold-1T-fixed): 1-0 {White mates}
+Started game 52 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 52 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 53 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 53 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 54 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 54 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 55 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 55 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 56 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 56 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 57 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 57 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 58 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 58 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 59 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 59 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 60 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 60 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+--------------------------------------------------
+Results of Manifold-8T-fixed vs Manifold-1T-fixed (100000 nodes, 8t - 1t, 64MB, UHO_Lichess_4852_v1.epd):
+Elo: -338.04 +/- 171.68, nElo: -371.62 +/- 87.91
+LOS: 0.00 %, DrawRatio: 6.67 %, PairsRatio: 0.08
+Games: 60, Wins: 5, Losses: 50, Draws: 5, Points: 7.5 (12.50 %)
+Ptnml(0-2): [22, 4, 2, 1, 1], WL/DD Ratio: inf
+--------------------------------------------------
+Started game 61 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 61 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 62 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 62 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 63 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 63 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 64 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 64 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 65 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 65 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 66 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 66 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 67 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 67 (Manifold-8T-fixed vs Manifold-1T-fixed): 1-0 {White mates}
+Started game 68 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 68 (Manifold-1T-fixed vs Manifold-8T-fixed): 0-1 {Black mates}
+Started game 69 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 69 (Manifold-8T-fixed vs Manifold-1T-fixed): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 70 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 70 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 71 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 71 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 72 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 72 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 73 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 73 (Manifold-8T-fixed vs Manifold-1T-fixed): 1-0 {White mates}
+Started game 74 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 74 (Manifold-1T-fixed vs Manifold-8T-fixed): 0-1 {Black mates}
+Started game 75 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 75 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 76 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 76 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 77 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 77 (Manifold-8T-fixed vs Manifold-1T-fixed): 1-0 {White mates}
+Started game 78 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 78 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 79 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 79 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 80 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 80 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+--------------------------------------------------
+Results of Manifold-8T-fixed vs Manifold-1T-fixed (100000 nodes, 8t - 1t, 64MB, UHO_Lichess_4852_v1.epd):
+Elo: -284.85 +/- 131.67, nElo: -277.59 +/- 76.13
+LOS: 0.00 %, DrawRatio: 7.50 %, PairsRatio: 0.12
+Games: 80, Wins: 10, Losses: 64, Draws: 6, Points: 13.0 (16.25 %)
+Ptnml(0-2): [28, 5, 3, 1, 3], WL/DD Ratio: inf
+--------------------------------------------------
+Started game 81 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 81 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 82 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 82 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 83 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 83 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 84 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 84 (Manifold-1T-fixed vs Manifold-8T-fixed): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 85 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 85 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 86 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 86 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 87 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 87 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 88 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 88 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 89 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 89 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 90 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 90 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 91 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 91 (Manifold-8T-fixed vs Manifold-1T-fixed): 1/2-1/2 {Draw by insufficient mating material}
+Started game 92 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 92 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 93 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 93 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 94 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 94 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 95 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 95 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 96 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 96 (Manifold-1T-fixed vs Manifold-8T-fixed): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 97 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 97 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 98 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 98 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+Started game 99 of 100 (Manifold-8T-fixed vs Manifold-1T-fixed)
+Finished game 99 (Manifold-8T-fixed vs Manifold-1T-fixed): 0-1 {Black mates}
+Started game 100 of 100 (Manifold-1T-fixed vs Manifold-8T-fixed)
+Finished game 100 (Manifold-1T-fixed vs Manifold-8T-fixed): 1-0 {White mates}
+--------------------------------------------------
+Results of Manifold-8T-fixed vs Manifold-1T-fixed (100000 nodes, 8t - 1t, 64MB, UHO_Lichess_4852_v1.epd):
+Elo: -308.24 +/- 116.63, nElo: -317.98 +/- 68.10
+LOS: 0.00 %, DrawRatio: 6.00 %, PairsRatio: 0.09
+Games: 100, Wins: 10, Losses: 81, Draws: 9, Points: 14.5 (14.50 %)
+Ptnml(0-2): [35, 8, 3, 1, 3], WL/DD Ratio: inf
+--------------------------------------------------
