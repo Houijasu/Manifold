@@ -3,8 +3,8 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const BENCH_NODE_COUNT: u64 = 174_415;
-const BENCH_NODES: &str = "Nodes searched: 174415";
+const BENCH_NODE_COUNT: u64 = 177_750;
+const BENCH_NODES: &str = "Nodes searched: 177750";
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -230,8 +230,8 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     assert_eq!(nodes.len(), 12);
     let baseline = nodes[0];
     assert_eq!(
-        baseline, 3_840_238,
-        "all selectivity disabled must reproduce the M3-F0 search signature"
+        baseline, 3_768_488,
+        "all selectivity disabled must reproduce the GHI-safe search signature"
     );
     for (name, enabled) in [
         "UseNMP",

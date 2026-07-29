@@ -96,6 +96,15 @@ fn piece_square_key(piece: Piece, square: Square) -> u64 {
     TABLES.piece_square[piece.index()][square.index() as usize]
 }
 
+/// Returns the main-key XOR delta for a quiet, reversible move.
+///
+/// The caller is responsible for using this only when no capture, promotion,
+/// castling-right, or en-passant component changes.
+#[inline]
+pub fn reversible_move_delta(piece: Piece, from: Square, to: Square) -> u64 {
+    TABLES.side ^ piece_square_key(piece, from) ^ piece_square_key(piece, to)
+}
+
 #[inline]
 const fn material_index(kind: PieceKind) -> Option<usize> {
     match kind {

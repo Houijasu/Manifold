@@ -285,6 +285,35 @@ fn selective_fixed_depth_search_is_reproducible_with_fresh_and_warm_tt() {
 }
 
 #[test]
+fn campbell_ghi_position_is_stable_with_warm_and_cleared_tt() {
+    let position = Position::from_fen("5B2/1p3pk1/3p4/8/3p4/p7/8/7K b - - 78 30", false).unwrap();
+    let table = TranspositionTable::new(16).expect("test TT should allocate");
+
+    let drawing_line =
+        Position::from_fen("5k2/1p3p2/3p4/8/3p4/p7/8/7K w - - 99 31", false).unwrap();
+    let draw_first = search(&drawing_line, &table, limits(9));
+    let warm = search(&position, &table, limits(10));
+    table.clear();
+    let after_new_game = search(&position, &table, limits(10));
+
+    assert_eq!(draw_first.score, 0);
+    for result in [&warm, &after_new_game] {
+        assert_eq!(
+            result
+                .best_move
+                .map(|mv| format_uci_move(&position, mv, false)),
+            Some("g7f8".to_string())
+        );
+        assert!(
+            result.score >= 500,
+            "Campbell win score was {}",
+            result.score
+        );
+    }
+    assert_eq!(after_new_game.best_move, warm.best_move);
+}
+
+#[test]
 fn m2_tt_marks_static_evaluation_as_unavailable() {
     let position = Position::startpos();
     let table = TranspositionTable::new(4).expect("test TT should allocate");
@@ -334,6 +363,14 @@ fn fifty_move_rule_draws_at_the_boundary_but_not_from_a_fresh_clock() {
     assert!(
         search(&fresh, &table, limits(6)).score >= 400,
         "positions with different halfmove clocks must not share TT scores"
+    );
+
+    let draw_last_table = TranspositionTable::new(4).expect("test TT should allocate");
+    assert!(search(&fresh, &draw_last_table, limits(6)).score >= 400);
+    assert_eq!(
+        search(&near_draw, &draw_last_table, limits(6)).score,
+        0,
+        "a decisive value stored first must not poison the later draw path"
     );
 }
 

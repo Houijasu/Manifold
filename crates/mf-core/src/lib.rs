@@ -28,4 +28,4 @@ pub use see::static_exchange_evaluation;
 pub use sliding::{
     SlidingAttackBackend, SlidingAttacks, bishop_attacks, queen_attacks, rook_attacks,
 };
-pub use zobrist::ZobristKeys;
+pub use zobrist::{ZobristKeys, reversible_move_delta};

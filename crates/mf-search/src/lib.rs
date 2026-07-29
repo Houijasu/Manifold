@@ -2,6 +2,7 @@
 
 mod evaluation;
 mod move_ordering;
+mod repetition;
 mod search;
 mod transposition_table;
 

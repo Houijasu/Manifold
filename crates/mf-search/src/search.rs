@@ -10,6 +10,7 @@ use mf_core::{
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
 use crate::move_ordering::{MovePicker, quiescence_moves};
+use crate::repetition::RepetitionHistory;
 use crate::{Bound, EntryData, TranspositionTable};
 
 pub const MATE_SCORE: i32 = 30_000;
@@ -17,6 +18,8 @@ pub const MAX_SEARCH_PLY: usize = 128;
 /// Marks a TT entry whose static evaluation was intentionally not computed.
 pub const UNEVALUATED_STATIC_EVAL: i16 = i16::MIN;
 const INFINITY: i32 = MATE_SCORE + 1;
+const TABLEBASE_SCORE: i32 = MATE_SCORE - MAX_SEARCH_PLY as i32 - 1;
+const TABLEBASE_WIN_IN_MAX_PLY: i32 = TABLEBASE_SCORE - MAX_SEARCH_PLY as i32;
 const ASPIRATION_INITIAL_DELTA: i32 = 25;
 const DEFAULT_MAX_DEPTH: u32 = 64;
 const NMP_MIN_DEPTH: i32 = 3;
@@ -269,7 +272,7 @@ where
     }
 
     let fallback_move = root_moves[0];
-    if context.is_rule_draw(position) {
+    if context.rule_draw_score(position, 0).is_some() {
         return SearchResult {
             best_move: Some(fallback_move),
             score: 0,
@@ -394,6 +397,9 @@ fn root_search(
     for mv in MovePicker::new(&position, tt_move, [None, None]) {
         let mover = position.side_to_move();
         let undo = position.make_move(mv);
+        context
+            .transposition_table
+            .prefetch(tt_key(&position, depth as i32 - 1));
         if is_in_check(&position, mover) {
             position.unmake_move(mv, undo);
             continue;
@@ -408,7 +414,7 @@ fn root_search(
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(&position);
+        context.push_position(&position, 1, mv);
         let mut child_pv = Vec::new();
         let score = if searched == 0 {
             pvs(
@@ -465,7 +471,7 @@ fn root_search(
                 }
             })
         };
-        context.pop_position();
+        context.pop_position(1);
         position.unmake_move(mv, undo);
         let score = score?;
         searched += 1;
@@ -532,8 +538,18 @@ fn pvs(
     if !context.visit_node(ply) {
         return None;
     }
-    if context.is_rule_draw(position) {
-        return Some(0);
+    if alpha < 0
+        && context
+            .repetition_history
+            .upcoming_repetition(position, ply)
+    {
+        alpha = draw_value(context.nodes);
+        if alpha >= beta {
+            return Some(alpha);
+        }
+    }
+    if let Some(draw_score) = context.rule_draw_score(position, ply) {
+        return Some(draw_score);
     }
     if ply >= MAX_SEARCH_PLY {
         return Some(evaluate(position));
@@ -550,12 +566,24 @@ fn pvs(
     if let Some(entry) = tt_entry {
         tt_move = entry.best_move;
         if !pv_node && !verification_node && i32::from(entry.depth) >= depth {
-            let score = score_from_tt(i32::from(entry.score), ply);
-            match entry.bound {
-                Bound::Exact => return Some(score),
-                Bound::Lower if score >= beta => return Some(score),
-                Bound::Upper if score <= alpha => return Some(score),
-                _ => {}
+            let score = value_from_tt(i32::from(entry.score), ply, position.halfmove_clock());
+            let bound_allows_cutoff = match entry.bound {
+                Bound::Exact => true,
+                Bound::Lower => score >= beta,
+                Bound::Upper => score <= alpha,
+            };
+            if bound_allows_cutoff
+                && tt_cutoff_is_safe(
+                    position,
+                    entry,
+                    score,
+                    depth,
+                    beta,
+                    ply,
+                    context.transposition_table,
+                )
+            {
+                return Some(score);
             }
         }
     }
@@ -611,7 +639,7 @@ fn pvs(
         {
             let reduction = null_move_reduction(depth, static_eval, beta);
             let undo = position.make_null_move();
-            context.push_null_position();
+            context.push_null_position(ply + 1);
             let mut null_pv = Vec::new();
             let null_value = pvs(
                 position,
@@ -628,7 +656,7 @@ fn pvs(
                 &mut null_pv,
             )
             .map(|score| -score);
-            context.pop_position();
+            context.pop_position(ply + 1);
             position.unmake_null_move(undo);
             let null_value = null_value?;
 
@@ -686,7 +714,8 @@ fn pvs(
         && eval_pruning_rule50_safe(position, depth)
     {
         let probcut_beta = probcut_beta(beta, improving);
-        let tt_score = tt_entry.map(|entry| score_from_tt(i32::from(entry.score), ply));
+        let tt_score = tt_entry
+            .map(|entry| value_from_tt(i32::from(entry.score), ply, position.halfmove_clock()));
         if tt_score.is_none_or(|score| score >= probcut_beta) {
             let probcut_depth = probcut_depth(depth, improving);
             let see_threshold = probcut_beta - static_eval;
@@ -698,11 +727,14 @@ fn pvs(
                 }
                 let mover = position.side_to_move();
                 let undo = position.make_move(mv);
+                context
+                    .transposition_table
+                    .prefetch(tt_key(position, probcut_depth));
                 if is_in_check(position, mover) {
                     position.unmake_move(mv, undo);
                     continue;
                 }
-                context.push_position(position);
+                context.push_position(position, ply + 1, mv);
                 let mut probcut_pv = Vec::new();
                 let mut value = quiescence(
                     position,
@@ -732,7 +764,7 @@ fn pvs(
                     )
                     .map(|score| -score);
                 }
-                context.pop_position();
+                context.pop_position(ply + 1);
                 position.unmake_move(mv, undo);
                 let value = value?;
                 if value >= probcut_beta {
@@ -741,7 +773,7 @@ fn pvs(
                             key,
                             EntryData {
                                 best_move: Some(mv),
-                                score: score_to_tt(value, ply) as i16,
+                                score: value_to_tt(value, ply) as i16,
                                 static_eval: static_eval as i16,
                                 depth: (probcut_depth + 1).clamp(0, i32::from(u8::MAX)) as u8,
                                 bound: Bound::Lower,
@@ -855,15 +887,27 @@ fn pvs(
             && excluded_move.is_none()
             && Some(mv) == tt_move
             && depth >= SINGULAR_MIN_DEPTH + i32::from(tt_pv)
+            && !is_shuffling(
+                mv,
+                ply,
+                position,
+                &context.current_moves,
+                context.repetition_history.plies_since_null(),
+            )
             && tt_entry.is_some_and(|entry| {
                 matches!(entry.bound, Bound::Lower | Bound::Exact)
                     && i32::from(entry.depth) >= depth - 3
-                    && !is_mate_score(score_from_tt(i32::from(entry.score), ply))
+                    && !is_mate_score(value_from_tt(
+                        i32::from(entry.score),
+                        ply,
+                        position.halfmove_clock(),
+                    ))
             })
         {
-            let tt_score = score_from_tt(
+            let tt_score = value_from_tt(
                 i32::from(tt_entry.expect("singular candidate has TT entry").score),
                 ply,
+                position.halfmove_clock(),
             );
             let singular_beta = singular_beta(tt_score, depth, tt_pv, pv_node);
             let singular_depth = (new_depth / 2).max(1);
@@ -898,11 +942,14 @@ fn pvs(
 
         let child_depth = (new_depth + extension).max(0);
         let undo = position.make_move(mv);
+        context
+            .transposition_table
+            .prefetch(tt_key(position, child_depth));
         if is_in_check(position, mover) {
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(position);
+        context.push_position(position, ply + 1, mv);
         child_pv.clear();
         let score = if searched == 0 {
             pvs(
@@ -988,7 +1035,7 @@ fn pvs(
                 }
             })
         };
-        context.pop_position();
+        context.pop_position(ply + 1);
         position.unmake_move(mv, undo);
         let score = score?;
         searched += 1;
@@ -1041,7 +1088,7 @@ fn pvs(
             key,
             EntryData {
                 best_move,
-                score: score_to_tt(best_score, ply) as i16,
+                score: value_to_tt(best_score, ply) as i16,
                 static_eval: static_eval as i16,
                 depth: depth.min(i32::from(u8::MAX)) as u8,
                 bound,
@@ -1066,8 +1113,18 @@ fn quiescence(
         return None;
     }
     context.seldepth = context.seldepth.max(ply as u32);
-    if context.is_rule_draw(position) {
-        return Some(0);
+    if alpha < 0
+        && context
+            .repetition_history
+            .upcoming_repetition(position, ply)
+    {
+        alpha = draw_value(context.nodes);
+        if alpha >= beta {
+            return Some(alpha);
+        }
+    }
+    if let Some(draw_score) = context.rule_draw_score(position, ply) {
+        return Some(draw_score);
     }
     if ply >= MAX_SEARCH_PLY {
         return Some(evaluate(position));
@@ -1103,11 +1160,12 @@ fn quiescence(
     for mv in moves {
         let mover = position.side_to_move();
         let undo = position.make_move(mv);
+        context.transposition_table.prefetch(tt_key(position, 0));
         if is_in_check(position, mover) {
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(position);
+        context.push_position(position, ply + 1, mv);
         child_pv.clear();
         let score = quiescence(
             position,
@@ -1119,7 +1177,7 @@ fn quiescence(
             &mut child_pv,
         )
         .map(|score| -score);
-        context.pop_position();
+        context.pop_position(ply + 1);
         position.unmake_move(mv, undo);
         let score = score?;
         searched += 1;
@@ -1148,14 +1206,19 @@ fn quiescence(
     }
 }
 
-fn score_to_tt(score: i32, ply: usize) -> i32 {
-    if score >= MATE_SCORE - MAX_SEARCH_PLY as i32 {
+fn value_to_tt(score: i32, ply: usize) -> i32 {
+    if score >= TABLEBASE_WIN_IN_MAX_PLY {
         score + ply as i32
-    } else if score <= -MATE_SCORE + MAX_SEARCH_PLY as i32 {
+    } else if score <= -TABLEBASE_WIN_IN_MAX_PLY {
         score - ply as i32
     } else {
         score
     }
+}
+
+#[inline]
+fn draw_value(nodes: u64) -> i32 {
+    -1 + (nodes & 0x2) as i32
 }
 
 #[inline]
@@ -1169,6 +1232,54 @@ fn tt_entry_for_node(
     } else {
         transposition_table.probe(key)
     }
+}
+
+fn tt_cutoff_is_safe(
+    position: &Position,
+    entry: EntryData,
+    score: i32,
+    depth: i32,
+    beta: i32,
+    ply: usize,
+    transposition_table: &TranspositionTable,
+) -> bool {
+    if position.halfmove_clock() >= 96 {
+        return false;
+    }
+
+    if depth <= 8
+        && position.halfmove_clock() >= 80
+        && entry.best_move.is_some_and(|mv| {
+            mv.flag().is_capture()
+                || position
+                    .piece_at(mv.from())
+                    .is_some_and(|piece| piece.kind() == PieceKind::Pawn)
+        })
+    {
+        return false;
+    }
+
+    if depth < 7 || is_decisive_score(score) {
+        return true;
+    }
+    let Some(tt_move) = entry.best_move else {
+        return true;
+    };
+    if !generate_legal_moves(position).contains(&tt_move) {
+        return true;
+    }
+
+    let mut child = position.clone();
+    child.make_move(tt_move);
+    let Some(child_entry) = transposition_table.probe(tt_key(&child, depth - 1)) else {
+        return true;
+    };
+    let child_score = value_from_tt(
+        i32::from(child_entry.score),
+        ply + 1,
+        child.halfmove_clock(),
+    );
+    (score >= beta) == (-child_score >= beta)
 }
 
 #[inline]
@@ -1335,6 +1446,28 @@ fn check_extension(gives_check: bool, extension: i32) -> i32 {
     }
 }
 
+fn is_shuffling(
+    mv: Move,
+    ply: usize,
+    position: &Position,
+    current_moves: &[Option<Move>; MAX_SEARCH_PLY],
+    plies_since_null: usize,
+) -> bool {
+    if mv.flag().is_capture() || position.halfmove_clock() < 10 {
+        return false;
+    }
+    if plies_since_null < 6 || ply < 20 {
+        return false;
+    }
+    let Some(two_plies_ago) = current_moves[ply - 2] else {
+        return false;
+    };
+    let Some(four_plies_ago) = current_moves[ply - 4] else {
+        return false;
+    };
+    mv.from() == two_plies_ago.to() && two_plies_ago.from() == four_plies_ago.to()
+}
+
 #[inline]
 fn shallow_pruning_allowed(best_score: i32) -> bool {
     !(best_score < 0 && is_mate_score(best_score))
@@ -1439,26 +1572,45 @@ fn has_non_pawn_material_for(position: &Position, color: Color) -> bool {
         .any(|kind| !position.pieces(color, kind).is_empty())
 }
 
-fn tt_key(position: &Position, depth: i32) -> u64 {
-    const RULE50_SALT: u64 = 0x6a09_e667_f3bc_c909;
-
-    if i32::from(position.halfmove_clock()) + depth < 100 {
-        return position.zobrist().main();
-    }
-    let mut value = u64::from(position.halfmove_clock()).wrapping_add(RULE50_SALT);
-    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    position.zobrist().main() ^ (value ^ (value >> 31))
+fn tt_key(position: &Position, _depth: i32) -> u64 {
+    adjust_key50(position.repetition_key(), position.halfmove_clock())
 }
 
-fn score_from_tt(score: i32, ply: usize) -> i32 {
-    if score >= MATE_SCORE - MAX_SEARCH_PLY as i32 {
-        score - ply as i32
-    } else if score <= -MATE_SCORE + MAX_SEARCH_PLY as i32 {
-        score + ply as i32
-    } else {
-        score
+#[inline]
+fn adjust_key50(key: u64, rule50: u16) -> u64 {
+    const RULE50_SALT: u64 = 0x6a09_e667_f3bc_c909;
+
+    if rule50 < 14 {
+        return key;
     }
+    let bucket = (rule50 - 14) / 8;
+    let mut value = u64::from(bucket).wrapping_add(RULE50_SALT);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    key ^ (value ^ (value >> 31))
+}
+
+fn value_from_tt(score: i32, ply: usize, rule50: u16) -> i32 {
+    let headroom = 100 - i32::from(rule50.min(100));
+    if score >= TABLEBASE_WIN_IN_MAX_PLY {
+        if is_mate_score(score) && MATE_SCORE - score > headroom {
+            return TABLEBASE_WIN_IN_MAX_PLY - 1;
+        }
+        if TABLEBASE_SCORE - score > headroom {
+            return TABLEBASE_WIN_IN_MAX_PLY - 1;
+        }
+        return score - ply as i32;
+    }
+    if score <= -TABLEBASE_WIN_IN_MAX_PLY {
+        if is_mate_score(score) && MATE_SCORE + score > headroom {
+            return -TABLEBASE_WIN_IN_MAX_PLY + 1;
+        }
+        if TABLEBASE_SCORE + score > headroom {
+            return -TABLEBASE_WIN_IN_MAX_PLY + 1;
+        }
+        return score + ply as i32;
+    }
+    score
 }
 
 struct SearchContext<'a> {
@@ -1473,7 +1625,8 @@ struct SearchContext<'a> {
     killers: [[Option<Move>; 2]; MAX_SEARCH_PLY],
     static_evals: [Option<i32>; MAX_SEARCH_PLY],
     quiet_history: Box<[[[i16; 64]; 64]; 2]>,
-    position_history: Vec<Option<u64>>,
+    repetition_history: RepetitionHistory,
+    current_moves: [Option<Move>; MAX_SEARCH_PLY],
     nmp_min_ply: usize,
     stopped: bool,
 }
@@ -1488,17 +1641,6 @@ impl<'a> SearchContext<'a> {
         history: &[u64],
         options: SearchOptions,
     ) -> Self {
-        let root_key = position.repetition_key();
-        let position_history = if history.is_empty() {
-            vec![Some(root_key)]
-        } else {
-            assert_eq!(
-                history.last().copied(),
-                Some(root_key),
-                "search history must end at the root position"
-            );
-            history.iter().copied().map(Some).collect()
-        };
         Self {
             transposition_table,
             stop,
@@ -1511,7 +1653,8 @@ impl<'a> SearchContext<'a> {
             killers: [[None; 2]; MAX_SEARCH_PLY],
             static_evals: [None; MAX_SEARCH_PLY],
             quiet_history: Box::new([[[0; 64]; 64]; 2]),
-            position_history,
+            repetition_history: RepetitionHistory::new(position, history),
+            current_moves: [None; MAX_SEARCH_PLY],
             nmp_min_ply: 0,
             stopped: false,
         }
@@ -1573,43 +1716,31 @@ impl<'a> SearchContext<'a> {
         *entry = updated.clamp(-HISTORY_MAX, HISTORY_MAX) as i16;
     }
 
-    fn push_position(&mut self, position: &Position) {
-        self.position_history.push(Some(position.repetition_key()));
+    fn push_position(&mut self, position: &Position, ply: usize, mv: Move) {
+        self.current_moves[ply - 1] = Some(mv);
+        self.repetition_history.push_position(position);
     }
 
-    fn push_null_position(&mut self) {
-        self.position_history.push(None);
+    fn push_null_position(&mut self, ply: usize) {
+        self.current_moves[ply - 1] = None;
+        self.repetition_history.push_null();
     }
 
-    fn pop_position(&mut self) {
-        self.position_history
-            .pop()
-            .expect("search position history must contain the root");
+    fn pop_position(&mut self, ply: usize) {
+        self.repetition_history.pop();
+        self.current_moves[ply - 1] = None;
     }
 
-    fn is_rule_draw(&self, position: &Position) -> bool {
-        if position.is_insufficient_material() || self.is_threefold_repetition(position) {
-            return true;
+    fn rule_draw_score(&self, position: &Position, ply: usize) -> Option<i32> {
+        if position.is_insufficient_material() {
+            return Some(0);
         }
-        position.halfmove_clock() >= 100
-            && (!is_in_check(position, position.side_to_move()) || has_legal_move(position))
-    }
-
-    fn is_threefold_repetition(&self, position: &Position) -> bool {
-        let key = position.repetition_key();
-        let boundary = self
-            .position_history
-            .iter()
-            .rposition(Option::is_none)
-            .map_or(0, |index| index + 1);
-        self.position_history[boundary..]
-            .iter()
-            .rev()
-            .step_by(2)
-            .filter(|&&previous| previous == Some(key))
-            .take(3)
-            .count()
-            == 3
+        if self.repetition_history.is_repetition(ply) {
+            return Some(draw_value(self.nodes));
+        }
+        (position.halfmove_clock() >= 100
+            && (!is_in_check(position, position.side_to_move()) || has_legal_move(position)))
+        .then_some(0)
     }
 
     fn nmp_allowed_at(&self, ply: usize) -> bool {
@@ -1619,6 +1750,11 @@ impl<'a> SearchContext<'a> {
 
 pub fn is_mate_score(score: i32) -> bool {
     score.abs() >= MATE_SCORE - MAX_SEARCH_PLY as i32
+}
+
+#[inline]
+fn is_decisive_score(score: i32) -> bool {
+    score.abs() >= TABLEBASE_WIN_IN_MAX_PLY
 }
 
 pub fn score_to_uci_mate(score: i32) -> Option<i32> {
@@ -1640,13 +1776,181 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tt_key_distinguishes_every_halfmove_clock() {
-        let clock_92 = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 92 1", false).unwrap();
-        let clock_95 = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 95 1", false).unwrap();
+    fn tt_key_uses_coarse_rule_fifty_shards_independent_of_depth() {
+        let clock_13 = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 13 1", false).unwrap();
+        let clock_14 = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 14 1", false).unwrap();
+        let clock_21 = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 21 1", false).unwrap();
+        let clock_22 = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 22 1", false).unwrap();
 
-        assert_ne!(tt_key(&clock_92, 5), tt_key(&clock_95, 5));
-        assert_eq!(tt_key(&clock_92, 5), clock_92.zobrist().main());
-        assert_ne!(tt_key(&clock_92, 8), clock_92.zobrist().main());
+        assert_eq!(tt_key(&clock_13, 99), clock_13.zobrist().main());
+        assert_ne!(tt_key(&clock_14, 1), clock_14.zobrist().main());
+        assert_eq!(tt_key(&clock_14, 1), tt_key(&clock_21, 99));
+        assert_ne!(tt_key(&clock_21, 1), tt_key(&clock_22, 1));
+    }
+
+    #[test]
+    fn tt_key_canonicalizes_legally_irrelevant_en_passant_targets() {
+        let pinned = Position::from_fen("k3r3/8/8/3pP3/8/8/8/4K3 w - d6 20 1", false).unwrap();
+        let no_target = Position::from_fen("k3r3/8/8/3pP3/8/8/8/4K3 w - - 20 1", false).unwrap();
+        assert_eq!(tt_key(&pinned, 6), tt_key(&no_target, 6));
+
+        let capturable = Position::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 20 1", false).unwrap();
+        let capturable_without_target =
+            Position::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - - 20 1", false).unwrap();
+        assert_ne!(
+            tt_key(&capturable, 6),
+            tt_key(&capturable_without_target, 6)
+        );
+    }
+
+    #[test]
+    fn draw_scores_are_fuzzed_by_node_parity() {
+        assert_eq!(draw_value(0), -1);
+        assert_eq!(draw_value(1), -1);
+        assert_eq!(draw_value(2), 1);
+        assert_eq!(draw_value(3), 1);
+    }
+
+    #[test]
+    fn tt_values_adjust_mate_and_tablebase_distance_and_respect_rule_fifty() {
+        let mate = MATE_SCORE - 20;
+        let stored_mate = value_to_tt(mate, 7);
+        assert_eq!(value_from_tt(stored_mate, 7, 0), mate);
+        assert_eq!(value_from_tt(stored_mate, 12, 0), mate - 5);
+        assert_eq!(
+            value_from_tt(stored_mate, 7, 90),
+            TABLEBASE_WIN_IN_MAX_PLY - 1
+        );
+
+        let tablebase = TABLEBASE_SCORE - 20;
+        let stored_tablebase = value_to_tt(tablebase, 7);
+        assert_eq!(value_from_tt(stored_tablebase, 7, 0), tablebase);
+        assert_eq!(
+            value_from_tt(stored_tablebase, 7, 90),
+            TABLEBASE_WIN_IN_MAX_PLY - 1
+        );
+
+        let stored_loss = value_to_tt(-mate, 7);
+        assert_eq!(
+            value_from_tt(stored_loss, 7, 90),
+            -TABLEBASE_WIN_IN_MAX_PLY + 1
+        );
+    }
+
+    #[test]
+    fn tt_cutoffs_are_blocked_by_high_rule_fifty_and_zeroing_moves() {
+        let high_clock = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 96 1", false).unwrap();
+        let table = TranspositionTable::new(1).unwrap();
+        let entry = EntryData {
+            best_move: None,
+            score: 500,
+            static_eval: 500,
+            depth: 8,
+            bound: Bound::Lower,
+            age: 0,
+            pv: false,
+        };
+        assert!(!tt_cutoff_is_safe(
+            &high_clock,
+            entry,
+            500,
+            8,
+            100,
+            1,
+            &table
+        ));
+
+        let pawn_clock = Position::from_fen("4k3/8/8/8/8/8/P7/4K3 w - - 80 1", false).unwrap();
+        let pawn_move = generate_legal_moves(&pawn_clock)
+            .into_iter()
+            .copied()
+            .find(|mv| mv.from() == Square::new(8).unwrap())
+            .unwrap();
+        let pawn_entry = EntryData {
+            best_move: Some(pawn_move),
+            ..entry
+        };
+        assert!(!tt_cutoff_is_safe(
+            &pawn_clock,
+            pawn_entry,
+            500,
+            8,
+            100,
+            1,
+            &table
+        ));
+        assert!(tt_cutoff_is_safe(
+            &pawn_clock,
+            pawn_entry,
+            500,
+            9,
+            100,
+            1,
+            &table
+        ));
+    }
+
+    #[test]
+    fn deep_tt_cutoff_requires_one_ply_child_consistency() {
+        let position = Position::startpos();
+        let tt_move = generate_legal_moves(&position)
+            .into_iter()
+            .copied()
+            .find(|mv| mv.from() == Square::new(6).unwrap() && mv.to() == Square::new(21).unwrap())
+            .unwrap();
+        let parent = EntryData {
+            best_move: Some(tt_move),
+            score: 500,
+            static_eval: 0,
+            depth: 7,
+            bound: Bound::Lower,
+            age: 0,
+            pv: false,
+        };
+        let table = TranspositionTable::new(1).unwrap();
+        assert!(tt_cutoff_is_safe(&position, parent, 500, 7, 100, 1, &table));
+
+        let mut child = position.clone();
+        child.make_move(tt_move);
+        table.store(
+            tt_key(&child, 6),
+            EntryData {
+                best_move: None,
+                score: value_to_tt(500, 2) as i16,
+                static_eval: 0,
+                depth: 6,
+                bound: Bound::Exact,
+                age: 0,
+                pv: false,
+            },
+        );
+        assert!(!tt_cutoff_is_safe(
+            &position, parent, 500, 7, 100, 1, &table
+        ));
+    }
+
+    #[test]
+    fn shuffling_detection_matches_the_four_ply_retrace_pattern() {
+        let position = Position::from_fen("4k3/8/8/8/8/7N/8/4K1N1 w - - 10 1", false).unwrap();
+        let candidate = Move::new(
+            Square::new(6).unwrap(),
+            Square::new(21).unwrap(),
+            mf_core::MoveFlag::QUIET,
+        );
+        let mut current_moves = [None; MAX_SEARCH_PLY];
+        current_moves[18] = Some(Move::new(
+            Square::new(23).unwrap(),
+            Square::new(6).unwrap(),
+            mf_core::MoveFlag::QUIET,
+        ));
+        current_moves[16] = Some(Move::new(
+            Square::new(0).unwrap(),
+            Square::new(23).unwrap(),
+            mf_core::MoveFlag::QUIET,
+        ));
+
+        assert!(is_shuffling(candidate, 20, &position, &current_moves, 6));
+        assert!(!is_shuffling(candidate, 19, &position, &current_moves, 6));
     }
 
     #[test]
@@ -1701,7 +2005,11 @@ mod tests {
 
     #[test]
     fn null_move_is_a_hard_boundary_for_repetition_history() {
-        let position = Position::startpos();
+        let position = Position::from_fen(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 10 1",
+            false,
+        )
+        .unwrap();
         let key = position.repetition_key();
         let history = [key; 6];
         let table = TranspositionTable::new(1).expect("test TT should allocate");
@@ -1716,9 +2024,9 @@ mod tests {
             SearchOptions::default(),
         );
 
-        assert!(context.is_threefold_repetition(&position));
-        context.push_null_position();
-        assert!(!context.is_threefold_repetition(&position));
+        assert!(context.repetition_history.is_repetition(0));
+        context.push_null_position(1);
+        assert!(!context.repetition_history.is_repetition(20));
     }
 
     #[test]
