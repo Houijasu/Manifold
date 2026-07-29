@@ -1753,7 +1753,7 @@ impl<'a> SearchContext<'a> {
             nodes: 0,
             seldepth: 0,
             iterations: Vec::new(),
-            history_tables: HistoryTables::new(1),
+            history_tables: HistoryTables::new(node_counters.len()),
             static_evals: [None; MAX_SEARCH_PLY],
             repetition_history: RepetitionHistory::new(position, history),
             current_moves: [None; MAX_SEARCH_PLY],

@@ -191,7 +191,17 @@ impl TranspositionTable {
     }
 
     pub fn clear(&self) {
-        for cluster in &self.clusters {
+        self.clear_cluster_range(0, self.clusters.len());
+    }
+
+    pub(crate) fn cluster_count(&self) -> usize {
+        self.clusters.len()
+    }
+
+    pub(crate) fn clear_cluster_range(&self, start_cluster: usize, end_cluster: usize) {
+        debug_assert!(start_cluster <= end_cluster);
+        debug_assert!(end_cluster <= self.clusters.len());
+        for cluster in &self.clusters[start_cluster..end_cluster] {
             for entry in &cluster.entries {
                 entry.clear();
             }

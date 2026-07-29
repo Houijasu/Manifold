@@ -5,6 +5,7 @@ mod history;
 mod move_ordering;
 mod repetition;
 mod search;
+mod thread_pool;
 mod transposition_table;
 mod vote;
 
@@ -18,6 +19,7 @@ pub use search::{
     search_with_history_callback, search_with_history_callback_options,
     search_with_history_options, search_with_options,
 };
+pub use thread_pool::{PoolError, PoolSearchResult, SearchPool};
 pub use transposition_table::{
     AllocationError, Bound, CACHE_LINE_BYTES, CLUSTER_ALIGNMENT, CLUSTER_BYTES,
     ENTRIES_PER_CLUSTER, ENTRY_BYTES, EntryData, TranspositionTable,
