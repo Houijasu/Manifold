@@ -679,17 +679,15 @@ fn pvs(
     let static_eval = tt_entry
         .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
         .map_or_else(|| evaluate(position), |entry| i32::from(entry.static_eval));
-    let uses_improving =
-        context.options.use_lmr || context.options.use_lmp || context.options.use_probcut;
-    let mut improving = true;
-    if uses_improving {
-        context.static_evals[ply] = (!in_check).then_some(static_eval);
-        improving = is_improving(
-            static_eval,
-            ply.checked_sub(2)
-                .and_then(|previous_ply| context.static_evals[previous_ply]),
-        );
-    }
+    // `improving` is a shared derived value: it feeds the LMR reduction, which feeds
+    // `effective_depth`, which futility and SEE pruning read. Gating it on a set of
+    // toggles is the AGENTS.md 4.4 defect class, so it is always computed.
+    context.static_evals[ply] = (!in_check).then_some(static_eval);
+    let mut improving = is_improving(
+        static_eval,
+        ply.checked_sub(2)
+            .and_then(|previous_ply| context.static_evals[previous_ply]),
+    );
     let tt_pv = tt_entry.is_some_and(|entry| entry.pv);
     if !in_check && !pv_node && excluded_move.is_none() {
         if context.options.use_razoring
@@ -773,9 +771,7 @@ fn pvs(
                 }
             }
         }
-        if uses_improving {
-            improving |= static_eval >= beta;
-        }
+        improving |= static_eval >= beta;
     }
 
     if context.options.use_iir {
@@ -893,12 +889,18 @@ fn pvs(
             needs_non_pawn_material && has_non_pawn_material_for(position, mover);
         let gives_check = move_gives_check(position, mv);
         let move_count = searched + 1;
-        let history_score = if quiet && context.options.use_lmr {
+        // `history_score`, `reduction`, and `effective_depth` are DERIVED VALUES read by
+        // futility and SEE pruning as well as by LMR. They must never be gated on
+        // `use_lmr`: doing so silently weakened two separately-toggled techniques and
+        // made roughly 35% of the apparent LMR effect actually be futility and SEE
+        // getting weaker. See mission AGENTS.md 4.4 item 3. Only the LMR *reduction
+        // application* below is gated on `use_lmr`.
+        let history_score = if quiet {
             context.history_tables.quiet_score(mover, mv)
         } else {
             0
         };
-        let reduction = if context.options.use_lmr && quiet && !gives_check {
+        let reduction = if quiet && !gives_check {
             late_move_reduction(depth, move_count, improving, cut_node, tt_pv, history_score)
         } else {
             0
@@ -1136,16 +1138,18 @@ fn pvs(
         }
         alpha = alpha.max(score);
         if alpha >= beta {
+            // History MAINTENANCE is unconditional. Every consumer gates only its own
+            // READ. Gating writes on `use_lmr` was harmless while LMR was the sole
+            // consumer, but becomes the AGENTS.md 4.4 confound the moment a second
+            // consumer exists (move ordering, pruning, correction history).
             if quiet {
                 context.history_tables.record_killer(ply, mv);
-                if context.options.use_lmr {
-                    context
-                        .history_tables
-                        .update_quiet(mover, mv, quiet_history_bonus(depth));
-                    let malus = -quiet_history_bonus(depth);
-                    for &previous in &searched_quiets {
-                        context.history_tables.update_quiet(mover, previous, malus);
-                    }
+                context
+                    .history_tables
+                    .update_quiet(mover, mv, quiet_history_bonus(depth));
+                let malus = -quiet_history_bonus(depth);
+                for &previous in &searched_quiets {
+                    context.history_tables.update_quiet(mover, previous, malus);
                 }
             }
             break;
