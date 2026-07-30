@@ -82,6 +82,15 @@ fn selectivity_options_default_to_enabled() {
             use_multicut: true,
             use_iir: true,
             use_probcut: true,
+            use_butterfly_history: true,
+            use_capture_history: true,
+            // Pawn history is the one selectivity option that ships DISABLED: it is a
+            // measured node-count regression until continuation history exists. See
+            // the comment on `SearchOptions::default` in `search.rs`.
+            use_pawn_history: false,
+            // History pruning also ships DISABLED: it saves nodes but loses ~237 Elo.
+            // See the comment on `SearchOptions::default` in `search.rs`.
+            use_history_pruning: false,
         }
     );
 }
@@ -163,6 +172,15 @@ fn mate_in_n_found() {
                 use_multicut: false,
                 use_iir: false,
                 use_probcut: false,
+                // History affects only move ORDER, never which moves are legal, so a
+                // forced mate must still be found with the tables on. Leaving them
+                // enabled keeps this test exercising the shipped ordering path.
+                use_butterfly_history: true,
+                use_capture_history: true,
+                use_pawn_history: false,
+                // History pruning DROPS moves, so it must be off here for the same
+                // reason every other pruning toggle is: a mate search must be exact.
+                use_history_pruning: false,
             },
         );
 

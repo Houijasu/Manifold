@@ -34,6 +34,10 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseMultiCut type check default true",
     "option name UseIIR type check default true",
     "option name UseProbCut type check default true",
+    "option name UseButterflyHistory type check default true",
+    "option name UseCaptureHistory type check default true",
+    "option name UsePawnHistory type check default false",
+    "option name UseHistoryPruning type check default false",
     "option name EvalFile type string default <empty>",
     "uciok",
 ];
@@ -605,6 +609,22 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UseProbCut") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_probcut = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseButterflyHistory") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_butterfly_history = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseCaptureHistory") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_capture_history = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UsePawnHistory") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_pawn_history = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseHistoryPruning") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_history_pruning = enabled;
         }
     } else if name.eq_ignore_ascii_case("Hash") {
         let Ok(requested) = value.parse::<i128>() else {
@@ -1250,6 +1270,34 @@ mod tests {
             &mut output,
         )
         .expect("setoption output should be writable");
+        handle_setoption(
+            "SeToPtIoN NaMe UsEbUtTeRfLyHiStOrY VaLuE FaLsE",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseCaptureHistory value FALSE",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+        // Pawn history defaults to false, so setting it false would prove nothing
+        // about parsing. Set it TRUE and assert it flipped.
+        handle_setoption(
+            "setoption name UsePawnHistory value TRUE",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+        // History pruning defaults to false, so setting it false would prove nothing
+        // about parsing. Set it TRUE and assert it flipped.
+        handle_setoption(
+            "setoption name UseHistoryPruning value true",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
 
         state
             .new_game()
@@ -1267,6 +1315,10 @@ mod tests {
         assert!(!state.search_options.use_multicut);
         assert!(!state.search_options.use_iir);
         assert!(!state.search_options.use_probcut);
+        assert!(!state.search_options.use_butterfly_history);
+        assert!(!state.search_options.use_capture_history);
+        assert!(state.search_options.use_pawn_history);
+        assert!(state.search_options.use_history_pruning);
     }
 
     #[test]

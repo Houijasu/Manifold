@@ -3,26 +3,32 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const BENCH_NODE_COUNT: u64 = 175_944;
-const BENCH_NODES: &str = "Nodes searched: 175944";
+/// The all-on bench signature.
+///
+/// M4-F1 moved this from `175_944` to `138_600` (-21.2%) by adding butterfly and
+/// capture history to move ordering. The move is expected: better ordering means more
+/// cutoffs on the first move tried.
+///
+/// The change is attributable ENTIRELY to history. With the history toggles off, both
+/// all-off anchors below reproduce their M3 values bit-for-bit (`4_961_681` and
+/// `3_768_488`), which proves the search core was not touched.
+const BENCH_NODE_COUNT: u64 = 138_600;
+const BENCH_NODES: &str = "Nodes searched: 138600";
 
 /// The default-context `UseLMR=false` arm.
 ///
-/// M4-F1 deliberately moved this anchor from `367_369` to `400_404` by hoisting
-/// `improving`, `history_score`, `reduction`, and `effective_depth` out from under
-/// `use_lmr`. Those are shared derived values that futility (`search.rs` frontier
-/// futility) and SEE pruning both read, so gating them on `use_lmr` made roughly 35%
-/// of the apparent LMR effect actually be futility and SEE getting weaker. See
-/// mission AGENTS.md 4.4 item 3.
+/// M4-F1 moved this anchor twice, both deliberately:
 ///
-/// Attribution measured in isolation at the same commit:
-///   * `367_369` — both couplings present (M3 baseline `9fd3035`)
-///   * `330_310` — `effective_depth` hoisted, quiet-history reads still gated
-///   * `400_404` — both hoisted (this anchor)
-///
-/// The all-on signature (`175_944`) and the all-off signature (`3_768_488`) are
-/// UNCHANGED by the split, which proves only gating moved and the search core did not.
-const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 400_404;
+/// 1. The toggle split hoisted `improving`, `history_score`, `reduction`, and
+///    `effective_depth` out from under `use_lmr`. Those are shared derived values that
+///    frontier futility and SEE pruning both read, so gating them on `use_lmr` made
+///    roughly 35% of the apparent LMR effect actually be futility and SEE getting
+///    weaker (mission AGENTS.md 4.4 item 3). Attribution measured in isolation at the
+///    same commit: `367_369` (both couplings) -> `330_310` (`effective_depth` hoisted
+///    only) -> `400_404` (both hoisted).
+/// 2. Adding history to move ordering then moved it from `400_404` to `265_786`, for
+///    the same reason the all-on signature moved.
+const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 265_786;
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -98,7 +104,16 @@ fn run_uci_bench_session() -> Output {
 
 fn run_uci_bench_ablation_session() -> Output {
     run_uci_session(
-        "setoption name UseNMP value false\n\
+        // The history tables are disabled for the whole of this session. They are a
+        // move-ordering input that every other technique's isolated delta is measured
+        // through, so leaving them on would fold history's effect into all eleven
+        // numbers below. Turning them off restores the exact M3 signatures
+        // (`4_961_681` and `3_768_488`), which is what makes these anchors comparable
+        // across the milestone. History gets its own isolation context in
+        // `each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent`.
+        "setoption name UseButterflyHistory value false\n\
+             setoption name UseCaptureHistory value false\n\
+             setoption name UseNMP value false\n\
              setoption name UseRFP value false\n\
              setoption name UseRazoring value false\n\
              setoption name UseLMR value false\n\
@@ -283,18 +298,193 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     );
 }
 
+/// Each shipped history toggle must be independently observable.
+///
+/// Unlike the eleven selectivity toggles, history is measured in the SHIPPED context
+/// rather than with everything else off. History is a move-ordering input: with LMR,
+/// futility, SEE, and the rest disabled there is almost no pruning left for better
+/// ordering to feed, so its isolated-context delta understates it. The shipped context
+/// is the one where the 2% bar means something for an ordering change.
+///
+/// The two toggles that ship OFF are excluded; each has its own test.
+#[test]
+fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseButterflyHistory value false\n\
+         bench\n\
+         setoption name UseButterflyHistory value true\n\
+         setoption name UseCaptureHistory value false\n\
+         bench\n\
+         quit\n",
+        "UCI history ablation session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 3);
+
+    let baseline = nodes[0];
+    assert_eq!(baseline, BENCH_NODE_COUNT);
+    for (name, disabled) in ["UseButterflyHistory", "UseCaptureHistory"]
+        .into_iter()
+        .zip(&nodes[1..=2])
+    {
+        assert!(
+            baseline.abs_diff(*disabled).saturating_mul(100) >= baseline.saturating_mul(2),
+            "{name} changed bench nodes by less than 2%: base={baseline}, disabled={disabled}"
+        );
+        assert!(
+            *disabled > baseline,
+            "{name} must SAVE nodes when enabled, not cost them: \
+             base={baseline}, disabled={disabled}"
+        );
+    }
+}
+
+/// Turning history off must reproduce the M3 all-off signatures bit-for-bit.
+///
+/// This is the proof that M4-F1 moved the shipped bench signature by adding history
+/// and by nothing else. If the search core had changed as well, these two numbers
+/// would drift even with every history table disabled.
+#[test]
+fn disabling_history_restores_the_m3_all_selectivity_off_signatures() {
+    let output = run_uci_bench_ablation_session();
+    assert!(output.status.success());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+
+    assert_eq!(
+        nodes[0], 4_961_681,
+        "ten selectivity toggles off with history off must match the M3 anchor exactly"
+    );
+    assert_eq!(
+        nodes[13], 3_768_488,
+        "all selectivity off with history off must match the M3 anchor exactly"
+    );
+}
+
+/// History pruning ships OFF, and this test records WHY in an executable form.
+///
+/// It is the one place in the codebase where a favourable bench delta and a match
+/// result point in opposite directions, so the bench number alone would mislead
+/// anyone who later tries to "fix" the default:
+///
+///   * enabled : 133_126 bench nodes (-3.95%) and **-103.68 +/- 46.31 Elo**
+///   * disabled: 138_600 bench nodes and **+133.61 +/- 44.43 Elo**
+///
+/// Both arms vs `baselines/M3/manifold.exe` at 8+0.08, Threads=1, `-use-affinity
+/// -concurrency 8`. See `experiments/M4-F1-history/`.
+///
+/// The assertion direction is deliberately INVERTED relative to every other toggle
+/// test: enabling history pruning must still SAVE nodes. If that ever stops being
+/// true the implementation has changed materially and the Elo result above no longer
+/// describes the code, so the default must be re-measured rather than re-assumed.
+#[test]
+fn history_pruning_ships_disabled_because_the_nodes_it_saves_contain_the_best_move() {
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseHistoryPruning value true\n\
+         bench\n\
+         quit\n",
+        "UCI history pruning session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 2);
+
+    assert_eq!(
+        nodes[0], BENCH_NODE_COUNT,
+        "history pruning must be OFF in the shipped default"
+    );
+    assert!(
+        nodes[1] < nodes[0],
+        "history pruning must still save nodes; if it does not, the measured -103.68 \
+         Elo no longer describes this code and the default needs re-measuring: \
+         off={}, on={}",
+        nodes[0],
+        nodes[1]
+    );
+}
+
+/// `UsePawnHistory` ships OFF because it is a measured regression on its own.
+///
+/// Standalone with butterfly history disabled it is 9.18% WORSE than no history at
+/// all, and at every ordering weight tried (1, 2, 4, 8, 16) it cost nodes. In
+/// Stockfish pawn history is never a standalone ordering signal: it is one small term
+/// in a sum dominated by continuation history, which this engine does not have yet.
+///
+/// In the shipped configuration its remaining effect is under 0.1%, far below the 2%
+/// observability bar, so this test pins only that the toggle is wired and off. That
+/// is the AGENTS.md 4.52 situation: the guard is NOT lowered to manufacture an
+/// observable delta.
+#[test]
+fn pawn_history_ships_disabled_and_is_wired_through_to_the_search() {
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UsePawnHistory value true\n\
+         bench\n\
+         quit\n",
+        "UCI pawn history session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 2);
+
+    assert_eq!(
+        nodes[0], BENCH_NODE_COUNT,
+        "pawn history must be OFF in the shipped default"
+    );
+    assert_ne!(
+        nodes[1], nodes[0],
+        "enabling pawn history must reach the search and change the tree"
+    );
+}
+
+/// The UCI option list must advertise the real defaults.
+///
+/// A GUI that trusts `default true` would silently enable a measured regression.
+#[test]
+fn the_advertised_pawn_history_default_matches_the_shipped_default() {
+    let output = run_uci_session("uci\nquit\n", "UCI option list session");
+    assert!(output.status.success());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    for name in ["UsePawnHistory", "UseHistoryPruning"] {
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line == format!("option name {name} type check default false")),
+            "{name} must advertise default false"
+        );
+    }
+    for name in ["UseButterflyHistory", "UseCaptureHistory"] {
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line == format!("option name {name} type check default true")),
+            "{name} must advertise default true"
+        );
+    }
+}
+
 /// `UseLMR` must gate ONLY the LMR reduction application.
 ///
 /// This is the regression test for mission AGENTS.md 4.4 item 3. `improving`,
 /// `history_score`, `reduction`, and `effective_depth` are shared derived values that
 /// futility and SEE pruning read. If any of them is ever moved back under `use_lmr`,
 /// the `UseLMR=false` arm silently weakens futility and SEE too, and every LMR ablation
-/// becomes invalid. That regression shows up here as `400_404` drifting back toward the
-/// old confounded `367_369`.
-///
-/// The all-on and all-off signatures are asserted alongside it because an honest split
-/// changes ONLY the ablation arm; if either of those moves, the search core changed and
-/// this is not a gating fix.
+/// becomes invalid. That regression shows up here as the LMR-off-to-all-on RATIO
+/// falling back toward the old confounded 2.088.
 #[test]
 fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
     let output = run_uci_session(
@@ -326,25 +516,20 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 187_700,
+        nodes[2], 157_791,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(
-        nodes[3], 322_887,
+        nodes[3], 484_153,
         "with futility and SEE already off, UseLMR=false is unchanged by the split"
     );
 
-    // With the couplings present the LMR-off arm was 2.088x the all-on count, of which
-    // roughly 35% was futility and SEE getting weaker rather than LMR itself. Once
-    // hoisted, the LMR-off arm must be STRICTLY LARGER than the old confounded figure:
-    // futility and SEE now stay at full strength, so LMR alone has to account for the
-    // whole difference.
-    assert!(
-        nodes[1] > 367_369,
-        "hoisting effective_depth must strengthen, not weaken, the Fut+SEE arms in the \
-         LMR-off ablation: got {}",
-        nodes[1]
-    );
+    // A ratio guard against the pre-split 367_369/175_944 = 2.088 used to live here.
+    // It is gone deliberately: history changed the composition of BOTH arms, so the
+    // ratio no longer isolates the gating property it was standing in for. The four
+    // exact anchors above are the real guard — re-gating any shared derived value on
+    // `use_lmr` moves `nodes[1]` while leaving `nodes[0]`, `nodes[2]`, and `nodes[3]`
+    // where they are, which is exactly the signature this test exists to catch.
 }
 
 #[test]

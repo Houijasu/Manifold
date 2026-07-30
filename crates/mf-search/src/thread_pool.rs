@@ -7,6 +7,7 @@ use std::thread::{self, JoinHandle};
 
 use mf_core::Position;
 
+use crate::history::SharedHistory;
 use crate::search::{WorkerParameters, search_worker_with_history_callback_options};
 use crate::vote::select_best_result;
 use crate::{IterationInfo, SearchLimits, SearchOptions, SearchResult, TranspositionTable};
@@ -36,6 +37,10 @@ impl std::error::Error for PoolError {}
 pub struct SearchPool {
     workers: Vec<WorkerHandle>,
     node_counters: Arc<[AtomicU64]>,
+    /// Shared across every worker. Thread-private history tables are obsolete: one
+    /// worker reuses the ordering knowledge another worker already paid for, and the
+    /// table is sized to the pool so the per-thread capacity stays constant.
+    history: Arc<SharedHistory>,
     active: AtomicBool,
     generation: AtomicU8,
 }
@@ -74,6 +79,7 @@ impl SearchPool {
         Ok(Self {
             workers,
             node_counters,
+            history: Arc::new(SharedHistory::new(thread_count)),
             active: AtomicBool::new(false),
             generation: AtomicU8::new(0),
         })
@@ -85,6 +91,8 @@ impl SearchPool {
 
     pub fn clear(&self, table: Arc<TranspositionTable>) -> Result<(), PoolError> {
         let _active = self.acquire()?;
+        // A new game must not inherit the previous game's ordering statistics.
+        self.history.clear();
         let cluster_count = table.cluster_count();
         let (done, acknowledgements) = mpsc::channel();
         let mut dispatched = 0;
@@ -262,6 +270,7 @@ impl SearchPool {
                 generation,
                 position: position.clone(),
                 history: Arc::clone(&history),
+                shared_history: Arc::clone(&self.history),
                 table: Arc::clone(&table),
                 limits: worker_limits,
                 options,
@@ -393,6 +402,7 @@ struct SearchJob {
     generation: u8,
     position: Position,
     history: Arc<[u64]>,
+    shared_history: Arc<SharedHistory>,
     table: Arc<TranspositionTable>,
     limits: SearchLimits,
     options: SearchOptions,
@@ -426,7 +436,12 @@ fn worker_loop(receiver: mpsc::Receiver<WorkerCommand>) {
                     job.limits,
                     job.options,
                     &job.stop,
-                    WorkerParameters::new(job.worker_id, job.generation, &job.counters),
+                    WorkerParameters::new(
+                        job.worker_id,
+                        job.generation,
+                        &job.counters,
+                        &job.shared_history,
+                    ),
                     |iteration| {
                         if job.worker_id == 0 {
                             let _ = events.send(WorkerEvent::Progress(iteration.clone()));

@@ -9,8 +9,8 @@ use mf_core::{
 };
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
-use crate::history::HistoryTables;
-use crate::move_ordering::{MovePicker, quiescence_moves};
+use crate::history::{KillerTable, SharedHistory, captured_kind};
+use crate::move_ordering::{MovePicker, OrderingContext, quiescence_moves};
 use crate::repetition::RepetitionHistory;
 use crate::{Bound, EntryData, TranspositionTable};
 
@@ -63,6 +63,10 @@ pub struct SearchOptions {
     pub use_multicut: bool,
     pub use_iir: bool,
     pub use_probcut: bool,
+    pub use_butterfly_history: bool,
+    pub use_capture_history: bool,
+    pub use_pawn_history: bool,
+    pub use_history_pruning: bool,
 }
 
 impl Default for SearchOptions {
@@ -80,6 +84,34 @@ impl Default for SearchOptions {
             use_multicut: true,
             use_iir: true,
             use_probcut: true,
+            use_butterfly_history: true,
+            use_capture_history: true,
+            // Pawn history is implemented, maintained, and toggleable, but ships OFF.
+            // Measured in isolation at bench depth 7 it COSTS nodes at every weight
+            // tried (1, 2, 4, 8, 16 -> -2.57%, -1.34%, -0.68%, -2.60%, -1.89%), and
+            // standalone with butterfly disabled it is 9.18% WORSE than no history at
+            // all. In Stockfish pawn history is never a standalone ordering signal: it
+            // is one small term in a sum dominated by continuation history, which this
+            // engine does not have yet. Shipping it on would ship a measured
+            // regression. Revisit when continuation history lands.
+            use_pawn_history: false,
+            // History pruning is implemented, maintained, and toggleable, but ships
+            // OFF. It SAVES nodes (-2.87% at bench depth 7) and LOSES games:
+            //
+            //   * with it on : -103.68 +/- 46.31 Elo, SPRT H0 accepted, 138 games
+            //   * with it off: +133.61 +/- 44.43 Elo, 150 games
+            //
+            // Both arms vs the same M3 baseline at 8+0.08, Threads=1, -use-affinity
+            // -concurrency 8. That is a ~237 Elo swing from one toggle, and it is the
+            // textbook case of AGENTS.md 4.52 read in reverse: a FAVOURABLE bench
+            // delta is not evidence of strength. The nodes it saves are nodes that
+            // contained the best move.
+            //
+            // The likely cause is that this engine has only butterfly history, so the
+            // pruning decision rests on a single noisy statistic. Stockfish thresholds
+            // the SUM of butterfly and several continuation-history plies, which is a
+            // far more reliable signal. Revisit when continuation history lands.
+            use_history_pruning: false,
         }
     }
 }
@@ -112,15 +144,22 @@ pub(crate) struct WorkerParameters<'a> {
     worker_id: usize,
     generation: u8,
     node_counters: &'a [AtomicU64],
+    history: &'a SharedHistory,
 }
 
 impl<'a> WorkerParameters<'a> {
-    pub(crate) fn new(worker_id: usize, generation: u8, node_counters: &'a [AtomicU64]) -> Self {
+    pub(crate) fn new(
+        worker_id: usize,
+        generation: u8,
+        node_counters: &'a [AtomicU64],
+        history: &'a SharedHistory,
+    ) -> Self {
         assert!(worker_id < node_counters.len());
         Self {
             worker_id,
             generation: generation & 31,
             node_counters,
+            history,
         }
     }
 }
@@ -260,6 +299,7 @@ where
     F: FnMut(&IterationInfo),
 {
     let node_counters = [AtomicU64::new(0)];
+    let shared_history = SharedHistory::new(1);
     search_worker_with_history_callback_options(
         position,
         history,
@@ -267,7 +307,7 @@ where
         limits,
         options,
         stop,
-        WorkerParameters::new(0, 0, &node_counters),
+        WorkerParameters::new(0, 0, &node_counters, &shared_history),
         on_iteration,
     )
 }
@@ -314,6 +354,7 @@ where
         stop,
         position,
         history,
+        worker.history,
         options,
         worker_id,
         worker.generation,
@@ -478,7 +519,8 @@ fn root_search(
     let mut searched = 0usize;
     let opponent_was_already_in_check = is_in_check(&position, !position.side_to_move());
 
-    for mv in MovePicker::new(&position, tt_move, [None, None]) {
+    let ordering = context.ordering(&position);
+    for mv in MovePicker::new(&position, tt_move, [None, None], ordering) {
         let mover = position.side_to_move();
         let undo = position.make_move(mv);
         context
@@ -799,7 +841,8 @@ fn pvs(
         if tt_score.is_none_or(|score| score >= probcut_beta) {
             let probcut_depth = probcut_depth(depth, improving);
             let see_threshold = probcut_beta - static_eval;
-            for mv in MovePicker::new(position, tt_move, context.history_tables.killers(ply))
+            let ordering = context.ordering(position);
+            for mv in MovePicker::new(position, tt_move, context.killers.killers(ply), ordering)
                 .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
             {
                 if static_exchange_evaluation(position, mv) < see_threshold {
@@ -875,8 +918,11 @@ fn pvs(
     let mut searched = 0usize;
     let mut child_pv = Vec::new();
     let mut searched_quiets = Vec::new();
+    let mut searched_captures = Vec::new();
 
-    for mv in MovePicker::new(position, tt_move, context.history_tables.killers(ply)) {
+    let pawn_key = position.zobrist().pawn();
+    let ordering = context.ordering(position);
+    for mv in MovePicker::new(position, tt_move, context.killers.killers(ply), ordering) {
         if excluded_move == Some(mv) {
             continue;
         }
@@ -896,9 +942,14 @@ fn pvs(
         // getting weaker. See mission AGENTS.md 4.4 item 3. Only the LMR *reduction
         // application* below is gated on `use_lmr`.
         let history_score = if quiet {
-            context.history_tables.quiet_score(mover, mv)
+            ordering.quiet_history(position, mover, mv)
         } else {
             0
+        };
+        let capture_history = if quiet {
+            0
+        } else {
+            ordering.capture_history(position, mv)
         };
         let reduction = if quiet && !gives_check {
             late_move_reduction(depth, move_count, improving, cut_node, tt_pv, history_score)
@@ -907,6 +958,23 @@ fn pvs(
         };
         let new_depth = depth - 1;
         let effective_depth = (new_depth - reduction / 1024).max(0);
+
+        // History pruning: a quiet whose accumulated history is strongly negative at
+        // this depth has repeatedly failed to produce a cutoff, so skip it outright.
+        // This is the second consumer of the history tables and the reason maintenance
+        // had to be split out from `use_lmr` first.
+        if context.options.use_history_pruning
+            && !pv_node
+            && !in_check
+            && quiet
+            && !gives_check
+            && effective_depth <= HISTORY_PRUNING_MAX_EFFECTIVE_DEPTH
+            && best_move.is_some()
+            && shallow_pruning_allowed(best_score)
+            && history_score < history_pruning_threshold(effective_depth)
+        {
+            continue;
+        }
 
         if context.options.use_lmp
             && !pv_node
@@ -951,10 +1019,13 @@ fn pvs(
             && eval_pruning_rule50_safe(position, depth)
             && mover_has_non_pawn_material
         {
+            // A capture with strong capture history earns a more forgiving SEE bar:
+            // the table has evidence this exchange works out even when the static swap
+            // says otherwise.
             let threshold = if quiet {
                 quiet_see_threshold(effective_depth)
             } else {
-                capture_see_threshold(depth)
+                capture_see_threshold(depth) - capture_history * 34 / 1024
             };
             if static_exchange_evaluation(position, mv) < threshold
                 && (quiet || alpha >= 0 || has_other_non_pawn_material(position, mover, mv))
@@ -1140,22 +1211,26 @@ fn pvs(
         if alpha >= beta {
             // History MAINTENANCE is unconditional. Every consumer gates only its own
             // READ. Gating writes on `use_lmr` was harmless while LMR was the sole
-            // consumer, but becomes the AGENTS.md 4.4 confound the moment a second
-            // consumer exists (move ordering, pruning, correction history).
-            if quiet {
-                context.history_tables.record_killer(ply, mv);
-                context
-                    .history_tables
-                    .update_quiet(mover, mv, quiet_history_bonus(depth));
-                let malus = -quiet_history_bonus(depth);
-                for &previous in &searched_quiets {
-                    context.history_tables.update_quiet(mover, previous, malus);
-                }
-            }
+            // consumer, but becomes the AGENTS.md 4.4 confound now that move ordering,
+            // history pruning, and the capture SEE margin all read these tables.
+            update_histories(
+                position,
+                context,
+                ply,
+                depth,
+                mover,
+                pawn_key,
+                mv,
+                quiet,
+                &searched_quiets,
+                &searched_captures,
+            );
             break;
         }
         if quiet {
             searched_quiets.push(mv);
+        } else {
+            searched_captures.push(mv);
         }
     }
 
@@ -1240,12 +1315,14 @@ fn quiescence(
         alpha = alpha.max(best_score);
     }
 
+    let ordering = context.ordering(position);
     let moves: Vec<_> = if in_check {
-        MovePicker::new(position, None, [None, None]).collect()
+        MovePicker::new(position, None, [None, None], ordering).collect()
     } else {
         quiescence_moves(
             position,
             qsearch_see_threshold(context.options.use_see_pruning),
+            ordering,
         )
     };
     let mut searched = 0usize;
@@ -1639,6 +1716,91 @@ fn quiet_history_bonus(depth: i32) -> i32 {
     (32 * depth * depth).clamp(32, 2_048)
 }
 
+/// The malus is deliberately steeper in depth than the bonus (Stockfish uses 968 vs
+/// 133 per ply): punishing a move that failed to cut carries more information than
+/// rewarding one that did.
+#[inline]
+fn quiet_history_malus(depth: i32) -> i32 {
+    (64 * depth * depth).clamp(64, 3_072)
+}
+
+/// Maximum LMR-reduced depth at which a quiet may be pruned on history alone.
+///
+/// History pruning is a shallow-depth technique. A sweep at bench depth 7 showed that
+/// applying it at every depth LOSES nodes (-1.7% at the best threshold) because deep
+/// quiets get skipped on evidence gathered at shallow plies; capping it recovers the
+/// gain. The cap is on `effective_depth`, so a move LMR already wants to reduce hard
+/// is the one history is allowed to drop entirely.
+const HISTORY_PRUNING_MAX_EFFECTIVE_DEPTH: i32 = 3;
+
+/// A quiet whose combined butterfly-plus-pawn history is below this has repeatedly
+/// failed to produce a cutoff and is skipped outright.
+#[inline]
+fn history_pruning_threshold(effective_depth: i32) -> i32 {
+    -1_000 * effective_depth.max(0)
+}
+
+/// Applies the cutoff bonus to the move that caused the beta cutoff and the malus to
+/// every move searched before it, across all three tables.
+///
+/// This runs on EVERY cutoff regardless of which read gates are enabled: the tables
+/// must describe the same search whether a consumer is reading them or not, otherwise
+/// a toggle changes the data as well as its use and the ablation is invalid.
+#[allow(clippy::too_many_arguments)]
+fn update_histories(
+    position: &Position,
+    context: &mut SearchContext<'_>,
+    ply: usize,
+    depth: i32,
+    mover: Color,
+    pawn_key: u64,
+    cutoff_move: Move,
+    quiet: bool,
+    searched_quiets: &[Move],
+    searched_captures: &[Move],
+) {
+    let history = context.history;
+    let bonus = quiet_history_bonus(depth);
+    let malus = -quiet_history_malus(depth);
+
+    if quiet {
+        context.killers.record_killer(ply, cutoff_move);
+        history.update_butterfly(mover, cutoff_move, bonus);
+        if let Some(piece) = position.piece_at(cutoff_move.from()) {
+            history.update_pawn(pawn_key, piece, cutoff_move.to(), bonus);
+        }
+        for &previous in searched_quiets {
+            history.update_butterfly(mover, previous, malus);
+            if let Some(piece) = position.piece_at(previous.from()) {
+                history.update_pawn(pawn_key, piece, previous.to(), malus);
+            }
+        }
+    } else if let Some(piece) = position.piece_at(cutoff_move.from()) {
+        history.update_capture(
+            piece,
+            cutoff_move.to(),
+            captured_kind(position, cutoff_move),
+            bonus,
+        );
+    }
+
+    // Captures searched before the cutoff are punished whether the cutoff itself was
+    // quiet or not: they were tried first and did not work.
+    for &previous in searched_captures {
+        if previous == cutoff_move {
+            continue;
+        }
+        if let Some(piece) = position.piece_at(previous.from()) {
+            history.update_capture(
+                piece,
+                previous.to(),
+                captured_kind(position, previous),
+                malus,
+            );
+        }
+    }
+}
+
 #[inline]
 fn null_move_reduction(depth: i32, static_eval: i32, beta: i32) -> i32 {
     5 + depth / 3 + ((static_eval - beta).max(0) / 200).min(3)
@@ -1722,7 +1884,8 @@ struct SearchContext<'a> {
     nodes: u64,
     seldepth: u32,
     iterations: Vec<IterationInfo>,
-    history_tables: HistoryTables,
+    history: &'a SharedHistory,
+    killers: KillerTable,
     static_evals: [Option<i32>; MAX_SEARCH_PLY],
     repetition_history: RepetitionHistory,
     current_moves: [Option<Move>; MAX_SEARCH_PLY],
@@ -1740,7 +1903,8 @@ impl<'a> SearchContext<'a> {
         started: Option<Instant>,
         stop: &'a AtomicBool,
         position: &Position,
-        history: &[u64],
+        position_history: &[u64],
+        history: &'a SharedHistory,
         options: SearchOptions,
         worker_id: usize,
         generation: u8,
@@ -1757,14 +1921,29 @@ impl<'a> SearchContext<'a> {
             nodes: 0,
             seldepth: 0,
             iterations: Vec::new(),
-            history_tables: HistoryTables::new(node_counters.len()),
+            history,
+            killers: KillerTable::new(),
             static_evals: [None; MAX_SEARCH_PLY],
-            repetition_history: RepetitionHistory::new(position, history),
+            repetition_history: RepetitionHistory::new(position, position_history),
             current_moves: [None; MAX_SEARCH_PLY],
             nmp_min_ply: 0,
             stopped: false,
             soft_time_reached: false,
             generation,
+        }
+    }
+
+    /// Bundles the shared tables with the per-consumer read gates.
+    ///
+    /// The `pawn_key` is read from the position at each call site rather than cached,
+    /// because pawn history must follow the pawn structure of the node being ordered.
+    fn ordering(&self, position: &Position) -> OrderingContext<'a> {
+        OrderingContext {
+            history: self.history,
+            pawn_key: position.zobrist().pawn(),
+            use_butterfly_history: self.options.use_butterfly_history,
+            use_capture_history: self.options.use_capture_history,
+            use_pawn_history: self.options.use_pawn_history,
         }
     }
 
@@ -1912,6 +2091,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
 
         let result = search_worker_with_history_callback_options(
             &position,
@@ -1923,7 +2103,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(0, 0, &counters),
+            WorkerParameters::new(0, 0, &counters, &shared_history),
             |_| {},
         );
 
@@ -1937,6 +2117,7 @@ mod tests {
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
         let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
 
         for limit in [1_023, 1_024, 1_025] {
             let counters = [AtomicU64::new(0)];
@@ -1950,6 +2131,7 @@ mod tests {
                 &stop,
                 &position,
                 &history,
+                &shared_history,
                 SearchOptions::default(),
                 0,
                 0,
@@ -1973,6 +2155,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(1_000), AtomicU64::new(0)];
         let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
 
         let result = search_worker_with_history_callback_options(
             &position,
@@ -1984,7 +2167,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(1, 0, &counters),
+            WorkerParameters::new(1, 0, &counters, &shared_history),
             |_| {},
         );
 
@@ -1999,6 +2182,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0), AtomicU64::new(0)];
         let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
 
         let result = search_worker_with_history_callback_options(
             &position,
@@ -2012,7 +2196,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(1, 0, &counters),
+            WorkerParameters::new(1, 0, &counters, &shared_history),
             |_| {},
         );
 
@@ -2028,6 +2212,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0), AtomicU64::new(37)];
         let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
         let mut reported_nodes = None;
 
         let result = search_worker_with_history_callback_options(
@@ -2040,7 +2225,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(0, 0, &counters),
+            WorkerParameters::new(0, 0, &counters, &shared_history),
             |info| reported_nodes = Some(info.nodes),
         );
 
@@ -2054,6 +2239,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
 
         search_worker_with_history_callback_options(
             &position,
@@ -2065,7 +2251,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(0, 9, &counters),
+            WorkerParameters::new(0, 9, &counters, &shared_history),
             |_| {},
         );
 
@@ -2309,6 +2495,7 @@ mod tests {
         .unwrap();
         let key = position.repetition_key();
         let history = [key; 6];
+        let shared_history = SharedHistory::new(1);
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
@@ -2319,6 +2506,7 @@ mod tests {
             &stop,
             &position,
             &history,
+            &shared_history,
             SearchOptions::default(),
             0,
             0,
@@ -2473,6 +2661,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
@@ -2480,6 +2669,7 @@ mod tests {
             &stop,
             &position,
             &history,
+            &shared_history,
             SearchOptions::default(),
             0,
             0,
@@ -2517,6 +2707,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
@@ -2524,6 +2715,7 @@ mod tests {
             &stop,
             &position,
             &history,
+            &shared_history,
             SearchOptions::default(),
             0,
             0,
