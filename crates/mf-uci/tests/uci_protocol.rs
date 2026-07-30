@@ -698,6 +698,47 @@ mod Threads {
     }
 
     #[test]
+    fn fixed_depth_output_is_identical_at_every_thread_count() {
+        let commands = |threads: usize| {
+            [
+                format!("setoption name Threads value {threads}"),
+                "position startpos moves e2e4 e7e5 g1f3".to_string(),
+                "go depth 8".to_string(),
+                "quit".to_string(),
+            ]
+        };
+        // The `info string threads set to N` acknowledgement necessarily differs;
+        // everything the search itself reports must not.
+        let run = |threads: usize| {
+            let owned = commands(threads);
+            let borrowed: Vec<&str> = owned.iter().map(String::as_str).collect();
+            let output = run_uci(&borrowed);
+            assert!(output.status.success());
+            let lines = canonical_search_lines(&output)
+                .into_iter()
+                .filter(|line| !line.starts_with("info string "))
+                .collect::<Vec<_>>();
+            let bestmove = bestmoves(&output)
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            (lines, bestmove)
+        };
+
+        let (expected_lines, expected_bestmove) = run(1);
+        assert_eq!(expected_lines.len(), 8);
+
+        for threads in [2, 8] {
+            let (lines, bestmove) = run(threads);
+            assert_eq!(
+                lines, expected_lines,
+                "go depth output must not depend on Threads (helpers must stay parked)"
+            );
+            assert_eq!(bestmove, expected_bestmove);
+        }
+    }
+
+    #[test]
     fn immediate_stop_keeps_publishing_until_pool_dispatch_finishes() {
         let mut engine = InteractiveUci::spawn();
         engine.send("setoption name Threads value 4");
