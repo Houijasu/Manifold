@@ -82,6 +82,27 @@ fn metrics(output: &str, prefix: &str) -> Vec<u64> {
         .collect()
 }
 
+/// How long one UCI session may take before it is treated as hung.
+///
+/// This is a watchdog against a genuinely stuck engine, not a performance assertion,
+/// so it is scaled to the build the way the perft anchors are depth-gated on
+/// `cfg!(debug_assertions)`. In release all thirteen tests in this file finish in about
+/// forty seconds; an unoptimised build is roughly an order of magnitude slower, and the
+/// two multi-session ablations —
+/// `disabling_history_restores_the_m3_all_selectivity_off_signatures` and
+/// `each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent` —
+/// blew the flat 300-second deadline under a debug `cargo test --workspace`. They
+/// failed as timeouts, never as signature mismatches, so the deadline was measuring the
+/// optimiser rather than the engine. A red suite that everyone has learned to ignore is
+/// how a real regression gets missed, so the watchdog is scaled rather than deleted.
+fn session_deadline() -> Duration {
+    if cfg!(debug_assertions) {
+        Duration::from_secs(3_000)
+    } else {
+        Duration::from_secs(300)
+    }
+}
+
 fn run_uci_session(script: &str, label: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_manifold"))
         .stdin(Stdio::piped())
@@ -98,7 +119,8 @@ fn run_uci_session(script: &str, label: &str) -> Output {
     }
     drop(child.stdin.take());
 
-    let deadline = Instant::now() + Duration::from_secs(300);
+    let limit = session_deadline();
+    let deadline = Instant::now() + limit;
     loop {
         if child
             .try_wait()
@@ -109,7 +131,7 @@ fn run_uci_session(script: &str, label: &str) -> Output {
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
-            panic!("{label} did not exit within 300 seconds");
+            panic!("{label} did not exit within {} seconds", limit.as_secs());
         }
         thread::sleep(Duration::from_millis(5));
     }

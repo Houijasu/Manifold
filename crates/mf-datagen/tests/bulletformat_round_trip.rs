@@ -239,3 +239,82 @@ fn a_generated_file_loads_through_bulletformats_data_loader_with_a_matching_coun
 
     let _ = std::fs::remove_file(&path);
 }
+
+/// Real `lichess_db_eval.jsonl` lines, trimmed to two principal variations each.
+///
+/// The second is a mate announcement, the third is black to move with a negative
+/// white-relative score, so the file exercises the mate saturation and the sign flip
+/// as well as the plain path.
+const SOURCE_LINES: &str = concat!(
+    r#"{"fen":"7r/1p3k2/p1bPR3/5p2/2B2P1p/8/PP4P1/3K4 b - -","evals":[{"pvs":[{"cp":69,"line":"f7g7 e6e2 h8d8 e2d2"},{"cp":163,"line":"h8d8 d1e1 a6a5 a2a3"}],"knodes":4189972,"depth":46}]}"#,
+    "\n",
+    r#"{"fen":"6k1/6p1/8/4K3/4NN2/8/8/8 w - -","evals":[{"pvs":[{"mate":15,"line":"e5e6 g8f8 e4d6"}],"knodes":589893,"depth":95},{"pvs":[{"mate":20,"line":"e4g5 g8f8 f4g6"}],"knodes":74318,"depth":34}]}"#,
+    "\n",
+    r#"{"fen":"1k4r1/1bp5/p2p2pp/Nq2r3/1P5P/2Q5/5PP1/3R1RK1 b - -","evals":[{"pvs":[{"cp":-104,"line":"g6g5 d1c1 g8g7"}],"knodes":198324,"depth":33}]}"#,
+    "\n",
+    r#"{"fen":"r1b2rk1/1p2bppp/p1nppn2/q7/2P1P3/N1N5/PP2BPPP/R1BQ1RK1 w - -","evals":[{"pvs":[{"cp":21,"line":"c1e3 f8d8 d1c2"}],"knodes":1000,"depth":40}]}"#,
+    "\n",
+);
+
+#[test]
+fn a_converted_lichess_file_loads_through_bulletformats_data_loader_unchanged() {
+    let mut path = std::env::temp_dir();
+    path.push(format!("mf-datagen-jsonl-{}.bullet", std::process::id()));
+
+    let mut file = std::io::BufWriter::new(std::fs::File::create(&path).expect("temp file"));
+    let stats = mf_datagen::convert(
+        SOURCE_LINES.as_bytes(),
+        mf_datagen::ConvertConfig::default(),
+        |bytes| {
+            file.write_all(bytes).map_err(|error| error.to_string())?;
+            Ok(())
+        },
+        |_| Ok(()),
+    )
+    .expect("conversion succeeds");
+    file.flush().expect("flush");
+    drop(file);
+
+    assert_eq!(stats.positions, 4, "every source line converts");
+    assert_eq!(stats.mate_converted, 1);
+
+    // The record count is re-derived from the byte length, never trusted from a counter.
+    let length = std::fs::metadata(&path).expect("file exists").len();
+    assert_eq!(length % RECORD_BYTES as u64, 0);
+    assert_eq!(length / RECORD_BYTES as u64, stats.positions);
+
+    let loader = DataLoader::<ChessBoard>::new(&path, 4).expect("bullet opens the file");
+    assert_eq!(loader.len() as u64, stats.positions);
+
+    let mut loaded = 0u64;
+    let mut scores = Vec::new();
+    loader.map_positions(|board| {
+        loaded += 1;
+        scores.push(board.score());
+        assert_eq!(
+            board.result_idx(),
+            Outcome::Draw as usize,
+            "the source carries no game result, so every record is the neutral placeholder"
+        );
+        assert!(
+            board.score().abs() as i32 <= mf_datagen::DEFAULT_SCORE_BOUND,
+            "a saturated mate must still respect the score bound"
+        );
+    });
+    assert_eq!(
+        loaded, stats.positions,
+        "bullet reads every converted record"
+    );
+
+    // Black to move with white-relative +69 must land at -69, and a white mate at the
+    // saturation value. Both sign conventions are load-bearing and neither is inferable
+    // from the file alone, so they are pinned through bullet's own reader.
+    assert!(scores.contains(&-69), "{scores:?}");
+    assert!(scores.contains(&10_000), "{scores:?}");
+    assert!(
+        scores.contains(&104),
+        "black to move with white-relative -104 must read as +104\n{scores:?}"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
