@@ -3,7 +3,11 @@ use crate::{CastlingSide, Color, Piece, PieceKind, Square};
 const PIECE_COUNT: usize = 12;
 const BOARD_SQUARES: usize = 64;
 const MATERIAL_KINDS: usize = 4;
-const MAX_MATERIAL_COUNT: usize = 16;
+/// The largest count of one non-pawn kind the material key can represent.
+///
+/// `Position::from_fen` rejects anything above this so that untrusted input cannot
+/// index past `ZobristTables::material` and panic inside the parser.
+pub(crate) const MAX_MATERIAL_COUNT: usize = 16;
 
 /// Incremental hashes used by the transposition table and correction histories.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

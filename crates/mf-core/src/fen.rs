@@ -1,5 +1,6 @@
 use core::fmt;
 
+use crate::zobrist::MAX_MATERIAL_COUNT;
 use crate::{CastlingSide, Color, Piece, PieceKind, Position, Square};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,6 +89,7 @@ fn parse_board(position: &mut Position, board: &str) -> Result<(), FenError> {
                 }
                 let piece = parse_piece(symbol)
                     .ok_or_else(|| FenError::new(format!("invalid piece '{symbol}'")))?;
+                reject_unindexable_material(position, piece)?;
                 position.place_piece(square(file, board_rank), piece);
                 file += 1;
             }
@@ -128,6 +130,35 @@ fn validate_kings(position: &Position) -> Result<(), FenError> {
                 "{color:?} must have exactly one king, found {count}"
             )));
         }
+    }
+    Ok(())
+}
+
+/// Rejects a piece whose placement would push a count past the material Zobrist key.
+///
+/// `ZobristKeys::toggle_material_count` indexes a table sized `MAX_MATERIAL_COUNT + 1`,
+/// and `Position::add_piece` calls it with `count + 1` on every non-pawn placement. A
+/// FEN placing a 17th piece of one kind therefore indexes past that table and **panics
+/// inside a parser**, which is a system boundary where untrusted input must produce a
+/// `FenError` instead. The check has to run *before* the placement for the same reason:
+/// by the time the board is complete the panic has already happened.
+///
+/// This is not hypothetical: it aborted a conversion of the CC0 Lichess evaluation
+/// database with `index out of bounds: the len is 17 but the index is 17`. Positions of
+/// this shape are unreachable in a legal game — eight pawns promoting leaves at most ten
+/// of a kind — so the bound is generous and only rejects boards that were already
+/// impossible.
+fn reject_unindexable_material(position: &Position, piece: Piece) -> Result<(), FenError> {
+    if !piece.kind().is_non_pawn_material() {
+        return Ok(());
+    }
+    let count = position.pieces(piece.color(), piece.kind()).count() as usize;
+    if count >= MAX_MATERIAL_COUNT {
+        return Err(FenError::new(format!(
+            "{:?} has more than the {MAX_MATERIAL_COUNT} {:?}s the material key can represent",
+            piece.color(),
+            piece.kind()
+        )));
     }
     Ok(())
 }
