@@ -9,7 +9,10 @@ use mf_core::{
 };
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
-use crate::history::{KillerTable, SharedHistory, captured_kind};
+use crate::history::{
+    CONTINUATION_PLIES, CONTINUATION_WEIGHTS, ContinuationKey, KillerTable, SharedHistory,
+    captured_kind,
+};
 use crate::move_ordering::{MovePicker, OrderingContext, quiescence_moves};
 use crate::repetition::RepetitionHistory;
 use crate::{Bound, EntryData, TranspositionTable};
@@ -66,6 +69,7 @@ pub struct SearchOptions {
     pub use_butterfly_history: bool,
     pub use_capture_history: bool,
     pub use_pawn_history: bool,
+    pub use_continuation_history: bool,
     pub use_history_pruning: bool,
 }
 
@@ -95,6 +99,7 @@ impl Default for SearchOptions {
             // engine does not have yet. Shipping it on would ship a measured
             // regression. Revisit when continuation history lands.
             use_pawn_history: false,
+            use_continuation_history: true,
             // History pruning is implemented, maintained, and toggleable, but ships
             // OFF. It SAVES nodes (-2.87% at bench depth 7) and LOSES games:
             //
@@ -519,9 +524,10 @@ fn root_search(
     let mut searched = 0usize;
     let opponent_was_already_in_check = is_in_check(&position, !position.side_to_move());
 
-    let ordering = context.ordering(&position);
+    let ordering = context.ordering(&position, 0);
     for mv in MovePicker::new(&position, tt_move, [None, None], ordering) {
         let mover = position.side_to_move();
+        let continuation = continuation_key(&position, mv);
         let undo = position.make_move(mv);
         context
             .transposition_table
@@ -540,7 +546,7 @@ fn root_search(
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(&position, 1, mv);
+        context.push_position(&position, 1, mv, continuation);
         let mut child_pv = Vec::new();
         let score = if searched == 0 {
             pvs(
@@ -841,7 +847,7 @@ fn pvs(
         if tt_score.is_none_or(|score| score >= probcut_beta) {
             let probcut_depth = probcut_depth(depth, improving);
             let see_threshold = probcut_beta - static_eval;
-            let ordering = context.ordering(position);
+            let ordering = context.ordering(position, ply);
             for mv in MovePicker::new(position, tt_move, context.killers.killers(ply), ordering)
                 .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
             {
@@ -849,6 +855,7 @@ fn pvs(
                     continue;
                 }
                 let mover = position.side_to_move();
+                let continuation = continuation_key(position, mv);
                 let undo = position.make_move(mv);
                 context
                     .transposition_table
@@ -857,7 +864,7 @@ fn pvs(
                     position.unmake_move(mv, undo);
                     continue;
                 }
-                context.push_position(position, ply + 1, mv);
+                context.push_position(position, ply + 1, mv, continuation);
                 let mut probcut_pv = Vec::new();
                 let mut value = quiescence(
                     position,
@@ -921,7 +928,7 @@ fn pvs(
     let mut searched_captures = Vec::new();
 
     let pawn_key = position.zobrist().pawn();
-    let ordering = context.ordering(position);
+    let ordering = context.ordering(position, ply);
     for mv in MovePicker::new(position, tt_move, context.killers.killers(ply), ordering) {
         if excluded_move == Some(mv) {
             continue;
@@ -961,8 +968,10 @@ fn pvs(
 
         // History pruning: a quiet whose accumulated history is strongly negative at
         // this depth has repeatedly failed to produce a cutoff, so skip it outright.
-        // This is the second consumer of the history tables and the reason maintenance
-        // had to be split out from `use_lmr` first.
+        // It reads `pruning_history` -- the SUM of the 1- and 2-ply continuation tables
+        // and pawn history -- not the butterfly-dominated `history_score` that LMR uses.
+        // Thresholding one butterfly statistic is what cost ~237 Elo in M4-F1
+        // (AGENTS.md 4.53); see `OrderingContext::pruning_history`.
         if context.options.use_history_pruning
             && !pv_node
             && !in_check
@@ -971,7 +980,7 @@ fn pvs(
             && effective_depth <= HISTORY_PRUNING_MAX_EFFECTIVE_DEPTH
             && best_move.is_some()
             && shallow_pruning_allowed(best_score)
-            && history_score < history_pruning_threshold(effective_depth)
+            && ordering.pruning_history(position, mv) < history_pruning_threshold(effective_depth)
         {
             continue;
         }
@@ -1101,6 +1110,7 @@ fn pvs(
         }
 
         let child_depth = (new_depth + extension).max(0);
+        let continuation = continuation_key(position, mv);
         let undo = position.make_move(mv);
         context
             .transposition_table
@@ -1109,7 +1119,7 @@ fn pvs(
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(position, ply + 1, mv);
+        context.push_position(position, ply + 1, mv, continuation);
         child_pv.clear();
         let score = if searched == 0 {
             pvs(
@@ -1315,7 +1325,7 @@ fn quiescence(
         alpha = alpha.max(best_score);
     }
 
-    let ordering = context.ordering(position);
+    let ordering = context.ordering(position, ply);
     let moves: Vec<_> = if in_check {
         MovePicker::new(position, None, [None, None], ordering).collect()
     } else {
@@ -1329,13 +1339,14 @@ fn quiescence(
     let mut child_pv = Vec::new();
     for mv in moves {
         let mover = position.side_to_move();
+        let continuation = continuation_key(position, mv);
         let undo = position.make_move(mv);
         context.transposition_table.prefetch(tt_key(position, 0));
         if is_in_check(position, mover) {
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(position, ply + 1, mv);
+        context.push_position(position, ply + 1, mv, continuation);
         child_pv.clear();
         let score = quiescence(
             position,
@@ -1711,6 +1722,21 @@ fn move_gives_check(position: &Position, mv: Move) -> bool {
         .is_empty()
 }
 
+/// Resolves the continuation plane a move will select for its children.
+///
+/// Must be called BEFORE `make_move`, because the moving piece is no longer on `from`
+/// afterwards. A promotion is keyed on the piece that lands on `to`, matching the
+/// reference: children respond to the queen that appeared, not to the pawn that left.
+#[inline]
+fn continuation_key(position: &Position, mv: Move) -> Option<ContinuationKey> {
+    let piece = position.piece_at(mv.from())?;
+    let kind = mv.flag().promotion().unwrap_or(piece.kind());
+    Some(ContinuationKey::new(
+        mf_core::Piece::new(piece.color(), kind),
+        mv.to(),
+    ))
+}
+
 #[inline]
 fn quiet_history_bonus(depth: i32) -> i32 {
     (32 * depth * depth).clamp(32, 2_048)
@@ -1766,13 +1792,16 @@ fn update_histories(
     if quiet {
         context.killers.record_killer(ply, cutoff_move);
         history.update_butterfly(mover, cutoff_move, bonus);
+        let planes = context.continuation_planes(ply);
         if let Some(piece) = position.piece_at(cutoff_move.from()) {
             history.update_pawn(pawn_key, piece, cutoff_move.to(), bonus);
+            update_continuation_histories(history, &planes, piece, cutoff_move.to(), bonus);
         }
         for &previous in searched_quiets {
             history.update_butterfly(mover, previous, malus);
             if let Some(piece) = position.piece_at(previous.from()) {
                 history.update_pawn(pawn_key, piece, previous.to(), malus);
+                update_continuation_histories(history, &planes, piece, previous.to(), malus);
             }
         }
     } else if let Some(piece) = position.piece_at(cutoff_move.from()) {
@@ -1796,6 +1825,32 @@ fn update_histories(
                 previous.to(),
                 captured_kind(position, previous),
                 malus,
+            );
+        }
+    }
+}
+
+/// Applies one bonus across every continuation table, weighted by lookback distance.
+///
+/// The weights are non-monotone in the reference's full 1-6 set; over the `{1,2,4,6}`
+/// subset this engine keeps they happen to decrease, which is asserted in
+/// `history.rs`. Absent planes are skipped rather than updated with zero.
+#[inline]
+fn update_continuation_histories(
+    history: &SharedHistory,
+    planes: &[Option<ContinuationKey>; CONTINUATION_PLIES.len()],
+    piece: mf_core::Piece,
+    to: Square,
+    bonus: i32,
+) {
+    for (slot, previous) in planes.iter().enumerate() {
+        if let Some(previous) = *previous {
+            history.update_continuation_at(
+                slot,
+                previous,
+                piece,
+                to,
+                bonus * CONTINUATION_WEIGHTS[slot] / 1_024,
             );
         }
     }
@@ -1889,6 +1944,11 @@ struct SearchContext<'a> {
     static_evals: [Option<i32>; MAX_SEARCH_PLY],
     repetition_history: RepetitionHistory,
     current_moves: [Option<Move>; MAX_SEARCH_PLY],
+    /// The continuation plane each searched ply's move selects, resolved at push time
+    /// because the moving piece is no longer on `from` once the move is made. `None`
+    /// marks a null move, which BREAKS the chain: "the reply to the opponent's last
+    /// move" is meaningless when the opponent did not move.
+    continuation_keys: [Option<ContinuationKey>; MAX_SEARCH_PLY],
     nmp_min_ply: usize,
     stopped: bool,
     soft_time_reached: bool,
@@ -1926,6 +1986,7 @@ impl<'a> SearchContext<'a> {
             static_evals: [None; MAX_SEARCH_PLY],
             repetition_history: RepetitionHistory::new(position, position_history),
             current_moves: [None; MAX_SEARCH_PLY],
+            continuation_keys: [None; MAX_SEARCH_PLY],
             nmp_min_ply: 0,
             stopped: false,
             soft_time_reached: false,
@@ -1937,13 +1998,15 @@ impl<'a> SearchContext<'a> {
     ///
     /// The `pawn_key` is read from the position at each call site rather than cached,
     /// because pawn history must follow the pawn structure of the node being ordered.
-    fn ordering(&self, position: &Position) -> OrderingContext<'a> {
+    fn ordering(&self, position: &Position, ply: usize) -> OrderingContext<'a> {
         OrderingContext {
             history: self.history,
             pawn_key: position.zobrist().pawn(),
+            continuation: self.continuation_planes(ply),
             use_butterfly_history: self.options.use_butterfly_history,
             use_capture_history: self.options.use_capture_history,
             use_pawn_history: self.options.use_pawn_history,
+            use_continuation_history: self.options.use_continuation_history,
         }
     }
 
@@ -2007,19 +2070,43 @@ impl<'a> SearchContext<'a> {
             .map_or(Duration::ZERO, |started| started.elapsed())
     }
 
-    fn push_position(&mut self, position: &Position, ply: usize, mv: Move) {
+    fn push_position(
+        &mut self,
+        position: &Position,
+        ply: usize,
+        mv: Move,
+        continuation: Option<ContinuationKey>,
+    ) {
         self.current_moves[ply - 1] = Some(mv);
+        self.continuation_keys[ply - 1] = continuation;
         self.repetition_history.push_position(position);
     }
 
     fn push_null_position(&mut self, ply: usize) {
         self.current_moves[ply - 1] = None;
+        self.continuation_keys[ply - 1] = None;
         self.repetition_history.push_null();
     }
 
     fn pop_position(&mut self, ply: usize) {
         self.repetition_history.pop();
         self.current_moves[ply - 1] = None;
+        self.continuation_keys[ply - 1] = None;
+    }
+
+    /// The predecessor plane at each lookback distance in `CONTINUATION_PLIES`.
+    ///
+    /// A `None` entry means the stack does not reach back that far, or a null move sits
+    /// at that distance. Both are genuine absences of information rather than a zero
+    /// score, so the corresponding table is skipped entirely rather than contributing 0.
+    fn continuation_planes(
+        &self,
+        ply: usize,
+    ) -> [Option<ContinuationKey>; CONTINUATION_PLIES.len()] {
+        CONTINUATION_PLIES.map(|distance| {
+            ply.checked_sub(distance)
+                .and_then(|index| self.continuation_keys[index])
+        })
     }
 
     fn rule_draw_score(&self, position: &Position, ply: usize) -> Option<i32> {

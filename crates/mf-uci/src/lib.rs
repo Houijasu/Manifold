@@ -37,6 +37,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseButterflyHistory type check default true",
     "option name UseCaptureHistory type check default true",
     "option name UsePawnHistory type check default false",
+    "option name UseContHistory type check default true",
     "option name UseHistoryPruning type check default false",
     "option name EvalFile type string default <empty>",
     "uciok",
@@ -621,6 +622,10 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UsePawnHistory") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_pawn_history = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseContHistory") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_continuation_history = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseHistoryPruning") {
         if let Some(enabled) = parse_check_option(&value) {

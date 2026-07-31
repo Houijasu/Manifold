@@ -10,6 +10,26 @@ const BUTTERFLY_MAX: i32 = 7_183;
 const CAPTURE_MAX: i32 = 10_692;
 /// Gravity saturation bound for pawn-structure history.
 const PAWN_MAX: i32 = 8_192;
+/// Gravity saturation bound for continuation history (Stockfish `PieceToHistory`).
+///
+/// This is deliberately ~4x the butterfly bound: a continuation entry is conditioned on
+/// a specific predecessor move, so it is a far sharper statistic than a from-to average
+/// and is allowed to express a correspondingly stronger opinion.
+const CONTINUATION_MAX: i32 = 30_000;
+
+/// Lookback distances, in plies, at which continuation history is kept.
+///
+/// The 1-ply table IS the counter-move heuristic: `continuation[0]` is indexed by the
+/// opponent's immediately preceding move, so "the reply that refutes this move" falls
+/// out of it without a separate counter-move structure.
+///
+/// `{1, 2, 4, 6}` is the community consensus subset for a new engine (Berserk,
+/// Stormphrax). Stockfish's dense 1-6 is a late refinement, and plies 3 and 5 carry the
+/// two weakest weights in its own bonus table (290 and 132 against 1040/780/502/418).
+pub(crate) const CONTINUATION_PLIES: [usize; 4] = [1, 2, 4, 6];
+/// Update weights in 1024ths, taken from Stockfish `conthist_bonuses` for exactly the
+/// plies in `CONTINUATION_PLIES`.
+pub(crate) const CONTINUATION_WEIGHTS: [i32; CONTINUATION_PLIES.len()] = [1_040, 780, 502, 418];
 
 const COLORS: usize = 2;
 const SQUARES: usize = 64;
@@ -32,11 +52,36 @@ const PAWN_BASE_BUCKETS: usize = 512;
 const BUTTERFLY_LEN: usize = COLORS * SQUARES * SQUARES;
 const CAPTURE_LEN: usize = PIECES * SQUARES * VICTIMS;
 const PAWN_BUCKET_LEN: usize = PIECES * SQUARES;
+/// One `[piece][to]` plane, the inner table a single predecessor move selects.
+const CONTINUATION_PLANE_LEN: usize = PIECES * SQUARES;
+/// A whole ply's table: one plane per `[previous_piece][previous_to]`.
+const CONTINUATION_LEN: usize = PIECES * SQUARES * CONTINUATION_PLANE_LEN;
 
 /// Forces each table onto its own cache line so concurrent updates to two different
 /// tables never contend for the same line.
 #[repr(align(64))]
 struct CacheAligned<T>(T);
+
+/// Identifies the `[piece][to]` plane a predecessor move selects inside one
+/// continuation table.
+///
+/// Resolved once when the move is pushed onto the search stack rather than on every
+/// lookup, so a node that scores forty quiets performs four plane resolutions, not one
+/// hundred and sixty.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct ContinuationKey {
+    plane: u32,
+}
+
+impl ContinuationKey {
+    #[inline]
+    pub(crate) fn new(piece: Piece, to: Square) -> Self {
+        let index = piece.index() * SQUARES + usize::from(to.index());
+        Self {
+            plane: (index * CONTINUATION_PLANE_LEN) as u32,
+        }
+    }
+}
 
 /// Relaxed-atomic history tables shared by every search worker.
 ///
@@ -50,6 +95,9 @@ pub(crate) struct SharedHistory {
     butterfly: CacheAligned<Box<[AtomicI16]>>,
     capture: CacheAligned<Box<[AtomicI16]>>,
     pawn: CacheAligned<Box<[AtomicI16]>>,
+    /// One table per entry in `CONTINUATION_PLIES`, each on its own cache-line-aligned
+    /// allocation so an update at ply 1 cannot false-share with one at ply 6.
+    continuation: [CacheAligned<Box<[AtomicI16]>>; CONTINUATION_PLIES.len()],
     pawn_bucket_mask: u64,
 }
 
@@ -65,6 +113,15 @@ impl SharedHistory {
             butterfly: CacheAligned(zeroed(BUTTERFLY_LEN)),
             capture: CacheAligned(zeroed(CAPTURE_LEN)),
             pawn: CacheAligned(zeroed(buckets * PAWN_BUCKET_LEN)),
+            // Continuation history is FIXED SIZE and does not scale with the thread
+            // count, unlike pawn history and corrhist. Stockfish says so explicitly, and
+            // the reason is structural: this table is keyed on an exact predecessor move
+            // rather than on a hashed structure, so there is no collision rate for a
+            // larger table to hold flat. Four planes at 9 MiB each is already the whole
+            // Each ply is 12*64 planes of 12*64 `i16` = 1.125 MiB, 4.5 MiB in total;
+            // scaling that by the thread count would multiply a table under no collision
+            // pressure and only thrash cache, which is the AGENTS.md 4.54 trap.
+            continuation: core::array::from_fn(|_| CacheAligned(zeroed(CONTINUATION_LEN))),
             pawn_bucket_mask: (buckets - 1) as u64,
         }
     }
@@ -78,6 +135,7 @@ impl SharedHistory {
             .iter()
             .chain(self.capture.0.iter())
             .chain(self.pawn.0.iter())
+            .chain(self.continuation.iter().flat_map(|table| table.0.iter()))
         {
             entry.store(0, Ordering::Relaxed);
         }
@@ -128,6 +186,36 @@ impl SharedHistory {
         );
     }
 
+    /// Continuation score at one lookback distance.
+    ///
+    /// `slot` indexes `CONTINUATION_PLIES`, not the ply distance itself.
+    #[inline]
+    pub(crate) fn continuation_score_at(
+        &self,
+        slot: usize,
+        previous: ContinuationKey,
+        piece: Piece,
+        to: Square,
+    ) -> i32 {
+        load(&self.continuation[slot].0[continuation_index(previous, piece, to)])
+    }
+
+    #[inline]
+    pub(crate) fn update_continuation_at(
+        &self,
+        slot: usize,
+        previous: ContinuationKey,
+        piece: Piece,
+        to: Square,
+        bonus: i32,
+    ) {
+        apply(
+            &self.continuation[slot].0[continuation_index(previous, piece, to)],
+            bonus,
+            CONTINUATION_MAX,
+        );
+    }
+
     #[inline]
     fn pawn_index(&self, pawn_key: u64, piece: Piece, to: Square) -> usize {
         let bucket = (pawn_key & self.pawn_bucket_mask) as usize;
@@ -138,10 +226,63 @@ impl SharedHistory {
     pub(crate) fn pawn_bucket_count(&self) -> usize {
         self.pawn_bucket_mask as usize + 1
     }
+
+    #[cfg(test)]
+    pub(crate) fn continuation_score(
+        &self,
+        previous: ContinuationKey,
+        piece: Piece,
+        to: Square,
+    ) -> i32 {
+        self.continuation_score_at(0, previous, piece, to)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn update_continuation(
+        &self,
+        previous: ContinuationKey,
+        piece: Piece,
+        to: Square,
+        bonus: i32,
+    ) {
+        self.update_continuation_at(0, previous, piece, to, bonus);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn continuation_len(&self) -> usize {
+        self.continuation[0].0.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn continuation_base_address(&self) -> usize {
+        self.continuation[0].0.as_ptr() as usize
+    }
 }
 
+#[inline]
+fn continuation_index(previous: ContinuationKey, piece: Piece, to: Square) -> usize {
+    previous.plane as usize + piece.index() * SQUARES + usize::from(to.index())
+}
+
+/// Allocates a zeroed table in ONE bulk request rather than element by element.
+///
+/// `(0..len).map(|_| AtomicI16::new(0)).collect()` writes every entry individually. At
+/// the 4.5 MiB the continuation tables occupy that is millions of stores per
+/// construction, which is invisible to any node-count anchor and cost ~15% of the
+/// measured bench NPS, since `bench` builds a fresh table per position inside its own
+/// timed region. `vec![0i16; len]` routes through `alloc_zeroed`, which hands back
+/// OS-zeroed pages.
 fn zeroed(len: usize) -> Box<[AtomicI16]> {
-    (0..len).map(|_| AtomicI16::new(0)).collect()
+    let zeros = vec![0i16; len].into_boxed_slice();
+    // SAFETY: `AtomicI16` is `#[repr(transparent)]` over `i16`, so the two have
+    // identical size, alignment, and layout, and every `i16` bit pattern is a valid
+    // `AtomicI16`. The pointer comes from `Box::into_raw`, is not aliased, and the
+    // slice length is carried through the fat pointer unchanged, so the reconstructed
+    // `Box` owns exactly the allocation it was handed. The debug assertion below pins
+    // the layout equality this relies on.
+    debug_assert_eq!(size_of::<AtomicI16>(), size_of::<i16>());
+    debug_assert_eq!(align_of::<AtomicI16>(), align_of::<i16>());
+    unsafe { Box::from_raw(Box::into_raw(zeros) as *mut [AtomicI16]) }
 }
 
 #[inline]
@@ -217,8 +358,8 @@ mod tests {
     use mf_core::{Color, Move, MoveFlag, Piece, PieceKind, Position, Square};
 
     use super::{
-        BUTTERFLY_MAX, CAPTURE_MAX, KillerTable, PAWN_BASE_BUCKETS, PAWN_MAX, SharedHistory,
-        captured_kind,
+        BUTTERFLY_MAX, CAPTURE_MAX, CONTINUATION_MAX, CONTINUATION_PLIES, CONTINUATION_WEIGHTS,
+        ContinuationKey, KillerTable, PAWN_BASE_BUCKETS, PAWN_MAX, SharedHistory, captured_kind,
     };
 
     fn square(index: u8) -> Square {
@@ -407,6 +548,133 @@ mod tests {
                 <= CAPTURE_MAX
         );
         assert!(history.pawn_score(0x1111, piece, square(20)).abs() <= PAWN_MAX);
+    }
+
+    #[test]
+    fn continuation_history_uses_the_reference_ply_set_and_weights() {
+        // {1, 2, 4, 6} is the community consensus subset for a new engine (Berserk,
+        // Stormphrax). Stockfish's dense 1-6 is a late refinement; plies 3 and 5 carry
+        // the two weakest weights in its own table and are deliberately not built here.
+        assert_eq!(CONTINUATION_PLIES, [1, 2, 4, 6]);
+        // Stockfish `conthist_bonuses` entries for exactly those plies, in 1024ths.
+        assert_eq!(CONTINUATION_WEIGHTS, [1_040, 780, 502, 418]);
+        assert!(
+            CONTINUATION_WEIGHTS
+                .windows(2)
+                .all(|pair| pair[0] > pair[1]),
+            "over the {{1,2,4,6}} subset the reference weights decrease with distance"
+        );
+    }
+
+    #[test]
+    fn continuation_history_is_keyed_on_the_previous_move() {
+        let history = SharedHistory::new(1);
+        let knight = Piece::new(Color::White, PieceKind::Knight);
+        let rook = Piece::new(Color::Black, PieceKind::Rook);
+        let previous = ContinuationKey::new(rook, square(20));
+        let other_piece = ContinuationKey::new(knight, square(20));
+        let other_square = ContinuationKey::new(rook, square(21));
+
+        history.update_continuation(previous, knight, square(30), CONTINUATION_MAX);
+
+        assert_eq!(
+            history.continuation_score(previous, knight, square(30)),
+            CONTINUATION_MAX
+        );
+        // A different previous piece, previous square, current piece, or current square
+        // must all be independent entries.
+        assert_eq!(
+            history.continuation_score(other_piece, knight, square(30)),
+            0
+        );
+        assert_eq!(
+            history.continuation_score(other_square, knight, square(30)),
+            0
+        );
+        assert_eq!(history.continuation_score(previous, rook, square(30)), 0);
+        assert_eq!(history.continuation_score(previous, knight, square(31)), 0);
+    }
+
+    #[test]
+    fn continuation_history_saturates_at_its_own_bound() {
+        let history = SharedHistory::new(1);
+        let knight = Piece::new(Color::White, PieceKind::Knight);
+        let previous = ContinuationKey::new(knight, square(20));
+
+        history.update_continuation(previous, knight, square(30), i32::MAX);
+        assert_eq!(
+            history.continuation_score(previous, knight, square(30)),
+            CONTINUATION_MAX
+        );
+        history.update_continuation(previous, knight, square(30), i32::MIN);
+        assert_eq!(
+            history.continuation_score(previous, knight, square(30)),
+            -CONTINUATION_MAX
+        );
+        // The bound must remain representable in the i16 the table stores.
+        assert!(CONTINUATION_MAX <= i32::from(i16::MAX));
+    }
+
+    #[test]
+    fn continuation_history_is_fixed_size_and_cache_line_aligned() {
+        // Continuation history does NOT scale with thread count -- it is keyed on the
+        // previous move, not on a hashed structure, so there is no collision rate to
+        // hold flat. Sizing it from a gravity bound instead of its real dimensions is
+        // the mission AGENTS.md 4.54 trap that cost 18% NPS on the pawn table.
+        let one = SharedHistory::new(1);
+        let eight = SharedHistory::new(8);
+        assert_eq!(one.continuation_len(), eight.continuation_len());
+        assert_eq!(one.continuation_len(), 12 * 64 * 12 * 64);
+
+        assert_eq!(
+            one.continuation_base_address() % 64,
+            0,
+            "the table base must sit on a cache line"
+        );
+        // Each previous-move plane is 12*64 i16 = 1,536 bytes = exactly 24 cache lines,
+        // so every plane starts on a line boundary without per-entry padding (which
+        // would multiply the table by 32x for no ordering benefit).
+        assert_eq!((12 * 64 * size_of::<i16>()) % 64, 0);
+    }
+
+    #[test]
+    fn continuation_history_clears_with_the_other_tables() {
+        let history = SharedHistory::new(1);
+        let knight = Piece::new(Color::White, PieceKind::Knight);
+        let previous = ContinuationKey::new(knight, square(20));
+        history.update_continuation(previous, knight, square(30), CONTINUATION_MAX);
+
+        history.clear();
+
+        assert_eq!(history.continuation_score(previous, knight, square(30)), 0);
+    }
+
+    #[test]
+    fn concurrent_continuation_updates_stay_inside_the_saturation_bound() {
+        let history = Arc::new(SharedHistory::new(8));
+        let knight = Piece::new(Color::White, PieceKind::Knight);
+        let previous = ContinuationKey::new(knight, square(20));
+        let workers: Vec<_> = (0..8)
+            .map(|worker| {
+                let history = Arc::clone(&history);
+                thread::spawn(move || {
+                    for _ in 0..2_000 {
+                        let sign = if worker % 2 == 0 { 1 } else { -1 };
+                        history.update_continuation(previous, knight, square(30), sign * 12_000);
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().expect("history worker should not panic");
+        }
+
+        assert!(
+            history
+                .continuation_score(previous, knight, square(30))
+                .abs()
+                <= CONTINUATION_MAX
+        );
     }
 
     #[test]

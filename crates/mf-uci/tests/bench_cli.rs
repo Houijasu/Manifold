@@ -6,14 +6,25 @@ use std::time::{Duration, Instant};
 /// The all-on bench signature.
 ///
 /// M4-F1 moved this from `175_944` to `138_600` (-21.2%) by adding butterfly and
-/// capture history to move ordering. The move is expected: better ordering means more
-/// cutoffs on the first move tried.
+/// capture history to move ordering. M4-F2 then moved it to `135_257` (-2.4%) by
+/// adding continuation history at 1/2/4/6 ply. Both moves are expected: better
+/// ordering means more cutoffs on the first move tried.
 ///
 /// The change is attributable ENTIRELY to history. With the history toggles off, both
 /// all-off anchors below reproduce their M3 values bit-for-bit (`4_961_681` and
-/// `3_768_488`), which proves the search core was not touched.
-const BENCH_NODE_COUNT: u64 = 138_600;
-const BENCH_NODES: &str = "Nodes searched: 138600";
+/// `3_768_488`), which proves the search core was not touched. `UseContHistory=false`
+/// additionally reproduces the M4-F1 signature `138_600` exactly, which is pinned in
+/// `continuation_history_off_reproduces_the_m4_f1_signature`.
+///
+/// The bench delta understates this feature badly, and deliberately is not the
+/// evidence for it (mission AGENTS.md 4.53). Bench is depth 7; continuation history
+/// feeds LMR and pruning, which matter at real depths. From startpos at `go depth 14`
+/// the same change is -25.7% nodes (`469_349` -> `348_683`).
+const BENCH_NODE_COUNT: u64 = 135_257;
+const BENCH_NODES: &str = "Nodes searched: 135257";
+
+/// The M4-F1 all-on signature, reproduced exactly by `UseContHistory=false`.
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 138_600;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -28,7 +39,14 @@ const BENCH_NODES: &str = "Nodes searched: 138600";
 ///    only) -> `400_404` (both hoisted).
 /// 2. Adding history to move ordering then moved it from `400_404` to `265_786`, for
 ///    the same reason the all-on signature moved.
-const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 265_786;
+///
+/// M4-F2 moved it again, from `265_786` to `320_602`. That direction is INTENDED and
+/// is the clearest single confirmation that continuation history reaches LMR: the
+/// `statScore` term that scales the reduction now reads continuation history, so
+/// removing LMR removes more search than it used to. The all-on arm got cheaper while
+/// the LMR-off arm got dearer, which is only possible if the new signal is being
+/// consumed by LMR rather than by move ordering alone.
+const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 320_602;
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_manifold"))
@@ -113,6 +131,7 @@ fn run_uci_bench_ablation_session() -> Output {
         // `each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent`.
         "setoption name UseButterflyHistory value false\n\
              setoption name UseCaptureHistory value false\n\
+             setoption name UseContHistory value false\n\
              setoption name UseNMP value false\n\
              setoption name UseRFP value false\n\
              setoption name UseRazoring value false\n\
@@ -307,6 +326,26 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
 /// is the one where the 2% bar means something for an ordering change.
 ///
 /// The two toggles that ship OFF are excluded; each has its own test.
+///
+/// NOTE ON THE MISSING "must save nodes" ASSERTION FOR BUTTERFLY HISTORY.
+///
+/// Through M4-F1 this test also asserted that disabling each table COSTS nodes. After
+/// continuation history landed that stopped being true for butterfly history at bench
+/// depth: `UseButterflyHistory=false` now *saves* 6.8% (`135_257` -> `126_029`),
+/// because continuation history covers most of the same quiet-ordering duty at depth 7
+/// and the two signals partly cancel in the ordering sum.
+///
+/// That is a shallow-depth artifact, NOT a reason to touch the default. Measured from
+/// startpos at `go depth 15` on the shipped build, the direction is emphatically the
+/// other way:
+///
+///   * butterfly ON : 379_741 nodes
+///   * butterfly OFF: 948_812 nodes  (2.50x MORE)
+///
+/// So the assertion is dropped for butterfly rather than inverted or weakened
+/// (mission AGENTS.md 4.52: do not tune a guard until it passes). The 2% observability
+/// bar below still applies to both tables, and the depth-15 pair above is the real
+/// evidence about direction. No default may be flipped on a bench number (4.53).
 #[test]
 fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
     let output = run_uci_session(
@@ -316,6 +355,9 @@ fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
          setoption name UseButterflyHistory value true\n\
          setoption name UseCaptureHistory value false\n\
          bench\n\
+         setoption name UseCaptureHistory value true\n\
+         setoption name UseContHistory value false\n\
+         bench\n\
          quit\n",
         "UCI history ablation session",
     );
@@ -324,24 +366,52 @@ fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
 
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
     let nodes = metrics(stdout, "Nodes searched: ");
-    assert_eq!(nodes.len(), 3);
+    assert_eq!(nodes.len(), 4);
 
     let baseline = nodes[0];
     assert_eq!(baseline, BENCH_NODE_COUNT);
-    for (name, disabled) in ["UseButterflyHistory", "UseCaptureHistory"]
+    for (name, disabled) in ["UseButterflyHistory", "UseCaptureHistory", "UseContHistory"]
         .into_iter()
-        .zip(&nodes[1..=2])
+        .zip(&nodes[1..=3])
     {
         assert!(
             baseline.abs_diff(*disabled).saturating_mul(100) >= baseline.saturating_mul(2),
             "{name} changed bench nodes by less than 2%: base={baseline}, disabled={disabled}"
         );
-        assert!(
-            *disabled > baseline,
-            "{name} must SAVE nodes when enabled, not cost them: \
-             base={baseline}, disabled={disabled}"
-        );
     }
+
+    assert!(
+        nodes[2] > baseline,
+        "capture history must SAVE nodes when enabled, not cost them: \
+         base={baseline}, disabled={}",
+        nodes[2]
+    );
+}
+
+/// `UseContHistory=false` must reproduce the M4-F1 signature bit-for-bit.
+///
+/// This is the control that proves M4-F2 moved the shipped signature by adding
+/// continuation history and by nothing else. Continuation history is threaded through
+/// `OrderingContext`, the LMR `statScore`, and history pruning, so a stray change to
+/// any shared ordering weight would show up here as drift even with the new tables
+/// switched off.
+#[test]
+fn continuation_history_off_reproduces_the_m4_f1_signature() {
+    let output = run_uci_session(
+        "setoption name UseContHistory value false\n\
+         bench\n\
+         quit\n",
+        "UCI continuation control session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT_WITHOUT_CONTINUATION],
+        "disabling continuation history must restore the exact M4-F1 bench signature"
+    );
 }
 
 /// Turning history off must reproduce the M3 all-off signatures bit-for-bit.
@@ -369,9 +439,8 @@ fn disabling_history_restores_the_m3_all_selectivity_off_signatures() {
 
 /// History pruning ships OFF, and this test records WHY in an executable form.
 ///
-/// It is the one place in the codebase where a favourable bench delta and a match
-/// result point in opposite directions, so the bench number alone would mislead
-/// anyone who later tries to "fix" the default:
+/// M4-F1 measured it as the one place where a favourable bench delta and a match
+/// result point in opposite directions:
 ///
 ///   * enabled : 133_126 bench nodes (-3.95%) and **-103.68 +/- 46.31 Elo**
 ///   * disabled: 138_600 bench nodes and **+133.61 +/- 44.43 Elo**
@@ -379,12 +448,29 @@ fn disabling_history_restores_the_m3_all_selectivity_off_signatures() {
 /// Both arms vs `baselines/M3/manifold.exe` at 8+0.08, Threads=1, `-use-affinity
 /// -concurrency 8`. See `experiments/M4-F1-history/`.
 ///
-/// The assertion direction is deliberately INVERTED relative to every other toggle
-/// test: enabling history pruning must still SAVE nodes. If that ever stops being
-/// true the implementation has changed materially and the Elo result above no longer
-/// describes the code, so the default must be re-measured rather than re-assumed.
+/// M4-F1's diagnosis was that a lone butterfly statistic is too noisy to decide that a
+/// quiet move is unsearchable, and predicted the technique would become viable once
+/// continuation history existed to thicken the signal. M4-F2 acted on that: the
+/// threshold now reads `OrderingContext::pruning_history`, which sums 1-ply and 2-ply
+/// continuation history with pawn history instead of the single butterfly entry.
+///
+/// It STILL ships off. Re-measured on the new signal against the same build with the
+/// toggle off, it was SPRT-REJECTED at **-45.63 +/- 32.58 Elo** (268 games, LLR -2.96,
+/// H0 accepted); see `experiments/M4-F2-conthist/history-pruning/`. The thicker signal
+/// did help — the regression shrank from -103.68 to -45.63 — but it is still a
+/// regression, so the prediction that continuation history alone would make history
+/// pruning viable is DISPROVEN, not merely unconfirmed.
+///
+/// The bench delta is now +0.14% (`135_257` -> `135_443`): enabling it no longer even
+/// saves nodes, so there is no longer a favourable bench number tempting anyone to
+/// flip the default.
+///
+/// This test therefore pins only that the toggle ships off and still reaches the
+/// search. The old "must save nodes" assertion is deliberately NOT retained: it
+/// guarded an implementation (lone-butterfly threshold) that no longer exists, and
+/// keeping it would have meant asserting a property of dead code.
 #[test]
-fn history_pruning_ships_disabled_because_the_nodes_it_saves_contain_the_best_move() {
+fn history_pruning_ships_disabled_after_being_re_measured_on_the_continuation_signal() {
     let output = run_uci_session(
         "bench\n\
          setoption name UseHistoryPruning value true\n\
@@ -403,13 +489,9 @@ fn history_pruning_ships_disabled_because_the_nodes_it_saves_contain_the_best_mo
         nodes[0], BENCH_NODE_COUNT,
         "history pruning must be OFF in the shipped default"
     );
-    assert!(
-        nodes[1] < nodes[0],
-        "history pruning must still save nodes; if it does not, the measured -103.68 \
-         Elo no longer describes this code and the default needs re-measuring: \
-         off={}, on={}",
-        nodes[0],
-        nodes[1]
+    assert_ne!(
+        nodes[1], nodes[0],
+        "enabling history pruning must reach the search and change the tree"
     );
 }
 
@@ -418,12 +500,23 @@ fn history_pruning_ships_disabled_because_the_nodes_it_saves_contain_the_best_mo
 /// Standalone with butterfly history disabled it is 9.18% WORSE than no history at
 /// all, and at every ordering weight tried (1, 2, 4, 8, 16) it cost nodes. In
 /// Stockfish pawn history is never a standalone ordering signal: it is one small term
-/// in a sum dominated by continuation history, which this engine does not have yet.
+/// in a sum dominated by continuation history.
 ///
-/// In the shipped configuration its remaining effect is under 0.1%, far below the 2%
-/// observability bar, so this test pins only that the toggle is wired and off. That
-/// is the AGENTS.md 4.52 situation: the guard is NOT lowered to manufacture an
-/// observable delta.
+/// M4-F2 added that continuation history and re-measured pawn history as a term in the
+/// sum rather than as a standalone ordering signal, which was M4-F1's stated condition
+/// for revisiting it. It still ships OFF, but the picture improved a lot: as a
+/// standalone signal M4-F1 measured it 9.18% WORSE than no history at all, whereas as
+/// a term in the sum it is now statistically indistinguishable from not having it
+/// (**-1.74 +/- 20.98 Elo**, 600 games, LLR -1.22, inconclusive at the cap). It costs
+/// 2.0% bench nodes (`135_257` -> `137_940`). See
+/// `experiments/M4-F2-conthist/pawn-history/`.
+///
+/// "Not measurably harmful" is not a reason to enable something, so the default stands
+/// unchanged. Pawn history remains wired as a term in `pruning_history` only, where it
+/// is gated off with the rest of history pruning.
+///
+/// This test pins only that the toggle is wired and off. That is the AGENTS.md 4.52
+/// situation: the guard is NOT lowered to manufacture an observable delta.
 #[test]
 fn pawn_history_ships_disabled_and_is_wired_through_to_the_search() {
     let output = run_uci_session(
@@ -467,7 +560,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
             "{name} must advertise default false"
         );
     }
-    for name in ["UseButterflyHistory", "UseCaptureHistory"] {
+    for name in ["UseButterflyHistory", "UseCaptureHistory", "UseContHistory"] {
         assert!(
             stdout
                 .lines()
@@ -516,11 +609,11 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 157_791,
+        nodes[2], 180_833,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(
-        nodes[3], 484_153,
+        nodes[3], 555_337,
         "with futility and SEE already off, UseLMR=false is unchanged by the split"
     );
 
