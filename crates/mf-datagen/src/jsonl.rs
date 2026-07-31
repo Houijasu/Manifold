@@ -141,6 +141,19 @@ pub struct ConvertConfig {
     pub max_positions: Option<u64>,
     /// Source lines to discard before converting, used to restart mid-file.
     pub skip_lines: u64,
+    /// Keep one source line in every `sample_stride`; `1` keeps all of them.
+    ///
+    /// The source file is **ordered**, so a prefix is not a sample of it. Probing nine
+    /// points spread across the compressed stream found mean piece count ranging from
+    /// 21.3 down to 14.0 (a 52% spread) and median `|cp|` from 33 to 246 (a 645%
+    /// spread), with the tail markedly sparser and more decisive than the head. Taking
+    /// the first N lines would therefore train rung 1 on the opening-heavy head of the
+    /// distribution. Striding spreads the same N across the entire file.
+    ///
+    /// The stride is anchored to [`ConvertStats::lines_consumed`], not to a counter
+    /// that resets, so a restart with `skip_lines` selects exactly the lines an
+    /// uninterrupted run would have.
+    pub sample_stride: u64,
 }
 
 impl Default for ConvertConfig {
@@ -150,6 +163,7 @@ impl Default for ConvertConfig {
             mate_saturation_cp: MATE_SATURATION_CP,
             max_positions: None,
             skip_lines: 0,
+            sample_stride: 1,
         }
     }
 }
@@ -234,6 +248,10 @@ where
         }
         stats.lines_consumed += 1;
         if stats.lines_consumed <= config.skip_lines {
+            continue;
+        }
+        // Anchored to the absolute line number so a restart keeps the same selection.
+        if config.sample_stride > 1 && (stats.lines_consumed - 1) % config.sample_stride != 0 {
             continue;
         }
         stats.lines += 1;
@@ -812,6 +830,74 @@ mod tests {
         assert_eq!(
             rejoined, whole,
             "a restart must reproduce the uninterrupted corpus byte for byte"
+        );
+    }
+
+    #[test]
+    fn a_sample_stride_takes_every_nth_line_across_the_whole_file() {
+        // A stride of 3 over four lines takes lines 0 and 3, so it reaches the last
+        // line of the file where the two-record prefix never leaves the first two.
+        let source = format!("{REAL_LINE}\n{REAL_LINE}\n{REAL_LINE}\n{MATE_LINE}\n");
+        let (strided, stats) = convert_all(
+            &source,
+            ConvertConfig {
+                sample_stride: 3,
+                ..ConvertConfig::default()
+            },
+        );
+        assert_eq!(stats.lines_consumed, 4, "the whole file is still read");
+        assert_eq!(stats.lines, 2, "but only every third line is considered");
+        assert_eq!(stats.positions, 2);
+
+        let (expected, _) = convert_all(
+            &format!("{REAL_LINE}\n{MATE_LINE}\n"),
+            ConvertConfig::default(),
+        );
+        assert_eq!(strided, expected, "the stride must select lines 0 and 3");
+
+        let (prefix, _) = convert_all(
+            &source,
+            ConvertConfig {
+                max_positions: Some(2),
+                ..ConvertConfig::default()
+            },
+        );
+        assert_ne!(
+            strided, prefix,
+            "a stride must not degenerate into the prefix it exists to avoid"
+        );
+    }
+
+    #[test]
+    fn a_strided_restart_selects_the_same_lines_an_uninterrupted_run_would() {
+        let source = format!("{REAL_LINE}\n{REAL_LINE}\n{REAL_LINE}\n{MATE_LINE}\n");
+        let config = ConvertConfig {
+            sample_stride: 3,
+            ..ConvertConfig::default()
+        };
+        let (whole, _) = convert_all(&source, config);
+
+        let (first, first_stats) = convert_all(
+            &source,
+            ConvertConfig {
+                max_positions: Some(1),
+                ..config
+            },
+        );
+        let (rest, _) = convert_all(
+            &source,
+            ConvertConfig {
+                skip_lines: first_stats.lines_consumed,
+                ..config
+            },
+        );
+
+        let mut rejoined = first;
+        rejoined.extend_from_slice(&rest);
+        assert_eq!(
+            rejoined, whole,
+            "the stride is anchored to the absolute line number, so a restart \
+             must not shift the selection"
         );
     }
 

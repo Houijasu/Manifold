@@ -9,7 +9,8 @@
 //! * **generate** — `datagen --out <file> [--format bulletformat] --games N --nodes N
 //!   --threads N --seed N [--score-bound N]`
 //! * **convert** — `datagen --out <file> --from-jsonl <file> [--max-positions N]
-//!   [--resume] [--score-bound N]`, reading the CC0 Lichess evaluation database
+//!   [--sample-stride N] [--resume] [--score-bound N]`, reading the CC0 Lichess
+//!   evaluation database
 //! * **validate** — `datagen --validate <file> [--format bulletformat] [--check-filters]
 //!   [--score-bound N] [--report <file>]`
 //!
@@ -106,6 +107,7 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
     let mut seed = None;
     let mut score_bound = None;
     let mut max_positions = None;
+    let mut sample_stride = None;
 
     let mut index = 0;
     while index < arguments.len() {
@@ -129,6 +131,11 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                 &mut max_positions,
                 parse_u64(&value()?, "--max-positions")?,
                 "--max-positions",
+            )?,
+            "--sample-stride" => set_once(
+                &mut sample_stride,
+                parse_u64(&value()?, "--sample-stride")?,
+                "--sample-stride",
             )?,
             "--games" => set_once(&mut games, parse_u64(&value()?, "--games")?, "--games")?,
             "--nodes" => set_once(&mut nodes, parse_u64(&value()?, "--nodes")?, "--nodes")?,
@@ -183,6 +190,11 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                     "--from-jsonl is an input source for --out, not for --validate",
                 ));
             }
+            if sample_stride.is_some() {
+                return Err(datagen_usage(
+                    "--sample-stride applies to --from-jsonl conversion, not to --validate",
+                ));
+            }
             Ok(Command::Validate(ValidateOptions {
                 input,
                 check_filters,
@@ -204,6 +216,10 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                     "{rejected} applies to self-play generation, not to --from-jsonl"
                 )));
             }
+            let sample_stride = sample_stride.unwrap_or(1);
+            if sample_stride == 0 {
+                return Err(datagen_usage("--sample-stride must be at least 1"));
+            }
             let source = from_jsonl.expect("guarded by the match arm");
             Ok(Command::Convert(ConvertOptions {
                 out,
@@ -212,6 +228,7 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                 config: ConvertConfig {
                     filter,
                     max_positions,
+                    sample_stride,
                     ..ConvertConfig::default()
                 },
             }))
@@ -232,6 +249,12 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                 return Err(datagen_usage(
                     "--resume applies to --from-jsonl conversion; self-play generation \
                      is reproduced from --seed instead",
+                ));
+            }
+            if sample_stride.is_some() {
+                return Err(datagen_usage(
+                    "--sample-stride subsamples a --from-jsonl source; self-play \
+                     generation is bounded by --games instead",
                 ));
             }
             let threads = threads.unwrap_or(1);
@@ -506,6 +529,7 @@ fn write_convert_summary<W: Write>(
         options.config.effective_mate_cp()
     ))?;
     emit(format!("tie_break={}", mf_datagen::TIE_BREAK_RULE))?;
+    emit(format!("sample_stride={}", options.config.sample_stride))?;
     emit(format!("wdl_lambda={:.1}", mf_datagen::RUNG1_WDL_LAMBDA))?;
     emit(
         "result_placeholder=draw; the source has no game result, so the result byte is \
@@ -623,7 +647,7 @@ fn datagen_help() -> &'static str {
      \x20 manifold datagen --out <FILE> [--format bulletformat] [--games N] [--nodes N]\n\
      \x20                  [--threads N] [--seed N] [--score-bound N]\n\
      \x20 manifold datagen --out <FILE> --from-jsonl <FILE|-> [--max-positions N]\n\
-     \x20                  [--resume] [--score-bound N]\n\
+     \x20                  [--sample-stride N] [--resume] [--score-bound N]\n\
      \x20 manifold datagen --validate <FILE> [--format bulletformat] [--check-filters]\n\
      \x20                  [--score-bound N] [--report <FILE>]\n\
      \n\
@@ -638,6 +662,8 @@ fn datagen_help() -> &'static str {
      \x20                     '-' reads standard input, so the .zst archive can be\n\
      \x20                     stream-decompressed rather than unpacked to disk\n\
      \x20 --max-positions N   stop after emitting N records (--from-jsonl only)\n\
+     \x20 --sample-stride N   keep one source line in every N, spreading a bounded\n\
+     \x20                     sample across the whole file (--from-jsonl only)\n\
      \x20 --resume            continue a --from-jsonl run from its .progress checkpoint\n\
      \x20 --format <NAME>     output format; only 'bulletformat' is supported\n\
      \x20 --games N           self-play games to generate (default 100)\n\
@@ -657,6 +683,10 @@ fn datagen_help() -> &'static str {
      by knodes and then by file order. Mate announcements saturate to the score bound.\n\
      The source has NO game result, so every converted record carries a neutral draw\n\
      placeholder and must be trained with bullet's WDL lambda at 0.0 (pure eval).\n\
+     \n\
+     The source file is ORDERED - later positions have markedly fewer pieces and\n\
+     larger evals - so its first N lines are not a sample of it. Use --sample-stride\n\
+     to spread a bounded corpus across the whole file rather than truncating it.\n\
      \n\
      Examples:\n\
      \x20 manifold datagen --out data.bullet --games 2000 --nodes 5000 --threads 8 --seed 7\n\
@@ -1050,12 +1080,69 @@ mod tests {
         assert!(run(&["--out", "x.bin", "--max-positions", "10"]).is_err());
         assert!(run(&["--out", "x.bin", "--resume"]).is_err());
         assert!(run(&["--validate", "x.bin", "--from-jsonl", "s.jsonl"]).is_err());
+        assert!(run(&["--out", "x.bin", "--sample-stride", "4"]).is_err());
+        assert!(run(&["--validate", "x.bin", "--sample-stride", "4"]).is_err());
+    }
+
+    #[test]
+    fn a_sample_stride_subsamples_the_source_and_is_recorded_in_the_summary() {
+        let source = write_source("stride");
+        let out = temp("stride-out");
+        let summary = run(&[
+            "--out",
+            out.to_str().expect("path is UTF-8"),
+            "--from-jsonl",
+            source.to_str().expect("path is UTF-8"),
+            "--sample-stride",
+            "2",
+        ])
+        .expect("strided conversion succeeds");
+
+        assert_eq!(field(&summary, "sample_stride="), "2");
+        let consumed: u64 = field(&summary, "lines_consumed=").parse().expect("number");
+        let considered: u64 = field(&summary, "lines=").parse().expect("number");
+        assert!(consumed > considered, "a stride must skip lines it reads");
+
+        // The stride must be a real selection knob, not a no-op that happens to parse.
+        let whole = temp("stride-whole");
+        run(&[
+            "--out",
+            whole.to_str().expect("path is UTF-8"),
+            "--from-jsonl",
+            source.to_str().expect("path is UTF-8"),
+        ])
+        .expect("unstrided conversion succeeds");
+        assert!(
+            std::fs::metadata(&out).expect("strided").len()
+                < std::fs::metadata(&whole).expect("whole").len()
+        );
+
+        assert!(
+            run(&[
+                "--out",
+                out.to_str().expect("path is UTF-8"),
+                "--from-jsonl",
+                source.to_str().expect("path is UTF-8"),
+                "--sample-stride",
+                "0",
+            ])
+            .is_err()
+        );
+
+        let _ = std::fs::remove_file(&source);
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&whole);
     }
 
     #[test]
     fn help_documents_the_conversion_source() {
         let help = run(&["--help"]).expect("help succeeds");
-        for flag in ["--from-jsonl", "--max-positions", "--resume"] {
+        for flag in [
+            "--from-jsonl",
+            "--max-positions",
+            "--sample-stride",
+            "--resume",
+        ] {
             assert!(help.contains(flag), "help must document {flag}");
         }
         assert!(
