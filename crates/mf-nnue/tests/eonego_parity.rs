@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use mf_core::{Color, Position};
@@ -38,8 +38,7 @@ fn resolve_network_path(explicit_path: Option<OsString>) -> (PathBuf, bool) {
     (path, is_explicit)
 }
 
-fn local_network(gate: &str) -> Option<Network> {
-    let (path, is_explicit) = resolve_network_path(std::env::var_os("MF_NNUE_TEST_NET"));
+fn load_network(path: &Path, is_explicit: bool, gate: &str) -> Option<Network> {
     if !path.is_file() {
         assert!(
             !is_explicit,
@@ -56,15 +55,18 @@ fn local_network(gate: &str) -> Option<Network> {
     )
 }
 
-fn validate_explicit_network_path() {
-    let (path, is_explicit) = resolve_network_path(std::env::var_os("MF_NNUE_TEST_NET"));
-    if is_explicit {
-        assert!(
-            path.is_file(),
-            "MF_NNUE_TEST_NET requires an existing network file: {}",
-            path.display()
-        );
-    }
+fn explicit_network(gate: &str) -> Option<Network> {
+    let path = std::env::var_os("MF_NNUE_TEST_NET").map(PathBuf::from)?;
+    load_network(&path, true, gate)
+}
+
+fn default_network(gate: &str) -> Option<Network> {
+    let (path, is_explicit) = resolve_network_path(None);
+    load_network(&path, is_explicit, gate)
+}
+
+fn local_network(gate: &str) -> Option<Network> {
+    explicit_network(gate).or_else(|| default_network(gate))
 }
 
 fn chess960_fen(fen: &str) -> bool {
@@ -138,6 +140,13 @@ fn network_path_resolution_marks_only_environment_paths_as_explicit() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue")
     );
     assert!(!is_explicit);
+}
+
+#[test]
+#[should_panic(expected = "failed to load NNUE network")]
+fn existing_invalid_network_is_rejected_by_loader() {
+    let path = fixture_path("README.md");
+    let _ = load_network(&path, true, "invalid-network helper test");
 }
 
 #[test]
@@ -222,7 +231,7 @@ fn manifold_matches_eonego_on_10k_reference_positions() {
 
 #[test]
 fn root_accumulator_stack_matches_eonego_on_10k_reference_positions() {
-    validate_explicit_network_path();
+    let explicit_network = explicit_network("10k Eonego root-stack parity gate");
 
     if cfg!(debug_assertions) {
         eprintln!("SKIPPED: 10k Eonego root-stack parity gate runs only in release builds");
@@ -234,8 +243,14 @@ fn root_accumulator_stack_matches_eonego_on_10k_reference_positions() {
     let dump = read_dump();
     assert_eq!(dump.len(), DUMP_BYTES, "fixture dump byte size");
 
-    let Some(network) = local_network("10k Eonego root-stack parity gate") else {
-        return;
+    let network = match explicit_network {
+        Some(network) => network,
+        None => {
+            let Some(network) = default_network("10k Eonego root-stack parity gate") else {
+                return;
+            };
+            network
+        }
     };
 
     let started = Instant::now();
