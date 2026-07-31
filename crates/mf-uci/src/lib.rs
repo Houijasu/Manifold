@@ -5,12 +5,14 @@ mod datagen_cli;
 pub use datagen_cli::run_datagen_subcommand;
 
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move, perft_divide};
+use mf_nnue::{Network, NetworkSource, production_forward_mode, resolve_network};
 use mf_search::{
     IterationInfo, PoolError, PoolSearchResult, SearchLimits, SearchOptions, SearchPool,
     SearchResult, SharedHistory, TranspositionTable, clamp_centipawn_score, score_to_uci_mate,
@@ -49,6 +51,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseCorrHistMajor type check default false",
     "option name UseCorrHistMaterial type check default false",
     "option name UseCorrHistCont type check default true",
+    "option name UseNnue type check default true",
     "option name EvalFile type string default <empty>",
     "uciok",
 ];
@@ -74,6 +77,10 @@ struct EngineState {
     position: Position,
     position_history: Vec<u64>,
     chess960: bool,
+    use_nnue: bool,
+    network: Option<Arc<Network>>,
+    network_source: Option<NetworkSource>,
+    network_resolution_error: Option<Arc<str>>,
     search_pool: Arc<SearchPool>,
     search_options: SearchOptions,
     transposition_table: Arc<TranspositionTable>,
@@ -82,10 +89,15 @@ struct EngineState {
 impl Default for EngineState {
     fn default() -> Self {
         let position = Position::startpos();
+        let network = default_network_resolution();
         Self {
             position_history: vec![position.repetition_key()],
             position,
             chess960: false,
+            use_nnue: true,
+            network: network.network,
+            network_source: network.source,
+            network_resolution_error: network.error,
             search_pool: Arc::new(
                 SearchPool::new(1).expect("the default search worker should start"),
             ),
@@ -96,6 +108,39 @@ impl Default for EngineState {
             ),
         }
     }
+}
+
+#[derive(Clone)]
+struct SharedNetworkResolution {
+    network: Option<Arc<Network>>,
+    source: Option<NetworkSource>,
+    error: Option<Arc<str>>,
+}
+
+fn default_network_resolution() -> SharedNetworkResolution {
+    static RESOLUTION: OnceLock<SharedNetworkResolution> = OnceLock::new();
+    RESOLUTION
+        .get_or_init(|| match resolve_network(None) {
+            Ok(Some(resolved)) => {
+                let (network, source) = resolved.into_parts();
+                SharedNetworkResolution {
+                    network: Some(Arc::new(network)),
+                    source: Some(source),
+                    error: None,
+                }
+            }
+            Ok(None) => SharedNetworkResolution {
+                network: None,
+                source: None,
+                error: None,
+            },
+            Err(error) => SharedNetworkResolution {
+                network: None,
+                source: None,
+                error: Some(Arc::from(error.to_string())),
+            },
+        })
+        .clone()
 }
 
 impl EngineState {
@@ -566,7 +611,7 @@ fn handle_setoption<W: Write>(
     writer: &mut W,
 ) -> io::Result<()> {
     let tokens: Vec<_> = command.split_whitespace().collect();
-    if tokens.len() < 5
+    if tokens.len() < 4
         || !tokens[0].eq_ignore_ascii_case("setoption")
         || !tokens[1].eq_ignore_ascii_case("name")
     {
@@ -585,6 +630,10 @@ fn handle_setoption<W: Write>(
     if name.eq_ignore_ascii_case("UCI_Chess960") {
         if let Some(enabled) = parse_check_option(&value) {
             state.chess960 = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseNnue") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.use_nnue = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseNMP") {
         if let Some(enabled) = parse_check_option(&value) {
@@ -662,6 +711,8 @@ fn handle_setoption<W: Write>(
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_correction_sources[source] = enabled;
         }
+    } else if name.eq_ignore_ascii_case("EvalFile") {
+        handle_eval_file(&value, state, writer)?;
     } else if name.eq_ignore_ascii_case("Hash") {
         let Ok(requested) = value.parse::<i128>() else {
             writeln!(writer, "info string invalid Hash value '{value}'")?;
@@ -708,6 +759,67 @@ fn handle_setoption<W: Write>(
         }
     }
     Ok(())
+}
+
+fn handle_eval_file<W: Write>(
+    value: &str,
+    state: &mut EngineState,
+    writer: &mut W,
+) -> io::Result<()> {
+    let automatic = value.is_empty() || value.eq_ignore_ascii_case("<empty>");
+    if automatic {
+        let resolution = default_network_resolution();
+        if let Some(error) = resolution.error {
+            state.network_resolution_error = Some(Arc::clone(&error));
+            writeln!(
+                writer,
+                "info string unable to load EvalFile automatic source: {error}"
+            )?;
+            return Ok(());
+        }
+
+        state.network = resolution.network;
+        state.network_source = resolution.source;
+        state.network_resolution_error = None;
+        return write_network_selection(writer, state, "automatic resolution");
+    }
+
+    match resolve_network(Some(Path::new(value))) {
+        Ok(Some(resolved)) => {
+            let (network, source) = resolved.into_parts();
+            state.network = Some(Arc::new(network));
+            state.network_source = Some(source);
+            state.network_resolution_error = None;
+            write_network_selection(writer, state, "EvalFile")
+        }
+        Ok(None) => unreachable!("an explicit EvalFile never resolves to no network"),
+        Err(error) => {
+            state.network_resolution_error = Some(Arc::from(error.to_string()));
+            writeln!(writer, "info string unable to load EvalFile {error}")
+        }
+    }
+}
+
+fn write_network_selection<W: Write>(
+    writer: &mut W,
+    state: &EngineState,
+    selection: &str,
+) -> io::Result<()> {
+    let Some(network) = state.network.as_ref() else {
+        return writeln!(writer, "info string {selection} found no NNUE network");
+    };
+    let source = state
+        .network_source
+        .as_ref()
+        .expect("a loaded network must retain its source");
+    let mode = production_forward_mode();
+    writeln!(
+        writer,
+        "info string {selection} loaded from {source}; network \"{}\"; backend {:?}; sparse FC0 {}",
+        network.description(),
+        mode.backend(),
+        mode.sparse_fc0()
+    )
 }
 
 /// Maps a per-variant correction-history option name to its `use_correction_sources` index.
@@ -1373,6 +1485,176 @@ mod tests {
         assert!(!state.search_options.use_capture_history);
         assert!(state.search_options.use_pawn_history);
         assert!(state.search_options.use_history_pruning);
+    }
+
+    #[test]
+    fn use_nnue_parses_case_insensitively_and_survives_new_game() {
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+
+        handle_setoption(
+            "SeToPtIoN NaMe UsEnNuE VaLuE FaLsE",
+            &mut state,
+            &mut output,
+        )
+        .expect("UseNnue output should be writable");
+        state
+            .new_game()
+            .expect("the default search pool should clear the table");
+
+        assert!(!state.use_nnue);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn bad_explicit_eval_file_preserves_the_previous_network_arc() {
+        let valid =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+        handle_setoption(
+            &format!("setoption name EvalFile value {}", valid.display()),
+            &mut state,
+            &mut output,
+        )
+        .expect("valid setup EvalFile should load");
+        let original = Arc::clone(
+            state
+                .network
+                .as_ref()
+                .expect("valid setup network should resolve"),
+        );
+        let missing = std::env::temp_dir().join(format!(
+            "manifold-missing-eval-file-{}.nnue",
+            std::process::id()
+        ));
+        output.clear();
+
+        handle_setoption(
+            &format!("setoption name EvalFile value {}", missing.display()),
+            &mut state,
+            &mut output,
+        )
+        .expect("EvalFile failure should be writable");
+
+        assert!(Arc::ptr_eq(
+            state
+                .network
+                .as_ref()
+                .expect("failed replacement should preserve the network"),
+            &original
+        ));
+        assert!(
+            String::from_utf8(output)
+                .expect("protocol output should be UTF-8")
+                .starts_with("info string unable to load EvalFile")
+        );
+    }
+
+    #[test]
+    fn good_explicit_eval_file_loads_and_reports_source_description_and_backend() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+
+        handle_setoption(
+            &format!("setoption name EvalFile value {}", path.display()),
+            &mut state,
+            &mut output,
+        )
+        .expect("EvalFile success should be writable");
+
+        assert!(state.network.is_some());
+        assert_eq!(
+            state.network_source.as_ref(),
+            Some(&mf_nnue::NetworkSource::Explicit(path.clone()))
+        );
+        let output = String::from_utf8(output).expect("protocol output should be UTF-8");
+        assert!(output.starts_with("info string"));
+        assert!(output.contains(&path.display().to_string()));
+        assert!(
+            output.contains(
+                state
+                    .network
+                    .as_ref()
+                    .expect("network should be present")
+                    .description()
+            )
+        );
+        assert!(output.contains("backend"));
+    }
+
+    #[test]
+    fn empty_marker_eval_file_value_returns_to_automatic_resolution() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+        handle_setoption(
+            &format!("setoption name EvalFile value {}", path.display()),
+            &mut state,
+            &mut output,
+        )
+        .expect("explicit EvalFile should load");
+        assert!(state.network.is_some());
+
+        output.clear();
+        handle_setoption(
+            "setoption name EvalFile value <empty>",
+            &mut state,
+            &mut output,
+        )
+        .expect("automatic EvalFile reset should be writable");
+
+        assert!(state.network.is_none());
+        assert!(state.network_source.is_none());
+    }
+
+    #[test]
+    fn empty_eval_file_value_returns_to_automatic_resolution() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+        handle_setoption(
+            &format!("setoption name EvalFile value {}", path.display()),
+            &mut state,
+            &mut output,
+        )
+        .expect("explicit EvalFile should load");
+        assert!(state.network.is_some());
+
+        output.clear();
+        handle_setoption("setoption name EvalFile value", &mut state, &mut output)
+            .expect("empty automatic EvalFile reset should be writable");
+
+        assert!(state.network.is_none());
+        assert!(state.network_source.is_none());
+    }
+
+    #[test]
+    fn existing_invalid_eval_file_reports_a_strict_format_error() {
+        let path = std::env::temp_dir().join(format!(
+            "manifold-invalid-eval-file-{}.nnue",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"invalid NNUE fixture")
+            .expect("invalid EvalFile fixture should be written");
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+
+        handle_setoption(
+            &format!("setoption name EvalFile value {}", path.display()),
+            &mut state,
+            &mut output,
+        )
+        .expect("strict EvalFile error should be writable");
+
+        let _ = std::fs::remove_file(&path);
+        let output = String::from_utf8(output).expect("protocol output should be UTF-8");
+        assert!(output.starts_with("info string unable to load EvalFile"));
+        assert!(output.contains("unexpected NNUE version"));
     }
 
     #[test]

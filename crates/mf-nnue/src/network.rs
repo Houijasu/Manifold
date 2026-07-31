@@ -202,6 +202,14 @@ impl Network {
         Self::from_bytes(&bytes)
     }
 
+    /// Parses the repository network compiled into an `embedded-net` build.
+    #[cfg(feature = "embedded-net")]
+    pub fn from_embedded() -> Result<Self, LoadError> {
+        const EMBEDDED_NETWORK: &[u8] =
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../nets/main.nnue"));
+        Self::from_bytes(EMBEDDED_NETWORK)
+    }
+
     #[must_use]
     pub const fn version(&self) -> u32 {
         self.version

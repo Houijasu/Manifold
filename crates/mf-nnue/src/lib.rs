@@ -5,6 +5,7 @@ mod eval;
 mod format;
 pub mod halfka;
 mod network;
+mod provision;
 mod simd;
 pub mod threats;
 
@@ -16,6 +17,7 @@ pub use network::{
     FC0_OUT, FC1_IN, FC1_OUT, FC2_IN, HALF, HALF_KA_DIMS, HalfKaWeights, L1, LAYER_STACKS,
     LayerStack, LoadError, Network, PSQT_BUCKETS, THREAT_DIMS, ThreatWeights, VERSION,
 };
+pub use provision::{NetworkSource, ResolveError, ResolvedNetwork, resolve_network};
 pub use simd::{
     ForwardMode, SimdBackend, UnsupportedBackend, UnsupportedBackendReason, production_forward_mode,
 };
