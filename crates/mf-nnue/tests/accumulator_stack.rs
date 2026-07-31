@@ -37,7 +37,11 @@ fn assert_matches_from_scratch(
     position: &Position,
 ) {
     let rebuilt = AccumulatorState::from_position(network, position);
-    assert_eq!(stack.current(), &rebuilt);
+    assert_eq!(
+        stack.current(),
+        &rebuilt,
+        "incremental accumulator diverged in {position:?}"
+    );
 
     let mut incremental_features = [0; L1];
     let mut rebuilt_features = [0; L1];
@@ -303,4 +307,84 @@ fn depth_errors_are_reported_without_indexing_out_of_bounds() {
             capacity: ACCUMULATOR_STACK_CAPACITY,
         })
     );
+}
+
+#[test]
+fn ten_thousand_position_standard_and_chess960_walk_matches_full_rebuilds() {
+    let Some(network) = local_network() else {
+        return;
+    };
+    let roots = [
+        (
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            false,
+        ),
+        (
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            false,
+        ),
+        ("r1k2r2/pppppppp/8/8/8/8/PPPPPPPP/R1K2R2 w FAfa - 0 1", true),
+        ("3r2kr/pppppppp/8/8/8/8/PPPPPPPP/3R2KR w HDhd - 0 1", true),
+        ("4kr2/pppppppp/8/8/8/8/PPPPPPPP/4KR2 w Ff - 0 1", true),
+    ];
+    let mut verified = 0_usize;
+
+    for (root_index, (fen, chess960)) in roots.into_iter().enumerate() {
+        let root = Position::from_fen(fen, chess960).expect("walk root should parse");
+        let mut position = root.clone();
+        let mut stack = AccumulatorStack::new(&network, &root);
+        let mut history = Vec::new();
+        let mut random =
+            0x9E37_79B9_7F4A_7C15_u64 ^ (root_index as u64).wrapping_mul(0xD1B5_4A32_D192_ED03);
+
+        while verified < (root_index + 1) * 2_000 {
+            if history.len() >= 48 || generate_legal_moves(&position).is_empty() {
+                while let Some((mv, undo)) = history.pop() {
+                    position.unmake_move(mv, undo);
+                    stack.pop().expect("walk pop should have a parent");
+                    assert_matches_from_scratch(&network, &stack, &position);
+                    verified += 1;
+                    if verified >= (root_index + 1) * 2_000 {
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            if verified.is_multiple_of(23) {
+                let undo = position.make_null_move();
+                stack.push_null().expect("null walk push should fit");
+                assert_matches_from_scratch(&network, &stack, &position);
+                verified += 1;
+                position.unmake_null_move(undo);
+                stack.pop().expect("null walk pop should have a parent");
+                assert_matches_from_scratch(&network, &stack, &position);
+                verified += 1;
+                continue;
+            }
+
+            let moves = generate_legal_moves(&position);
+            random ^= random << 13;
+            random ^= random >> 7;
+            random ^= random << 17;
+            let mv = moves[random as usize % moves.len()];
+            let undo = position.make_move(mv);
+            stack
+                .push_real(&position, mv, &undo)
+                .expect("walk should fit accumulator capacity");
+            assert_matches_from_scratch(&network, &stack, &position);
+            verified += 1;
+            history.push((mv, undo));
+
+            if history.len() > 1 && random & 7 == 0 {
+                let (mv, undo) = history.pop().expect("history is non-empty");
+                position.unmake_move(mv, undo);
+                stack.pop().expect("sibling pop should have a parent");
+                assert_matches_from_scratch(&network, &stack, &position);
+                verified += 1;
+            }
+        }
+    }
+
+    assert!(verified >= 10_000);
 }

@@ -12,7 +12,10 @@ use crate::simd::{
     ForwardMode, SimdBackend, UnsupportedBackend, add_i8_row, add_i16_row, add_psqt_row,
     production_forward_mode, subtract_i8_row, subtract_i16_row, subtract_psqt_row,
 };
-use crate::threats::{MAX_ACTIVE, append_active_threats};
+use crate::threats::{
+    ChangedThreatBuffer, MAX_ACTIVE, MAX_CHANGED, append_active_threats,
+    append_changed_threat_indices, discover_changed_threats,
+};
 
 /// Maximum number of child plies retained after the root position.
 pub const ACCUMULATOR_STACK_CAPACITY: usize = 128;
@@ -94,13 +97,8 @@ impl Accumulator {
         accumulator
     }
 
-    fn remove_threats(
-        &mut self,
-        network: &Network,
-        active_threats: &ActiveThreats,
-        backend: SimdBackend,
-    ) {
-        for feature in active_threats.iter() {
+    fn remove_threats(&mut self, network: &Network, features: &[usize], backend: SimdBackend) {
+        for &feature in features {
             subtract_i8_row(
                 backend,
                 &mut self.values,
@@ -119,13 +117,8 @@ impl Accumulator {
         }
     }
 
-    fn add_threats(
-        &mut self,
-        network: &Network,
-        active_threats: &ActiveThreats,
-        backend: SimdBackend,
-    ) {
-        for feature in active_threats.iter() {
+    fn add_threats(&mut self, network: &Network, features: &[usize], backend: SimdBackend) {
+        for &feature in features {
             add_i8_row(
                 backend,
                 &mut self.values,
@@ -290,24 +283,39 @@ impl AccumulatorState {
         &self.accumulators[perspective.index()]
     }
 
-    fn update(
+    fn update<const CAPACITY: usize>(
         &mut self,
         context: UpdateContext<'_>,
         previous_metadata: &FrameMetadata,
         child_metadata: &mut FrameMetadata,
+        changed_threats: &ChangedThreatBuffer<CAPACITY>,
         removed: &[PieceDelta],
         added: &[PieceDelta],
     ) {
+        if changed_threats.overflowed() {
+            *self = Self::build_with_backend(context.network, context.child, context.backend);
+            *child_metadata = FrameMetadata::from_position(context.child);
+            return;
+        }
+
+        let mut threat_additions = [0_usize; MAX_CHANGED];
+        let mut threat_removals = [0_usize; MAX_CHANGED];
         for perspective in Color::ALL {
             let index = perspective.index();
-            let accumulator = &mut self.accumulators[perspective.index()];
-            accumulator.remove_threats(
-                context.network,
-                &previous_metadata.active_threats[index],
-                context.backend,
-            );
-
             let child_king = context.child.king_square(perspective);
+            child_metadata.king_squares[index] = child_king;
+
+            if previous_metadata.king_squares[index] != child_king {
+                self.accumulators[index] = Accumulator::build(
+                    context.network,
+                    context.child,
+                    perspective,
+                    context.backend,
+                );
+                continue;
+            }
+
+            let accumulator = &mut self.accumulators[index];
             accumulator.update_halfka(
                 context,
                 perspective,
@@ -316,12 +324,21 @@ impl AccumulatorState {
                 removed,
                 added,
             );
-
-            child_metadata.king_squares[index] = child_king;
-            child_metadata.active_threats[index].fill(perspective, context.child);
+            let (addition_count, removal_count) = append_changed_threat_indices(
+                perspective,
+                context.child,
+                changed_threats,
+                &mut threat_additions,
+                &mut threat_removals,
+            );
+            accumulator.remove_threats(
+                context.network,
+                &threat_removals[..removal_count],
+                context.backend,
+            );
             accumulator.add_threats(
                 context.network,
-                &child_metadata.active_threats[index],
+                &threat_additions[..addition_count],
                 context.backend,
             );
         }
@@ -329,44 +346,8 @@ impl AccumulatorState {
 }
 
 #[derive(Clone, Copy)]
-struct ActiveThreats {
-    indices: [u16; MAX_ACTIVE],
-    count: u16,
-}
-
-impl ActiveThreats {
-    const EMPTY: Self = Self {
-        indices: [0; MAX_ACTIVE],
-        count: 0,
-    };
-
-    fn from_position(perspective: Color, position: &Position) -> Self {
-        let mut active = Self::EMPTY;
-        active.fill(perspective, position);
-        active
-    }
-
-    fn fill(&mut self, perspective: Color, position: &Position) {
-        let mut indices = [0; MAX_ACTIVE];
-        let count = append_active_threats(perspective, position, &mut indices);
-        for (destination, feature) in self.indices.iter_mut().zip(indices).take(count) {
-            *destination =
-                u16::try_from(feature).expect("FullThreats feature index must fit in u16");
-        }
-        self.count = u16::try_from(count).expect("active FullThreats count must fit in u16");
-    }
-
-    fn iter(&self) -> impl Iterator<Item = usize> + '_ {
-        self.indices[..usize::from(self.count)]
-            .iter()
-            .map(|&feature| usize::from(feature))
-    }
-}
-
-#[derive(Clone, Copy)]
 struct FrameMetadata {
     king_squares: [Square; 2],
-    active_threats: [ActiveThreats; 2],
 }
 
 impl FrameMetadata {
@@ -375,10 +356,6 @@ impl FrameMetadata {
             king_squares: [
                 position.king_square(Color::White),
                 position.king_square(Color::Black),
-            ],
-            active_threats: [
-                ActiveThreats::from_position(Color::White, position),
-                ActiveThreats::from_position(Color::Black, position),
             ],
         }
     }
@@ -495,6 +472,15 @@ impl<'network> AccumulatorStack<'network> {
         mv: Move,
         undo: &Undo,
     ) -> Result<(), AccumulatorStackError> {
+        self.push_real_with_threat_capacity::<MAX_CHANGED>(child, mv, undo)
+    }
+
+    fn push_real_with_threat_capacity<const CAPACITY: usize>(
+        &mut self,
+        child: &Position,
+        mv: Move,
+        undo: &Undo,
+    ) -> Result<(), AccumulatorStackError> {
         if self.depth == ACCUMULATOR_STACK_CAPACITY {
             return Err(AccumulatorStackError::CapacityExceeded {
                 capacity: ACCUMULATOR_STACK_CAPACITY,
@@ -504,6 +490,10 @@ impl<'network> AccumulatorStack<'network> {
         let mut removed = [EMPTY_DELTA; MAX_PIECE_DELTAS];
         let mut added = [EMPTY_DELTA; MAX_PIECE_DELTAS];
         let (removed_count, added_count) = move_deltas(mv, undo, &mut removed, &mut added);
+        let mut parent = child.clone();
+        parent.unmake_move(mv, undo.clone());
+        let mut changed_threats = ChangedThreatBuffer::<CAPACITY>::new();
+        discover_changed_threats(&parent, child, mv, undo, &mut changed_threats);
 
         let next_depth = self.depth + 1;
         let (parents, children) = self.frames.split_at_mut(next_depth);
@@ -516,6 +506,7 @@ impl<'network> AccumulatorStack<'network> {
             },
             &parents[self.depth].metadata,
             &mut children[0].metadata,
+            &changed_threats,
             &removed[..removed_count],
             &added[..added_count],
         );
@@ -758,8 +749,8 @@ mod tests {
     use mf_core::{Color, Position};
 
     use super::{
-        Accumulator, AccumulatorFrame, AccumulatorStack, AccumulatorState, ActiveThreats,
-        FrameMetadata, build_i32_oracle,
+        Accumulator, AccumulatorFrame, AccumulatorStack, AccumulatorState, FrameMetadata,
+        STACK_STATES, build_i32_oracle,
     };
     use crate::simd::{reset_sparse_fc0_calls, sparse_fc0_calls};
     use crate::{ForwardMode, L1, Network, SimdBackend};
@@ -792,18 +783,17 @@ mod tests {
     #[test]
     fn stack_frames_keep_compact_metadata_and_cache_line_alignment() {
         assert_eq!(
-            core::mem::size_of::<ActiveThreats>(),
-            crate::threats::MAX_ACTIVE * core::mem::size_of::<u16>() + core::mem::size_of::<u16>()
-        );
-        assert_eq!(
             core::mem::size_of::<FrameMetadata>(),
-            2 * core::mem::size_of::<mf_core::Square>() + 2 * core::mem::size_of::<ActiveThreats>()
+            2 * core::mem::size_of::<mf_core::Square>()
         );
-        assert_eq!(core::mem::size_of::<ActiveThreats>(), 514);
-        assert_eq!(core::mem::size_of::<FrameMetadata>(), 1_030);
+        assert_eq!(core::mem::size_of::<FrameMetadata>(), 2);
         assert_eq!(core::mem::size_of::<AccumulatorState>(), 4_224);
         assert_eq!(core::mem::align_of::<AccumulatorFrame>(), 64);
-        assert_eq!(core::mem::size_of::<AccumulatorFrame>(), 5_312);
+        assert_eq!(core::mem::size_of::<AccumulatorFrame>(), 4_288);
+        assert_eq!(
+            core::mem::size_of::<AccumulatorFrame>() * STACK_STATES,
+            553_152
+        );
     }
 
     #[test]
@@ -884,6 +874,32 @@ mod tests {
         assert_eq!(
             sparse_stack.evaluate(&position),
             dense_stack.evaluate(&position)
+        );
+    }
+
+    #[test]
+    fn dirty_threat_overflow_falls_back_to_an_exact_full_rebuild() {
+        let Some(network) = local_network("dirty-threat overflow fallback test") else {
+            return;
+        };
+        let parent = Position::from_fen(
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            false,
+        )
+        .expect("test FEN should parse");
+        let mv = mf_core::parse_uci_move(&parent, "e5d7", false)
+            .expect("overflow-test move should be legal");
+        let mut child = parent.clone();
+        let undo = child.make_move(mv);
+        let mut stack = AccumulatorStack::new(&network, &parent);
+
+        stack
+            .push_real_with_threat_capacity::<0>(&child, mv, &undo)
+            .expect("overflow fallback push should fit");
+
+        assert_eq!(
+            stack.current(),
+            &AccumulatorState::from_position(&network, &child)
         );
     }
 }

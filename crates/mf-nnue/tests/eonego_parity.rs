@@ -49,7 +49,7 @@ fn load_network(path: &Path, is_explicit: bool, gate: &str) -> Option<Network> {
         return None;
     }
     Some(
-        Network::load(&path).unwrap_or_else(|error| {
+        Network::load(path).unwrap_or_else(|error| {
             panic!("failed to load NNUE network {}: {error}", path.display())
         }),
     )

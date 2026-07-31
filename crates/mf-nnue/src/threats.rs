@@ -6,14 +6,16 @@
 use std::sync::OnceLock;
 
 use mf_core::{
-    Bitboard, Color, Piece, PieceKind, Position, Square, bishop_attacks, king_attacks,
-    knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
+    Bitboard, CastlingSide, Color, Move, Piece, PieceKind, Position, Square, Undo, bishop_attacks,
+    king_attacks, knight_attacks, pawn_attacks, queen_attacks, rook_attacks,
 };
 
 /// Number of FullThreats input dimensions.
 pub const DIMENSIONS: usize = 60_720;
 /// Safe fixed capacity for active FullThreats features.
 pub const MAX_ACTIVE: usize = 256;
+/// Maximum number of physical FullThreats edge changes produced by one move.
+pub(crate) const MAX_CHANGED: usize = 128;
 
 const PIECE_NB: usize = 16;
 const BOARD_SQUARES: usize = 64;
@@ -36,6 +38,8 @@ const ORIENT_TABLE: [u8; 64] = [
 ];
 const FILE_A: u64 = 0x0101_0101_0101_0101;
 const FILE_H: u64 = 0x8080_8080_8080_8080;
+const DIRTY_SIGN_BIT: u32 = 1 << 20;
+const DIRTY_EDGE_MASK: u32 = DIRTY_SIGN_BIT - 1;
 
 /// A piece in the FullThreats reference encoding: `(color << 3) + piece_type`.
 ///
@@ -55,6 +59,141 @@ impl ThreatPiece {
     }
 }
 
+/// Perspective-independent signed FullThreats edge change.
+///
+/// Bits match Eonego exactly: attacker | attacked << 4 | from << 8 | to << 14,
+/// with bit 20 set for additions and clear for removals.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DirtyThreat(u32);
+
+impl DirtyThreat {
+    const EMPTY: Self = Self(0);
+
+    #[inline]
+    pub(crate) const fn new(
+        attacker: ThreatPiece,
+        from: Square,
+        to: Square,
+        attacked: ThreatPiece,
+        sign: i32,
+    ) -> Self {
+        let edge = attacker.0 as u32
+            | ((attacked.0 as u32) << 4)
+            | ((from.index() as u32) << 8)
+            | ((to.index() as u32) << 14);
+        Self(edge | if sign > 0 { DIRTY_SIGN_BIT } else { 0 })
+    }
+
+    #[inline]
+    #[cfg(test)]
+    pub(crate) const fn raw(self) -> u32 {
+        self.0
+    }
+
+    #[inline]
+    pub(crate) const fn physical_bits(self) -> u32 {
+        self.0 & DIRTY_EDGE_MASK
+    }
+
+    #[inline]
+    pub(crate) const fn sign(self) -> i32 {
+        if self.0 & DIRTY_SIGN_BIT != 0 { 1 } else { -1 }
+    }
+
+    #[inline]
+    pub(crate) const fn with_sign(self, sign: i32) -> Self {
+        Self(self.physical_bits() | if sign > 0 { DIRTY_SIGN_BIT } else { 0 })
+    }
+
+    #[inline]
+    pub(crate) const fn attacker(self) -> ThreatPiece {
+        ThreatPiece((self.physical_bits() & 0xF) as u8)
+    }
+
+    #[inline]
+    pub(crate) const fn attacked(self) -> ThreatPiece {
+        ThreatPiece(((self.physical_bits() >> 4) & 0xF) as u8)
+    }
+
+    #[inline]
+    pub(crate) fn from(self) -> Square {
+        square(((self.physical_bits() >> 8) & 0x3F) as usize)
+    }
+
+    #[inline]
+    pub(crate) fn to(self) -> Square {
+        square(((self.physical_bits() >> 14) & 0x3F) as usize)
+    }
+}
+
+/// Fixed-capacity changed-edge buffer. Overflow invalidates the whole delta.
+#[derive(Clone)]
+pub(crate) struct ChangedThreatBuffer<const CAPACITY: usize> {
+    edges: [DirtyThreat; CAPACITY],
+    len: usize,
+    overflowed: bool,
+}
+
+impl<const CAPACITY: usize> ChangedThreatBuffer<CAPACITY> {
+    #[inline]
+    pub(crate) const fn new() -> Self {
+        Self {
+            edges: [DirtyThreat::EMPTY; CAPACITY],
+            len: 0,
+            overflowed: false,
+        }
+    }
+
+    #[inline]
+    #[cfg(test)]
+    pub(crate) const fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline]
+    pub(crate) const fn overflowed(&self) -> bool {
+        self.overflowed
+    }
+
+    #[inline]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = DirtyThreat> + '_ {
+        self.edges[..self.len].iter().copied()
+    }
+
+    /// Adds a raw entry without netting. Used by the fixed-buffer contract test.
+    #[inline]
+    pub(crate) fn push(&mut self, edge: DirtyThreat) -> bool {
+        if self.overflowed {
+            return false;
+        }
+        if self.len == CAPACITY {
+            self.overflowed = true;
+            return false;
+        }
+        self.edges[self.len] = edge;
+        self.len += 1;
+        true
+    }
+
+    /// Adds one locally discovered edge, removing duplicates and opposite-sign cancellations.
+    fn push_netted(&mut self, edge: DirtyThreat) {
+        if self.overflowed {
+            return;
+        }
+        if let Some(index) = self.edges[..self.len]
+            .iter()
+            .position(|candidate| candidate.physical_bits() == edge.physical_bits())
+        {
+            if self.edges[index].sign() != edge.sign() {
+                self.len -= 1;
+                self.edges[index] = self.edges[self.len];
+            }
+            return;
+        }
+        let _ = self.push(edge);
+    }
+}
+
 #[derive(Debug)]
 struct ThreatLuts {
     index_lut1: [u32; INDEX_LUT1_LEN],
@@ -63,6 +202,7 @@ struct ThreatLuts {
 }
 
 static THREAT_LUTS: OnceLock<ThreatLuts> = OnceLock::new();
+static RAY_BEYOND: OnceLock<[u64; BOARD_SQUARES * BOARD_SQUARES]> = OnceLock::new();
 
 #[inline]
 const fn piece_type(piece: usize) -> usize {
@@ -186,6 +326,70 @@ fn build_luts() -> ThreatLuts {
 #[inline]
 fn luts() -> &'static ThreatLuts {
     THREAT_LUTS.get_or_init(build_luts)
+}
+
+fn build_ray_beyond() -> [u64; BOARD_SQUARES * BOARD_SQUARES] {
+    let mut table = [0_u64; BOARD_SQUARES * BOARD_SQUARES];
+    for from in 0_i8..64 {
+        for through in 0_i8..64 {
+            if from == through {
+                continue;
+            }
+            let from_file = from % 8;
+            let from_rank = from / 8;
+            let through_file = through % 8;
+            let through_rank = through / 8;
+            let file_delta = through_file - from_file;
+            let rank_delta = through_rank - from_rank;
+            let step = if rank_delta == 0 {
+                file_delta.signum()
+            } else if file_delta == 0 {
+                8 * rank_delta.signum()
+            } else if file_delta == rank_delta {
+                9 * rank_delta.signum()
+            } else if file_delta == -rank_delta {
+                7 * rank_delta.signum()
+            } else {
+                0
+            };
+            if step == 0 {
+                continue;
+            }
+
+            let mut target = through + step;
+            while (0..64).contains(&target) {
+                let target_file = target % 8;
+                let target_rank = target / 8;
+                let target_file_delta = target_file - from_file;
+                let target_rank_delta = target_rank - from_rank;
+                let aligned = if rank_delta == 0 {
+                    target_rank_delta == 0
+                } else if file_delta == 0 {
+                    target_file_delta == 0
+                } else if file_delta == rank_delta {
+                    target_file_delta == target_rank_delta
+                        && target_file_delta.signum() == file_delta.signum()
+                } else {
+                    target_file_delta == -target_rank_delta
+                        && target_file_delta.signum() == file_delta.signum()
+                };
+                if !aligned {
+                    break;
+                }
+                table[from as usize * BOARD_SQUARES + through as usize] |= 1_u64 << target;
+                target += step;
+            }
+        }
+    }
+    table
+}
+
+#[inline]
+fn ray_beyond(from: Square, through: Square) -> Bitboard {
+    Bitboard::new(
+        RAY_BEYOND.get_or_init(build_ray_beyond)
+            [usize::from(from.index()) * BOARD_SQUARES + usize::from(through.index())],
+    )
 }
 
 #[inline]
@@ -389,6 +593,260 @@ pub fn append_active_threats(
     count
 }
 
+/// Discovers move-local physical FullThreats edge changes.
+///
+/// The scan is restricted to moved/captured/replaced squares, their direct contacts, and sliders
+/// whose ray crosses one of those squares. It never enumerates every threat in both positions.
+pub(crate) fn discover_changed_threats<const CAPACITY: usize>(
+    parent: &Position,
+    child: &Position,
+    mv: Move,
+    undo: &Undo,
+    changed: &mut ChangedThreatBuffer<CAPACITY>,
+) {
+    let mut affected = [A1; 4];
+    let mut count = 0;
+    let mut append_square = |candidate: Square| {
+        if !affected[..count].contains(&candidate) {
+            affected[count] = candidate;
+            count += 1;
+        }
+    };
+
+    if mv.flag().is_castling() {
+        let color = undo.moved().color();
+        let side = CastlingSide::from_rook_origin(mv.from(), mv.to());
+        append_square(mv.from());
+        append_square(side.king_destination(color));
+        append_square(mv.to());
+        append_square(side.rook_destination(color));
+    } else {
+        append_square(mv.from());
+        append_square(mv.to());
+        if let Some((captured_square, _)) = undo.captured() {
+            append_square(captured_square);
+        }
+    }
+
+    for &affected_square in &affected[..count] {
+        gather_changed_square(parent, child, affected_square, changed);
+        if changed.overflowed() {
+            return;
+        }
+    }
+}
+
+const A1: Square = match Square::new(0) {
+    Some(square) => square,
+    None => unreachable!(),
+};
+
+fn gather_changed_square<const CAPACITY: usize>(
+    parent: &Position,
+    child: &Position,
+    affected: Square,
+    changed: &mut ChangedThreatBuffer<CAPACITY>,
+) {
+    for position in [parent, child] {
+        if position
+            .piece_at(affected)
+            .is_some_and(|piece| piece.kind() != PieceKind::King)
+        {
+            let mut targets = outgoing_targets(position, affected);
+            while let Some(target) = targets.pop_first() {
+                record_changed_pair(parent, child, affected, target, changed);
+            }
+        }
+
+        let mut incoming = non_slider_attackers_to(position, affected);
+        while let Some(attacker) = incoming.pop_first() {
+            record_changed_pair(parent, child, attacker, affected, changed);
+        }
+
+        let occupancy = position.occupancy();
+        let rook_queens = position.pieces(Color::White, PieceKind::Rook)
+            | position.pieces(Color::Black, PieceKind::Rook)
+            | position.pieces(Color::White, PieceKind::Queen)
+            | position.pieces(Color::Black, PieceKind::Queen);
+        let bishop_queens = position.pieces(Color::White, PieceKind::Bishop)
+            | position.pieces(Color::Black, PieceKind::Bishop)
+            | position.pieces(Color::White, PieceKind::Queen)
+            | position.pieces(Color::Black, PieceKind::Queen);
+        let mut sliders = (rook_attacks(affected, occupancy) & rook_queens)
+            | (bishop_attacks(affected, occupancy) & bishop_queens);
+        while let Some(attacker) = sliders.pop_first() {
+            if position.piece_at(affected).is_some() {
+                record_changed_pair(parent, child, attacker, affected, changed);
+            }
+
+            let mut beyond =
+                ray_beyond(attacker, affected) & slider_attacks(position, attacker) & occupancy;
+            if let Some(target) = beyond.pop_first() {
+                record_changed_pair(parent, child, attacker, target, changed);
+            }
+        }
+    }
+}
+
+fn record_changed_pair<const CAPACITY: usize>(
+    parent: &Position,
+    child: &Position,
+    attacker: Square,
+    target: Square,
+    changed: &mut ChangedThreatBuffer<CAPACITY>,
+) {
+    let before = physical_edge(parent, attacker, target);
+    let after = physical_edge(child, attacker, target);
+    if before == after {
+        return;
+    }
+    if let Some(edge) = before {
+        changed.push_netted(edge.with_sign(-1));
+    }
+    if let Some(edge) = after {
+        changed.push_netted(edge.with_sign(1));
+    }
+}
+
+fn physical_edge(position: &Position, from: Square, to: Square) -> Option<DirtyThreat> {
+    let attacker = position.piece_at(from)?;
+    let attacked = position.piece_at(to)?;
+    if attacker.kind() == PieceKind::King {
+        return None;
+    }
+
+    let attacks = match attacker.kind() {
+        PieceKind::Pawn => {
+            let push = match attacker.color() {
+                Color::White if from.index() < 56 => 1_u64 << (from.index() + 8),
+                Color::Black if from.index() >= 8 => 1_u64 << (from.index() - 8),
+                Color::White | Color::Black => 0,
+            };
+            pawn_attacks(from, attacker.color())
+                | (Bitboard::new(push)
+                    & (position.pieces(Color::White, PieceKind::Pawn)
+                        | position.pieces(Color::Black, PieceKind::Pawn)))
+        }
+        PieceKind::Knight => knight_attacks(from),
+        PieceKind::Bishop => bishop_attacks(from, position.occupancy()),
+        PieceKind::Rook => rook_attacks(from, position.occupancy()),
+        PieceKind::Queen => queen_attacks(from, position.occupancy()),
+        PieceKind::King => unreachable!(),
+    };
+    attacks.contains(to).then(|| {
+        DirtyThreat::new(
+            ThreatPiece::from(attacker),
+            from,
+            to,
+            ThreatPiece::from(attacked),
+            1,
+        )
+    })
+}
+
+fn outgoing_targets(position: &Position, from: Square) -> Bitboard {
+    let Some(attacker) = position.piece_at(from) else {
+        return Bitboard::EMPTY;
+    };
+    let occupied = position.occupancy();
+    match attacker.kind() {
+        PieceKind::Pawn => {
+            let push = match attacker.color() {
+                Color::White if from.index() < 56 => 1_u64 << (from.index() + 8),
+                Color::Black if from.index() >= 8 => 1_u64 << (from.index() - 8),
+                Color::White | Color::Black => 0,
+            };
+            (pawn_attacks(from, attacker.color()) & occupied)
+                | (Bitboard::new(push)
+                    & (position.pieces(Color::White, PieceKind::Pawn)
+                        | position.pieces(Color::Black, PieceKind::Pawn)))
+        }
+        PieceKind::Knight => knight_attacks(from) & occupied,
+        PieceKind::Bishop => bishop_attacks(from, occupied) & occupied,
+        PieceKind::Rook => rook_attacks(from, occupied) & occupied,
+        PieceKind::Queen => queen_attacks(from, occupied) & occupied,
+        PieceKind::King => Bitboard::EMPTY,
+    }
+}
+
+fn slider_attacks(position: &Position, from: Square) -> Bitboard {
+    match position
+        .piece_at(from)
+        .expect("slider candidate must be occupied")
+        .kind()
+    {
+        PieceKind::Bishop => bishop_attacks(from, position.occupancy()),
+        PieceKind::Rook => rook_attacks(from, position.occupancy()),
+        PieceKind::Queen => queen_attacks(from, position.occupancy()),
+        PieceKind::Pawn | PieceKind::Knight | PieceKind::King => {
+            unreachable!("candidate must be a slider")
+        }
+    }
+}
+
+fn non_slider_attackers_to(position: &Position, target: Square) -> Bitboard {
+    let mut attackers = Bitboard::EMPTY;
+    for color in Color::ALL {
+        attackers |= pawn_attacks(target, !color) & position.pieces(color, PieceKind::Pawn);
+    }
+    attackers |= knight_attacks(target)
+        & (position.pieces(Color::White, PieceKind::Knight)
+            | position.pieces(Color::Black, PieceKind::Knight));
+
+    if position
+        .piece_at(target)
+        .is_some_and(|piece| piece.kind() == PieceKind::Pawn)
+    {
+        if target.index() >= 8 {
+            let from = square(usize::from(target.index() - 8));
+            if position.piece_at(from) == Some(Piece::new(Color::White, PieceKind::Pawn)) {
+                attackers |= Bitboard::new(1_u64 << from.index());
+            }
+        }
+        if target.index() < 56 {
+            let from = square(usize::from(target.index() + 8));
+            if position.piece_at(from) == Some(Piece::new(Color::Black, PieceKind::Pawn)) {
+                attackers |= Bitboard::new(1_u64 << from.index());
+            }
+        }
+    }
+    attackers
+}
+
+/// Converts physical changed edges into perspective-dependent add/sub feature rows.
+pub(crate) fn append_changed_threat_indices<const CAPACITY: usize>(
+    perspective: Color,
+    position: &Position,
+    changed: &ChangedThreatBuffer<CAPACITY>,
+    additions: &mut [usize],
+    removals: &mut [usize],
+) -> (usize, usize) {
+    let king_square = position.king_square(perspective);
+    let mut added = 0;
+    let mut removed = 0;
+    for edge in changed.iter() {
+        let index = make_index(
+            perspective,
+            edge.attacker(),
+            edge.from(),
+            edge.to(),
+            edge.attacked(),
+            king_square,
+        );
+        if index >= DIMENSIONS {
+            continue;
+        }
+        if edge.sign() > 0 {
+            additions[added] = index;
+            added += 1;
+        } else {
+            removals[removed] = index;
+            removed += 1;
+        }
+    }
+    (added, removed)
+}
+
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn emit(
@@ -425,5 +883,328 @@ impl From<Piece> for ThreatPiece {
     #[inline]
     fn from(piece: Piece) -> Self {
         Self::new(piece.color(), piece.kind())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use mf_core::{
+        Move, PieceKind, Position, Square, Undo, bishop_attacks, generate_legal_moves,
+        knight_attacks, parse_uci_move, pawn_attacks, queen_attacks, rook_attacks,
+    };
+
+    use super::{
+        ChangedThreatBuffer, DirtyThreat, ThreatPiece, append_changed_threat_indices,
+        discover_changed_threats,
+    };
+
+    fn parse(position: &Position, notation: &str, chess960: bool) -> Move {
+        parse_uci_move(position, notation, chess960)
+            .unwrap_or_else(|| panic!("{notation} should be legal in {position:?}"))
+    }
+
+    fn square(index: u8) -> Square {
+        Square::new(index).expect("test square should be valid")
+    }
+
+    fn physical_edges(position: &Position) -> Vec<DirtyThreat> {
+        let occupied = position.occupancy();
+        let all_pawns = position.pieces(super::Color::White, PieceKind::Pawn)
+            | position.pieces(super::Color::Black, PieceKind::Pawn);
+        let mut edges = Vec::new();
+
+        for color in super::Color::ALL {
+            let mut pawns = position.pieces(color, PieceKind::Pawn);
+            while let Some(from) = pawns.pop_first() {
+                let push = match color {
+                    super::Color::White if from.index() < 56 => 1_u64 << (from.index() + 8),
+                    super::Color::Black if from.index() >= 8 => 1_u64 << (from.index() - 8),
+                    super::Color::White | super::Color::Black => 0,
+                };
+                let mut targets = pawn_attacks(from, color) & occupied;
+                targets |= super::Bitboard::new(push) & all_pawns;
+                while let Some(to) = targets.pop_first() {
+                    edges.push(DirtyThreat::new(
+                        ThreatPiece::new(color, PieceKind::Pawn),
+                        from,
+                        to,
+                        ThreatPiece::from(
+                            position.piece_at(to).expect("physical target is occupied"),
+                        ),
+                        1,
+                    ));
+                }
+            }
+
+            for kind in [
+                PieceKind::Knight,
+                PieceKind::Bishop,
+                PieceKind::Rook,
+                PieceKind::Queen,
+            ] {
+                let mut pieces = position.pieces(color, kind);
+                while let Some(from) = pieces.pop_first() {
+                    let mut targets = match kind {
+                        PieceKind::Knight => knight_attacks(from),
+                        PieceKind::Bishop => bishop_attacks(from, occupied),
+                        PieceKind::Rook => rook_attacks(from, occupied),
+                        PieceKind::Queen => queen_attacks(from, occupied),
+                        PieceKind::Pawn | PieceKind::King => unreachable!(),
+                    } & occupied;
+                    while let Some(to) = targets.pop_first() {
+                        edges.push(DirtyThreat::new(
+                            ThreatPiece::new(color, kind),
+                            from,
+                            to,
+                            ThreatPiece::from(
+                                position.piece_at(to).expect("physical target is occupied"),
+                            ),
+                            1,
+                        ));
+                    }
+                }
+            }
+        }
+        edges
+    }
+
+    fn normalized_signed(edges: impl IntoIterator<Item = DirtyThreat>) -> BTreeMap<u32, i32> {
+        let mut counts = BTreeMap::new();
+        for edge in edges {
+            *counts.entry(edge.physical_bits()).or_default() += edge.sign();
+        }
+        counts.retain(|_, count| *count != 0);
+        counts
+    }
+
+    fn active_indices(position: &Position, perspective: super::Color) -> Vec<usize> {
+        let mut indices = [0_usize; super::MAX_ACTIVE];
+        let count = super::append_active_threats(perspective, position, &mut indices);
+        indices[..count].to_vec()
+    }
+
+    fn normalized_indices(entries: impl IntoIterator<Item = (usize, i32)>) -> BTreeMap<usize, i32> {
+        let mut counts = BTreeMap::new();
+        for (index, sign) in entries {
+            *counts.entry(index).or_default() += sign;
+        }
+        counts.retain(|_, count| *count != 0);
+        counts
+    }
+
+    fn assert_changed_edges_match_full_diff(
+        fen: &str,
+        notation: &str,
+        chess960: bool,
+    ) -> (Position, Position, Move, Undo, ChangedThreatBuffer<128>) {
+        let parent = Position::from_fen(fen, chess960).expect("targeted FEN should parse");
+        let mv = parse(&parent, notation, chess960);
+        let mut child = parent.clone();
+        let undo = child.make_move(mv);
+        let mut changed = ChangedThreatBuffer::<128>::new();
+        discover_changed_threats(&parent, &child, mv, &undo, &mut changed);
+        assert!(!changed.overflowed(), "{fen}, {notation}");
+
+        let expected = normalized_signed(
+            physical_edges(&parent)
+                .into_iter()
+                .map(|edge| edge.with_sign(-1))
+                .chain(physical_edges(&child)),
+        );
+        let actual = normalized_signed(changed.iter());
+        assert_eq!(actual, expected, "{fen}, {notation}");
+
+        for perspective in super::Color::ALL {
+            if parent.king_square(perspective) != child.king_square(perspective) {
+                continue;
+            }
+            let expected_indices = normalized_indices(
+                active_indices(&parent, perspective)
+                    .into_iter()
+                    .map(|index| (index, -1))
+                    .chain(
+                        active_indices(&child, perspective)
+                            .into_iter()
+                            .map(|index| (index, 1)),
+                    ),
+            );
+            let mut additions = [0_usize; 128];
+            let mut removals = [0_usize; 128];
+            let (added, removed) = append_changed_threat_indices(
+                perspective,
+                &child,
+                &changed,
+                &mut additions,
+                &mut removals,
+            );
+            let actual_indices = normalized_indices(
+                removals[..removed]
+                    .iter()
+                    .copied()
+                    .map(|index| (index, -1))
+                    .chain(additions[..added].iter().copied().map(|index| (index, 1))),
+            );
+            assert_eq!(
+                actual_indices, expected_indices,
+                "{fen}, {notation}, {perspective:?}"
+            );
+        }
+        (parent, child, mv, undo, changed)
+    }
+
+    #[test]
+    fn dirty_threat_pack_unpack_and_sign_are_byte_exact() {
+        let edge = DirtyThreat::new(
+            ThreatPiece::new(super::Color::Black, PieceKind::Queen),
+            square(63),
+            square(42),
+            ThreatPiece::new(super::Color::White, PieceKind::King),
+            1,
+        );
+        assert_eq!(
+            edge.raw(),
+            13_u32 | (6_u32 << 4) | (63_u32 << 8) | (42_u32 << 14) | (1_u32 << 20)
+        );
+        assert_eq!(
+            edge.attacker(),
+            ThreatPiece::new(super::Color::Black, PieceKind::Queen)
+        );
+        assert_eq!(
+            edge.attacked(),
+            ThreatPiece::new(super::Color::White, PieceKind::King)
+        );
+        assert_eq!(edge.from(), square(63));
+        assert_eq!(edge.to(), square(42));
+        assert_eq!(edge.sign(), 1);
+
+        let removed = edge.with_sign(-1);
+        assert_eq!(removed.raw(), edge.physical_bits());
+        assert_eq!(removed.sign(), -1);
+        assert_eq!(removed.with_sign(1), edge);
+    }
+
+    #[test]
+    fn changed_threat_buffer_overflow_sets_flag_without_partial_append() {
+        let edge = DirtyThreat::new(
+            ThreatPiece::new(super::Color::White, PieceKind::Pawn),
+            square(8),
+            square(16),
+            ThreatPiece::new(super::Color::Black, PieceKind::Pawn),
+            1,
+        );
+        let mut buffer = ChangedThreatBuffer::<2>::new();
+        assert!(buffer.push(edge));
+        assert!(buffer.push(edge.with_sign(-1)));
+        assert!(!buffer.push(edge));
+        assert!(buffer.overflowed());
+        assert_eq!(buffer.len(), 2);
+        assert_eq!(
+            buffer.iter().collect::<Vec<_>>(),
+            vec![edge, edge.with_sign(-1)]
+        );
+    }
+
+    #[test]
+    fn changed_edges_cover_quiets_captures_en_passant_and_promotions() {
+        for (fen, notation) in [
+            (
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                "g1f3",
+            ),
+            ("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1", "e4d5"),
+            ("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6"),
+            ("4k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8q"),
+            ("1r2k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7b8q"),
+        ] {
+            assert_changed_edges_match_full_diff(fen, notation, false);
+        }
+    }
+
+    #[test]
+    fn changed_edges_cover_standard_and_chess960_castling_relocations() {
+        for (fen, notation, chess960) in [
+            ("4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1", "e1g1", false),
+            ("4k3/8/8/8/8/8/8/R1K2R2 w FA - 0 1", "c1f1", true),
+            ("4k3/8/8/8/8/8/8/6KR w H - 0 1", "g1h1", true),
+            ("4k3/8/8/8/8/8/8/4KR2 w F - 0 1", "e1f1", true),
+        ] {
+            assert_changed_edges_match_full_diff(fen, notation, chess960);
+        }
+    }
+
+    #[test]
+    fn changed_edges_cover_pawn_blocks_and_discovered_slider_contacts() {
+        for (fen, notation) in [
+            ("4k3/8/8/8/4p3/8/4p3/4K3 b - - 0 1", "e4e3"),
+            ("4k3/8/8/3p4/4P3/4P3/8/4K3 w - - 0 1", "e4d5"),
+            ("4k3/8/8/3r4/2N5/8/8/B3K3 w - - 0 1", "c4b6"),
+            ("4k3/r7/8/N7/8/8/8/R3K3 w - - 0 1", "a5b7"),
+            ("4k3/7r/8/5N2/8/3Q4/8/4K3 w - - 0 1", "f5h4"),
+        ] {
+            assert_changed_edges_match_full_diff(fen, notation, false);
+        }
+    }
+
+    #[test]
+    fn changed_edges_cover_defences_same_type_rules_and_king_targets() {
+        let (_, child, _, _, changed) =
+            assert_changed_edges_match_full_diff("4k3/8/8/8/8/8/P7/R3K3 w - - 0 1", "a2a3", false);
+        let mut additions = [0_usize; 128];
+        let mut removals = [0_usize; 128];
+        for perspective in super::Color::ALL {
+            let (added, removed) = append_changed_threat_indices(
+                perspective,
+                &child,
+                &changed,
+                &mut additions,
+                &mut removals,
+            );
+            assert!(added + removed > 0);
+        }
+
+        assert_changed_edges_match_full_diff("4k3/8/8/8/8/2N5/4N3/4K3 w - - 0 1", "c3b5", false);
+
+        let (_, _, _, _, king_target_changes) =
+            assert_changed_edges_match_full_diff("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1", "e2e7", false);
+        assert!(king_target_changes.iter().any(|edge| {
+            edge.attacked() == ThreatPiece::new(super::Color::Black, PieceKind::King)
+        }));
+        assert!(king_target_changes.iter().all(|edge| {
+            edge.attacker() != ThreatPiece::new(super::Color::White, PieceKind::King)
+                && edge.attacker() != ThreatPiece::new(super::Color::Black, PieceKind::King)
+        }));
+    }
+
+    #[test]
+    fn move_local_discovery_matches_full_physical_diff_on_random_walk() {
+        let mut position = Position::startpos();
+        let mut random = 0xD1B5_4A32_D192_ED03_u64;
+        for ply in 0..512 {
+            let moves = generate_legal_moves(&position);
+            if moves.is_empty() {
+                break;
+            }
+            random ^= random << 13;
+            random ^= random >> 7;
+            random ^= random << 17;
+            let mv = moves[random as usize % moves.len()];
+            let parent = position.clone();
+            let undo = position.make_move(mv);
+            let mut changed = ChangedThreatBuffer::<128>::new();
+            discover_changed_threats(&parent, &position, mv, &undo, &mut changed);
+            let expected = normalized_signed(
+                physical_edges(&parent)
+                    .into_iter()
+                    .map(|edge| edge.with_sign(-1))
+                    .chain(physical_edges(&position)),
+            );
+            assert_eq!(
+                normalized_signed(changed.iter()),
+                expected,
+                "ply {ply}, move {mv:?}, parent {parent:?}"
+            );
+        }
     }
 }
