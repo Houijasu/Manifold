@@ -361,8 +361,7 @@ pub fn to_side_to_move_centipawns(
 /// and the two forms cannot collide: `e1g1` is a king move to an empty or
 /// enemy-occupied square, `e1h1` is a king move onto its own rook.
 fn parse_pv_move(position: &Position, notation: &str) -> Option<Move> {
-    parse_uci_move(position, notation, false)
-        .or_else(|| parse_uci_move(position, notation, true))
+    parse_uci_move(position, notation, false).or_else(|| parse_uci_move(position, notation, true))
 }
 
 /// Parses the source's four-field FEN.
