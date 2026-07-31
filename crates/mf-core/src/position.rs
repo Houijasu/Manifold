@@ -44,6 +44,20 @@ struct ReversibleState {
     zobrist: ZobristKeys,
 }
 
+impl Undo {
+    /// Returns the piece moved by the matching move.
+    #[inline]
+    pub const fn moved(&self) -> Piece {
+        self.moved
+    }
+
+    /// Returns the captured piece and its original square, if any.
+    #[inline]
+    pub const fn captured(&self) -> Option<(Square, Piece)> {
+        self.captured
+    }
+}
+
 impl Position {
     /// Creates a position without pieces, castling rights, or en-passant state.
     pub fn empty(side_to_move: Color) -> Self {
@@ -209,6 +223,18 @@ impl Position {
     #[inline]
     pub const fn pieces(&self, color: Color, kind: PieceKind) -> Bitboard {
         self.pieces[color.index()][kind.index()]
+    }
+
+    /// Returns the square occupied by the given color's king.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the position does not contain a king of that color.
+    #[inline]
+    pub fn king_square(&self, color: Color) -> Square {
+        self.pieces(color, PieceKind::King)
+            .first()
+            .expect("position must contain a king of the requested color")
     }
 
     #[inline]
@@ -604,4 +630,73 @@ impl Position {
 #[inline]
 fn square(file: u8, rank: u8) -> Square {
     Square::new(rank * 8 + file).expect("file and rank are in 0..8")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn undo_accessors_report_quiet_and_capture_data() {
+        let mut quiet = Position::startpos();
+        let quiet_move = Move::new(square(1, 0), square(2, 2), MoveFlag::QUIET);
+        let quiet_undo = quiet.make_move(quiet_move);
+        assert_eq!(
+            quiet_undo.moved(),
+            Piece::new(Color::White, PieceKind::Knight)
+        );
+        assert_eq!(quiet_undo.captured(), None);
+
+        let mut capture = Position::empty(Color::White);
+        capture.place_piece(square(4, 3), Piece::new(Color::White, PieceKind::Pawn));
+        capture.place_piece(square(3, 4), Piece::new(Color::Black, PieceKind::Knight));
+        let capture_move = Move::new(square(4, 3), square(3, 4), MoveFlag::CAPTURE);
+        let capture_undo = capture.make_move(capture_move);
+        assert_eq!(
+            capture_undo.moved(),
+            Piece::new(Color::White, PieceKind::Pawn)
+        );
+        assert_eq!(
+            capture_undo.captured(),
+            Some((square(3, 4), Piece::new(Color::Black, PieceKind::Knight)))
+        );
+    }
+
+    #[test]
+    fn undo_captured_reports_en_passant_capture_square() {
+        let mut position = Position::empty(Color::White);
+        position.place_piece(square(4, 4), Piece::new(Color::White, PieceKind::Pawn));
+        position.place_piece(square(3, 4), Piece::new(Color::Black, PieceKind::Pawn));
+        position.set_en_passant(Some(square(3, 5)));
+
+        let mv = Move::new(square(4, 4), square(3, 5), MoveFlag::EN_PASSANT);
+        let undo = position.make_move(mv);
+
+        assert_eq!(
+            undo.captured(),
+            Some((square(3, 4), Piece::new(Color::Black, PieceKind::Pawn)))
+        );
+    }
+
+    #[test]
+    fn king_square_tracks_both_kings_across_make_unmake() {
+        let mut position = Position::empty(Color::White);
+        let white_king = square(4, 0);
+        let white_destination = square(4, 1);
+        let black_king = square(4, 7);
+        position.place_piece(white_king, Piece::new(Color::White, PieceKind::King));
+        position.place_piece(black_king, Piece::new(Color::Black, PieceKind::King));
+
+        assert_eq!(position.king_square(Color::White), white_king);
+        assert_eq!(position.king_square(Color::Black), black_king);
+
+        let mv = Move::new(white_king, white_destination, MoveFlag::QUIET);
+        let undo = position.make_move(mv);
+        assert_eq!(position.king_square(Color::White), white_destination);
+        assert_eq!(position.king_square(Color::Black), black_king);
+
+        position.unmake_move(mv, undo);
+        assert_eq!(position.king_square(Color::White), white_king);
+        assert_eq!(position.king_square(Color::Black), black_king);
+    }
 }
