@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -28,15 +29,20 @@ fn read_dump() -> Vec<u8> {
         .unwrap_or_else(|error| panic!("failed to read fixture {}: {error}", path.display()))
 }
 
-fn local_network(gate: &str) -> Option<Network> {
-    let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
-    let path = explicit_path.clone().map_or_else(
+fn resolve_network_path(explicit_path: Option<OsString>) -> (PathBuf, bool) {
+    let is_explicit = explicit_path.is_some();
+    let path = explicit_path.map_or_else(
         || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
         PathBuf::from,
     );
+    (path, is_explicit)
+}
+
+fn local_network(gate: &str) -> Option<Network> {
+    let (path, is_explicit) = resolve_network_path(std::env::var_os("MF_NNUE_TEST_NET"));
     if !path.is_file() {
         assert!(
-            explicit_path.is_none(),
+            !is_explicit,
             "MF_NNUE_TEST_NET requires an existing network file: {}",
             path.display()
         );
@@ -48,6 +54,17 @@ fn local_network(gate: &str) -> Option<Network> {
             panic!("failed to load NNUE network {}: {error}", path.display())
         }),
     )
+}
+
+fn validate_explicit_network_path() {
+    let (path, is_explicit) = resolve_network_path(std::env::var_os("MF_NNUE_TEST_NET"));
+    if is_explicit {
+        assert!(
+            path.is_file(),
+            "MF_NNUE_TEST_NET requires an existing network file: {}",
+            path.display()
+        );
+    }
 }
 
 fn chess960_fen(fen: &str) -> bool {
@@ -105,6 +122,22 @@ fn eonego_ref_fixture_has_expected_schema() {
             "record {index} stm does not match FEN: {fen}"
         );
     }
+}
+
+#[test]
+fn network_path_resolution_marks_only_environment_paths_as_explicit() {
+    let explicit = PathBuf::from("explicit-test.nnue");
+    assert_eq!(
+        resolve_network_path(Some(explicit.clone().into_os_string())),
+        (explicit, true)
+    );
+
+    let (default, is_explicit) = resolve_network_path(None);
+    assert_eq!(
+        default,
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue")
+    );
+    assert!(!is_explicit);
 }
 
 #[test]
@@ -189,6 +222,8 @@ fn manifold_matches_eonego_on_10k_reference_positions() {
 
 #[test]
 fn root_accumulator_stack_matches_eonego_on_10k_reference_positions() {
+    validate_explicit_network_path();
+
     if cfg!(debug_assertions) {
         eprintln!("SKIPPED: 10k Eonego root-stack parity gate runs only in release builds");
         return;

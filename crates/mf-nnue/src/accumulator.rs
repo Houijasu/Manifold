@@ -752,6 +752,7 @@ fn build_i32_oracle(
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::path::PathBuf;
 
     use mf_core::{Color, Position};
@@ -762,6 +763,31 @@ mod tests {
     };
     use crate::simd::{reset_sparse_fc0_calls, sparse_fc0_calls};
     use crate::{ForwardMode, L1, Network, SimdBackend};
+
+    fn resolve_network_path(explicit_path: Option<OsString>) -> (PathBuf, bool) {
+        let is_explicit = explicit_path.is_some();
+        let path = explicit_path.map_or_else(
+            || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+            PathBuf::from,
+        );
+        (path, is_explicit)
+    }
+
+    fn local_network(test_name: &str) -> Option<Network> {
+        let (path, is_explicit) = resolve_network_path(std::env::var_os("MF_NNUE_TEST_NET"));
+        if !path.is_file() {
+            assert!(
+                !is_explicit,
+                "MF_NNUE_TEST_NET requires an existing network file: {}",
+                path.display()
+            );
+            eprintln!("SKIPPED: {test_name} is missing {}", path.display());
+            return None;
+        }
+        Some(Network::load(&path).unwrap_or_else(|error| {
+            panic!("failed to load NNUE network {}: {error}", path.display())
+        }))
+    }
 
     #[test]
     fn stack_frames_keep_compact_metadata_and_cache_line_alignment() {
@@ -781,15 +807,26 @@ mod tests {
     }
 
     #[test]
-    fn real_position_accumulators_are_narrowed_i32_oracles() {
-        let path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
-            || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
-            PathBuf::from,
+    fn network_path_resolution_marks_only_environment_paths_as_explicit() {
+        let explicit = PathBuf::from("explicit-test.nnue");
+        assert_eq!(
+            resolve_network_path(Some(explicit.clone().into_os_string())),
+            (explicit, true)
         );
-        if !path.is_file() {
+
+        let (default, is_explicit) = resolve_network_path(None);
+        assert_eq!(
+            default,
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue")
+        );
+        assert!(!is_explicit);
+    }
+
+    #[test]
+    fn real_position_accumulators_are_narrowed_i32_oracles() {
+        let Some(network) = local_network("real-position accumulator oracle test") else {
             return;
-        }
-        let network = Network::load(path).expect("local FullThreats net should load");
+        };
         let positions = [
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
@@ -815,20 +852,15 @@ mod tests {
 
     #[test]
     fn stack_evaluation_uses_its_stored_forward_mode() {
-        let path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
-            || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
-            PathBuf::from,
-        );
-        if !path.is_file() {
+        let Some(network) = local_network("stored forward-mode test") else {
             return;
-        }
+        };
         let Some(backend) = [SimdBackend::Avx2, SimdBackend::Avx2Vnni]
             .into_iter()
             .find(|backend| backend.is_supported())
         else {
             return;
         };
-        let network = Network::load(path).expect("local FullThreats net should load");
         let position = Position::startpos();
         let sparse_mode = ForwardMode::new(backend, true).expect("backend is supported");
         let sparse_stack = AccumulatorStack::new_with_mode(&network, &position, sparse_mode)
