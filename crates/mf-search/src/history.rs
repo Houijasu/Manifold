@@ -31,6 +31,66 @@ pub(crate) const CONTINUATION_PLIES: [usize; 4] = [1, 2, 4, 6];
 /// plies in `CONTINUATION_PLIES`.
 pub(crate) const CONTINUATION_WEIGHTS: [i32; CONTINUATION_PLIES.len()] = [1_040, 780, 502, 418];
 
+/// Gravity saturation bound for every correction-history table.
+///
+/// This is Stockfish's `CORRECTION_HISTORY_LIMIT` and it is deliberately far smaller
+/// than the ordering bounds above: a corrhist entry is a *mean residual in eval units*
+/// that gets divided by [`CORRECTION_SCALE`] before it touches the static evaluation,
+/// not a relative ordering score. The two families are not comparable and must not be
+/// given each other's constants.
+pub(crate) const CORRECTION_MAX: i32 = 1_024;
+
+/// Bucket count of each hash-keyed correction table at one thread.
+///
+/// Sized by the BUCKET COUNT, never by the gravity bound (mission AGENTS.md 4.54 trap
+/// 2 -- sizing pawn history from Stockfish's gravity divisor instead of its bucket
+/// count built a 12 MiB L2-thrashing table and cost 18% NPS). At 16,384 buckets x 2
+/// colors x `i16` each table is 64 KiB, so all four together are 256 KiB and stay
+/// inside L2. Stockfish uses 65,536, but it packs all four variants into ONE
+/// `CorrectionBundle` table sharing a single size mask; four separate 256 KiB tables
+/// would be 1 MiB of independently-strided lookups on the eval path. A search tree
+/// visits far fewer distinct pawn structures than 16,384 per node region, so the
+/// collision rate a larger table would hold flat is not the binding constraint here.
+const CORRECTION_BASE_BUCKETS: usize = 16_384;
+
+/// Blend slots for the hash-keyed correction sources.
+///
+/// The five Zobrist keys M1-F3 built exist for exactly this: `pawn` is the pawn
+/// structure, `minor` and `major` are placement hashes of {N,B} and {R,Q}, and
+/// `non_pawn_material` is a per-color piece-COUNT hash, which is precisely Caissa's
+/// original material-configuration corrhist.
+pub const CORRECTION_PAWN: usize = 0;
+pub const CORRECTION_MINOR: usize = 1;
+pub const CORRECTION_MAJOR: usize = 2;
+pub const CORRECTION_MATERIAL: usize = 3;
+pub const CORRECTION_SOURCES: usize = 4;
+
+/// Blend weights, applied before the `/ CORRECTION_SCALE` division.
+///
+/// Stockfish: `15341*pawn + 10569*minor + 12906*(nonPawnWhite + nonPawnBlack) + cont`.
+/// Manifold's `major` and `material` keys both stand in for a non-pawn characterisation
+/// of the position, so both take the reference's non-pawn weight.
+pub(crate) const CORRECTION_WEIGHTS: [i32; CORRECTION_SOURCES] = [15_341, 10_569, 12_906, 12_906];
+/// Stockfish's `8761 *` multiplier on the summed continuation-corrhist entries.
+pub(crate) const CORRECTION_CONTINUATION_WEIGHT: i32 = 8_761;
+/// Stockfish `to_corrected_static_eval`: `v + cv / 131072`.
+pub(crate) const CORRECTION_SCALE: i32 = 131_072;
+
+/// Per-source update weights in 128ths (Stockfish: pawn `bonus`, minor `150/128`,
+/// non-pawn `186/128`).
+pub(crate) const CORRECTION_UPDATE_WEIGHTS: [i32; CORRECTION_SOURCES] = [128, 150, 186, 186];
+
+/// Lookback distances, in plies, at which continuation correction history is kept.
+///
+/// **2 and 4, not 1 and 2.** Unlike continuation *ordering* history, which asks "what
+/// refutes the opponent's last move", continuation corrhist looks back at *our own*
+/// previous moves, so it steps two plies at a time. Getting this wrong silently indexes
+/// the residual on the opponent's move instead.
+pub(crate) const CORRECTION_CONTINUATION_PLIES: [usize; 2] = [2, 4];
+/// Stockfish's `130/128` and `70/128` update weights for plies 2 and 4.
+pub(crate) const CORRECTION_CONTINUATION_UPDATE_WEIGHTS: [i32; CORRECTION_CONTINUATION_PLIES
+    .len()] = [130, 70];
+
 const COLORS: usize = 2;
 const SQUARES: usize = 64;
 const PIECES: usize = 12;
@@ -56,6 +116,12 @@ const PAWN_BUCKET_LEN: usize = PIECES * SQUARES;
 const CONTINUATION_PLANE_LEN: usize = PIECES * SQUARES;
 /// A whole ply's table: one plane per `[previous_piece][previous_to]`.
 const CONTINUATION_LEN: usize = PIECES * SQUARES * CONTINUATION_PLANE_LEN;
+/// One continuation-corrhist table: a `[piece][to]` residual per predecessor plane.
+///
+/// This is the same shape as the ordering continuation table but is a SEPARATE
+/// allocation storing a different quantity: an eval residual bounded by
+/// [`CORRECTION_MAX`], not an ordering score bounded by `CONTINUATION_MAX`.
+const CORRECTION_CONTINUATION_LEN: usize = PIECES * SQUARES * CONTINUATION_PLANE_LEN;
 
 /// Forces each table onto its own cache line so concurrent updates to two different
 /// tables never contend for the same line.
@@ -71,6 +137,12 @@ struct CacheAligned<T>(T);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct ContinuationKey {
     plane: u32,
+    /// The `(piece, to)` pair the plane was derived from, retained so continuation
+    /// CORRECTION history can use a past move as its *entry* index while a different,
+    /// further-back move selects the plane. Ordering continuation history only ever
+    /// needs the plane, but corrhist indexes `[plane at ply-N][piece,to at ply-1]`.
+    piece: u8,
+    to: u8,
 }
 
 impl ContinuationKey {
@@ -79,7 +151,16 @@ impl ContinuationKey {
         let index = piece.index() * SQUARES + usize::from(to.index());
         Self {
             plane: (index * CONTINUATION_PLANE_LEN) as u32,
+            piece: piece.index() as u8,
+            to: to.index(),
         }
+    }
+
+    /// The `[piece][to]` offset this move contributes when used as an ENTRY index
+    /// rather than as a plane selector.
+    #[inline]
+    pub(crate) fn entry_offset(self) -> usize {
+        usize::from(self.piece) * SQUARES + usize::from(self.to)
     }
 }
 
@@ -98,7 +179,18 @@ pub struct SharedHistory {
     /// One table per entry in `CONTINUATION_PLIES`, each on its own cache-line-aligned
     /// allocation so an update at ply 1 cannot false-share with one at ply 6.
     continuation: [CacheAligned<Box<[AtomicI16]>>; CONTINUATION_PLIES.len()],
+    /// One table per entry in [`CORRECTION_SOURCES`], each `[bucket][color]`.
+    ///
+    /// Kept as four separate allocations rather than Stockfish's packed
+    /// `CorrectionBundle` because Manifold's four keys are genuinely independent
+    /// hashes: bundling them would make every read of one variant pull the other three
+    /// into cache on a line they will never be used from, since a single position
+    /// hashes to four *different* buckets.
+    correction: [CacheAligned<Box<[AtomicI16]>>; CORRECTION_SOURCES],
+    /// Continuation correction history at plies 2 and 4.
+    correction_continuation: [CacheAligned<Box<[AtomicI16]>>; CORRECTION_CONTINUATION_PLIES.len()],
     pawn_bucket_mask: u64,
+    correction_bucket_mask: u64,
 }
 
 impl SharedHistory {
@@ -108,6 +200,14 @@ impl SharedHistory {
         let buckets = PAWN_BASE_BUCKETS
             .checked_mul(thread_count.next_power_of_two())
             .expect("pawn history bucket count must not overflow");
+        // Corrhist scales with the thread count for the same reason pawn history does,
+        // and for the reason Stockfish gives explicitly: a shared table lets thread 1
+        // consume correction values thread 2 already paid to search for. More threads
+        // means more distinct positions in flight, so the table grows to hold the
+        // collision rate flat.
+        let correction_buckets = CORRECTION_BASE_BUCKETS
+            .checked_mul(thread_count.next_power_of_two())
+            .expect("correction history bucket count must not overflow");
 
         Self {
             butterfly: CacheAligned(zeroed(BUTTERFLY_LEN)),
@@ -122,7 +222,12 @@ impl SharedHistory {
             // scaling that by the thread count would multiply a table under no collision
             // pressure and only thrash cache, which is the AGENTS.md 4.54 trap.
             continuation: core::array::from_fn(|_| CacheAligned(zeroed(CONTINUATION_LEN))),
+            correction: core::array::from_fn(|_| CacheAligned(zeroed(correction_buckets * COLORS))),
+            correction_continuation: core::array::from_fn(|_| {
+                CacheAligned(zeroed(CORRECTION_CONTINUATION_LEN))
+            }),
             pawn_bucket_mask: (buckets - 1) as u64,
+            correction_bucket_mask: (correction_buckets - 1) as u64,
         }
     }
 
@@ -137,6 +242,12 @@ impl SharedHistory {
             .chain(self.capture.0.iter())
             .chain(self.pawn.0.iter())
             .chain(self.continuation.iter().flat_map(|table| table.0.iter()))
+            .chain(self.correction.iter().flat_map(|table| table.0.iter()))
+            .chain(
+                self.correction_continuation
+                    .iter()
+                    .flat_map(|table| table.0.iter()),
+            )
         {
             entry.store(0, Ordering::Relaxed);
         }
@@ -217,6 +328,64 @@ impl SharedHistory {
         );
     }
 
+    /// Correction residual for one hash-keyed source.
+    ///
+    /// `source` indexes [`CORRECTION_WEIGHTS`], `key` is the matching Zobrist key.
+    #[inline]
+    pub(crate) fn correction_score(&self, source: usize, key: u64, color: Color) -> i32 {
+        load(&self.correction[source].0[self.correction_index(key, color)])
+    }
+
+    #[inline]
+    pub(crate) fn update_correction(&self, source: usize, key: u64, color: Color, bonus: i32) {
+        apply(
+            &self.correction[source].0[self.correction_index(key, color)],
+            scale_correction_bonus(bonus, CORRECTION_UPDATE_WEIGHTS[source]),
+            CORRECTION_MAX,
+        );
+    }
+
+    /// Continuation correction residual at one lookback distance.
+    ///
+    /// `slot` indexes [`CORRECTION_CONTINUATION_PLIES`], not the ply distance itself.
+    /// `plane` is the move at that distance; `entry` is the IMMEDIATELY preceding move,
+    /// matching Stockfish's `(*(ss-2)->continuationCorrectionHistory)[piece_on(m.to)][m.to]`
+    /// where `m = (ss-1)->currentMove`.
+    #[inline]
+    pub(crate) fn correction_continuation_score(
+        &self,
+        slot: usize,
+        plane: ContinuationKey,
+        entry: ContinuationKey,
+    ) -> i32 {
+        load(&self.correction_continuation[slot].0[plane.plane as usize + entry.entry_offset()])
+    }
+
+    #[inline]
+    pub(crate) fn update_correction_continuation(
+        &self,
+        slot: usize,
+        plane: ContinuationKey,
+        entry: ContinuationKey,
+        bonus: i32,
+    ) {
+        apply(
+            &self.correction_continuation[slot].0[plane.plane as usize + entry.entry_offset()],
+            scale_correction_bonus(bonus, CORRECTION_CONTINUATION_UPDATE_WEIGHTS[slot]),
+            CORRECTION_MAX,
+        );
+    }
+
+    #[inline]
+    fn correction_index(&self, key: u64, color: Color) -> usize {
+        (key & self.correction_bucket_mask) as usize * COLORS + color.index()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn correction_bucket_count(&self) -> usize {
+        self.correction_bucket_mask as usize + 1
+    }
+
     #[inline]
     fn pawn_index(&self, pawn_key: u64, piece: Piece, to: Square) -> usize {
         let bucket = (pawn_key & self.pawn_bucket_mask) as usize;
@@ -258,6 +427,16 @@ impl SharedHistory {
     pub(crate) fn continuation_base_address(&self) -> usize {
         self.continuation[0].0.as_ptr() as usize
     }
+}
+
+/// Applies a per-source update weight in 128ths without overflowing.
+///
+/// `apply` clamps to `+/-max` anyway, so clamping the bonus first is behaviour-neutral
+/// for every in-range value and only removes the overflow on the `i32::MAX` sentinel
+/// that saturation tests and a degenerate depth could both produce.
+#[inline]
+fn scale_correction_bonus(bonus: i32, weight: i32) -> i32 {
+    bonus.clamp(-CORRECTION_MAX, CORRECTION_MAX) * weight / 128
 }
 
 #[inline]
@@ -360,7 +539,11 @@ mod tests {
 
     use super::{
         BUTTERFLY_MAX, CAPTURE_MAX, CONTINUATION_MAX, CONTINUATION_PLIES, CONTINUATION_WEIGHTS,
-        ContinuationKey, KillerTable, PAWN_BASE_BUCKETS, PAWN_MAX, SharedHistory, captured_kind,
+        CORRECTION_BASE_BUCKETS, CORRECTION_CONTINUATION_PLIES,
+        CORRECTION_CONTINUATION_UPDATE_WEIGHTS, CORRECTION_MAJOR, CORRECTION_MATERIAL,
+        CORRECTION_MAX, CORRECTION_MINOR, CORRECTION_PAWN, CORRECTION_SOURCES,
+        CORRECTION_UPDATE_WEIGHTS, CORRECTION_WEIGHTS, ContinuationKey, KillerTable,
+        PAWN_BASE_BUCKETS, PAWN_MAX, SharedHistory, captured_kind,
     };
 
     fn square(index: u8) -> Square {
@@ -698,5 +881,211 @@ mod tests {
     #[should_panic(expected = "thread count must be nonzero")]
     fn shared_history_requires_a_nonzero_thread_count() {
         let _ = SharedHistory::new(0);
+    }
+
+    #[test]
+    fn correction_history_is_keyed_on_the_position_hash_and_the_side_to_move() {
+        let history = SharedHistory::new(1);
+        history.update_correction(CORRECTION_PAWN, 0xAAAA, Color::White, 400);
+
+        assert!(history.correction_score(CORRECTION_PAWN, 0xAAAA, Color::White) > 0);
+        // A different key, a different color, and a different SOURCE must all be
+        // independent entries. The source independence is the one that matters most:
+        // the four variants are four separate tables consulted with four different
+        // Zobrist keys, and folding them would make every position teach every variant.
+        assert_eq!(
+            history.correction_score(CORRECTION_PAWN, 0xBBBB, Color::White),
+            0
+        );
+        assert_eq!(
+            history.correction_score(CORRECTION_PAWN, 0xAAAA, Color::Black),
+            0
+        );
+        for source in [CORRECTION_MINOR, CORRECTION_MAJOR, CORRECTION_MATERIAL] {
+            assert_eq!(history.correction_score(source, 0xAAAA, Color::White), 0);
+        }
+    }
+
+    #[test]
+    fn correction_history_applies_the_reference_per_source_update_weights() {
+        // Stockfish: pawn takes `bonus`, minor `bonus * 150/128`, non-pawn
+        // `bonus * 186/128`. Manifold's major and material keys both characterise the
+        // non-pawn position, so both take the non-pawn weight.
+        assert_eq!(CORRECTION_UPDATE_WEIGHTS, [128, 150, 186, 186]);
+        for (source, weight) in CORRECTION_UPDATE_WEIGHTS.iter().enumerate() {
+            let history = SharedHistory::new(1);
+            history.update_correction(source, 0x1234, Color::White, 128);
+            assert_eq!(
+                history.correction_score(source, 0x1234, Color::White),
+                *weight,
+                "source {source} must scale its bonus by {weight}/128"
+            );
+        }
+    }
+
+    #[test]
+    fn correction_history_saturates_at_the_reference_limit() {
+        let history = SharedHistory::new(1);
+        history.update_correction(CORRECTION_PAWN, 0x1234, Color::White, i32::MAX);
+        assert_eq!(
+            history.correction_score(CORRECTION_PAWN, 0x1234, Color::White),
+            CORRECTION_MAX
+        );
+        history.update_correction(CORRECTION_PAWN, 0x1234, Color::White, i32::MIN);
+        assert_eq!(
+            history.correction_score(CORRECTION_PAWN, 0x1234, Color::White),
+            -CORRECTION_MAX
+        );
+        // 1024 is Stockfish's CORRECTION_HISTORY_LIMIT and is deliberately three orders
+        // of magnitude below the ordering bounds: a corrhist entry is a mean residual
+        // in eval units that gets divided by 131,072, not an ordering score. Giving the
+        // two families each other's constants is how this feature goes silently wrong.
+        assert_eq!(CORRECTION_MAX, 1_024);
+        const { assert!(CORRECTION_MAX < BUTTERFLY_MAX) };
+    }
+
+    #[test]
+    fn correction_history_uses_the_reference_blend_weights() {
+        // Stockfish: 15341*pawn + 10569*minor + 12906*(nonPawnWhite + nonPawnBlack),
+        // then `8761 *` the summed continuation entries, all divided by 131,072.
+        assert_eq!(CORRECTION_WEIGHTS, [15_341, 10_569, 12_906, 12_906]);
+        assert_eq!(super::CORRECTION_CONTINUATION_WEIGHT, 8_761);
+        assert_eq!(super::CORRECTION_SCALE, 131_072);
+        // A single source saturated in one direction must not by itself be able to move
+        // the eval more than a few centipawns: 15341 * 1024 / 131072 = 119. Corrhist is
+        // a nudge, not an override.
+        let widest = CORRECTION_WEIGHTS.into_iter().max().expect("nonempty");
+        assert!(
+            widest * CORRECTION_MAX / super::CORRECTION_SCALE < 200,
+            "one saturated source must not dominate the static eval"
+        );
+    }
+
+    #[test]
+    fn continuation_correction_history_looks_back_two_and_four_plies() {
+        // NOT 1 and 2. Ordering continuation history asks "what refutes the opponent's
+        // last move" and steps one ply; correction continuation history looks at OUR
+        // OWN previous moves and steps two. Getting this wrong indexes the residual on
+        // the opponent's move and is invisible in every behavioural test.
+        assert_eq!(CORRECTION_CONTINUATION_PLIES, [2, 4]);
+        assert_eq!(CORRECTION_CONTINUATION_UPDATE_WEIGHTS, [130, 70]);
+        assert!(
+            CORRECTION_CONTINUATION_UPDATE_WEIGHTS[0] > CORRECTION_CONTINUATION_UPDATE_WEIGHTS[1],
+            "the nearer ply must carry the stronger update"
+        );
+    }
+
+    #[test]
+    fn continuation_correction_history_is_indexed_by_plane_and_entry_independently() {
+        let history = SharedHistory::new(1);
+        let knight = Piece::new(Color::White, PieceKind::Knight);
+        let rook = Piece::new(Color::Black, PieceKind::Rook);
+        let plane = ContinuationKey::new(rook, square(20));
+        let entry = ContinuationKey::new(knight, square(30));
+        let other_plane = ContinuationKey::new(rook, square(21));
+        let other_entry = ContinuationKey::new(knight, square(31));
+
+        history.update_correction_continuation(0, plane, entry, 512);
+        assert!(history.correction_continuation_score(0, plane, entry) > 0);
+        // The plane comes from the move 2 (or 4) plies back and the entry from the move
+        // 1 ply back. They are different moves, so swapping either must land elsewhere.
+        assert_eq!(
+            history.correction_continuation_score(0, other_plane, entry),
+            0
+        );
+        assert_eq!(
+            history.correction_continuation_score(0, plane, other_entry),
+            0
+        );
+        // Ply 2 and ply 4 are separate tables.
+        assert_eq!(history.correction_continuation_score(1, plane, entry), 0);
+    }
+
+    #[test]
+    fn continuation_correction_history_is_a_separate_table_from_ordering_continuation() {
+        // Same shape, different quantity: an eval residual bounded by CORRECTION_MAX
+        // versus an ordering score bounded by CONTINUATION_MAX. Aliasing them would let
+        // a 30,000-magnitude ordering score be read as a 1,024-magnitude eval residual.
+        let history = SharedHistory::new(1);
+        let knight = Piece::new(Color::White, PieceKind::Knight);
+        let plane = ContinuationKey::new(knight, square(20));
+        let entry = ContinuationKey::new(knight, square(30));
+
+        history.update_continuation_at(0, plane, knight, square(30), CONTINUATION_MAX);
+        assert_eq!(history.correction_continuation_score(0, plane, entry), 0);
+
+        history.update_correction_continuation(0, plane, entry, i32::MAX);
+        assert_eq!(
+            history.correction_continuation_score(0, plane, entry),
+            CORRECTION_MAX
+        );
+        assert_eq!(
+            history.continuation_score_at(0, plane, knight, square(30)),
+            CONTINUATION_MAX
+        );
+    }
+
+    #[test]
+    fn correction_history_scales_with_the_next_power_of_two_thread_count() {
+        // Corrhist is SHARED and grows with the pool, exactly as pawn history does and
+        // for the reason Stockfish gives: thread 1 consumes correction values thread 2
+        // already paid to search for, and more threads means more distinct positions in
+        // flight, so the table grows to hold the collision rate flat.
+        assert_eq!(
+            SharedHistory::new(1).correction_bucket_count(),
+            CORRECTION_BASE_BUCKETS
+        );
+        assert_eq!(
+            SharedHistory::new(5).correction_bucket_count(),
+            CORRECTION_BASE_BUCKETS * 8
+        );
+        // Sized by the BUCKET COUNT, never by the gravity bound (AGENTS.md 4.54 trap 2).
+        // 16,384 buckets x 2 colors x i16 = 64 KiB per table, 256 KiB for all four.
+        assert_eq!(CORRECTION_BASE_BUCKETS * 2 * size_of::<i16>(), 64 * 1024);
+        assert_ne!(CORRECTION_BASE_BUCKETS, CORRECTION_MAX as usize);
+    }
+
+    #[test]
+    fn correction_history_clears_with_the_other_tables() {
+        let history = SharedHistory::new(1);
+        let knight = Piece::new(Color::White, PieceKind::Knight);
+        let plane = ContinuationKey::new(knight, square(20));
+        let entry = ContinuationKey::new(knight, square(30));
+        for source in 0..CORRECTION_SOURCES {
+            history.update_correction(source, 0x1234, Color::White, CORRECTION_MAX);
+        }
+        history.update_correction_continuation(0, plane, entry, CORRECTION_MAX);
+
+        history.clear();
+
+        for source in 0..CORRECTION_SOURCES {
+            assert_eq!(history.correction_score(source, 0x1234, Color::White), 0);
+        }
+        assert_eq!(history.correction_continuation_score(0, plane, entry), 0);
+    }
+
+    #[test]
+    fn concurrent_correction_updates_stay_inside_the_saturation_bound() {
+        let history = Arc::new(SharedHistory::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|worker| {
+                let history = Arc::clone(&history);
+                thread::spawn(move || {
+                    for _ in 0..2_000 {
+                        let sign = if worker % 2 == 0 { 1 } else { -1 };
+                        for source in 0..CORRECTION_SOURCES {
+                            history.update_correction(source, 0x1234, Color::White, sign * 500);
+                        }
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().expect("history worker should not panic");
+        }
+
+        for source in 0..CORRECTION_SOURCES {
+            assert!(history.correction_score(source, 0x1234, Color::White).abs() <= CORRECTION_MAX);
+        }
     }
 }

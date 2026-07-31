@@ -10,8 +10,10 @@ use mf_core::{
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
 use crate::history::{
-    CONTINUATION_PLIES, CONTINUATION_WEIGHTS, ContinuationKey, KillerTable, SharedHistory,
-    captured_kind,
+    CONTINUATION_PLIES, CONTINUATION_WEIGHTS, CORRECTION_CONTINUATION_PLIES,
+    CORRECTION_CONTINUATION_WEIGHT, CORRECTION_MAJOR, CORRECTION_MATERIAL, CORRECTION_MAX,
+    CORRECTION_MINOR, CORRECTION_PAWN, CORRECTION_SCALE, CORRECTION_SOURCES, CORRECTION_WEIGHTS,
+    ContinuationKey, KillerTable, SharedHistory, captured_kind,
 };
 use crate::move_ordering::{MovePicker, OrderingContext, quiescence_moves};
 use crate::repetition::RepetitionHistory;
@@ -71,6 +73,15 @@ pub struct SearchOptions {
     pub use_pawn_history: bool,
     pub use_continuation_history: bool,
     pub use_history_pruning: bool,
+    pub use_correction_history: bool,
+    /// Per-variant read gates, indexed by the `CORRECTION_*` source constants plus a
+    /// trailing slot for continuation correction history.
+    ///
+    /// Each variant gets its own gate because the validation contract requires every
+    /// technique to be A/B testable externally, and because the six variants were
+    /// invented in five different engines and two of them were later REMOVED from
+    /// Stockfish. A single master toggle would measure the family, not the members.
+    pub use_correction_sources: [bool; CORRECTION_SOURCES + 1],
 }
 
 impl Default for SearchOptions {
@@ -117,6 +128,36 @@ impl Default for SearchOptions {
             // the SUM of butterfly and several continuation-history plies, which is a
             // far more reliable signal. Revisit when continuation history lands.
             use_history_pruning: false,
+            use_correction_history: true,
+            // Pawn, minor, non-pawn(x2), continuation(2,4) ship ON. MAJOR-piece and
+            // MATERIAL corrhist ship OFF, and this is the research's explicit
+            // instruction, not a measurement of ours: Stockfish ADDED both (PR #5556
+            // material, Sirius PR #178 major) and later REMOVED both ("Remove material
+            // corrHist", "Remove major corrhist") because the non-pawn variants
+            // subsume them. `research/search-and-eval-sota.md:1482` says verbatim
+            // "Build pawn + minor + non-pawn(x2) + continuation(2,4); skip material and
+            // major."
+            //
+            // Manifold's own instrumentation shows WHY, and shows that here they are
+            // worse than redundant. Over a depth-12 startpos search the four hash-keyed
+            // tables touched 3,683 / 2,981 / 324 / 39 distinct buckets. Major and
+            // material barely vary from the root within one search -- both are hashes
+            // of a piece set that only changes on a capture or promotion -- so
+            // residuals from thousands of structurally unrelated positions pile into a
+            // handful of buckets and SATURATE: mean |entry| 38 and 71 against 13 and 15
+            // for pawn and minor, with maxima of 509 and 342 against a 1,024 limit.
+            // A saturated shared bucket is not a learned residual, it is a constant
+            // offset added to the eval of every position reaching it, which is exactly
+            // the +34 cp score drift and the lost ply measured with all six on.
+            //
+            // The tables are still built, maintained, and individually toggleable so
+            // the claim above is externally checkable rather than asserted.
+            use_correction_sources: {
+                let mut sources = [true; CORRECTION_SOURCES + 1];
+                sources[CORRECTION_MAJOR] = false;
+                sources[CORRECTION_MATERIAL] = false;
+                sources
+            },
         }
     }
 }
@@ -756,9 +797,15 @@ fn pvs(
     }
 
     let in_check = is_in_check(position, position.side_to_move());
-    let static_eval = tt_entry
+    // The RAW static eval is what goes to the TT, deliberately. Storing the corrected
+    // value would fold a residual that was learned at one point in the search into an
+    // entry read at another, and the correction would then be applied a second time on
+    // top of itself on every re-probe. The reference is explicit about this.
+    let raw_static_eval = tt_entry
         .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
         .map_or_else(|| evaluate(position), |entry| i32::from(entry.static_eval));
+    let correction = correction_value(position, context, ply);
+    let static_eval = to_corrected_static_eval(raw_static_eval, correction);
     // `improving` is a shared derived value: it feeds the LMR reduction, which feeds
     // `effective_depth`, which futility and SEE pruning read. Gating it on a set of
     // toggles is the AGENTS.md 4.4 defect class, so it is always computed.
@@ -936,7 +983,7 @@ fn pvs(
                             EntryData {
                                 best_move: Some(mv),
                                 score: value_to_tt(value, ply) as i16,
-                                static_eval: static_eval as i16,
+                                static_eval: raw_static_eval as i16,
                                 depth: (probcut_depth + 1).clamp(0, i32::from(u8::MAX)) as u8,
                                 bound: Bound::Lower,
                                 age: context.generation,
@@ -1293,13 +1340,34 @@ fn pvs(
     } else {
         Bound::Exact
     };
+    // Correction MAINTENANCE is unconditional, exactly as ordering-history maintenance
+    // is (mission AGENTS.md 4.4): `use_correction_history` gates only the READ in
+    // `correction_value`. That keeps the toggle a pure measurement control instead of
+    // also changing which information the search collects.
+    //
+    // Skipped at verification nodes, which deliberately search a restricted move set and
+    // whose scores are therefore not evidence about this position class.
+    if !verification_node && excluded_move.is_none() {
+        update_correction_histories(
+            position,
+            context,
+            ply,
+            CorrectionNode {
+                depth,
+                in_check,
+                static_eval,
+                best_score,
+                best_move: (best_score > original_alpha).then_some(best_move).flatten(),
+            },
+        );
+    }
     if !verification_node {
         context.transposition_table.store(
             key,
             EntryData {
                 best_move,
                 score: value_to_tt(best_score, ply) as i16,
-                static_eval: static_eval as i16,
+                static_eval: raw_static_eval as i16,
                 depth: depth.min(i32::from(u8::MAX)) as u8,
                 bound,
                 age: context.generation,
@@ -1341,10 +1409,14 @@ fn quiescence(
     }
 
     let in_check = is_in_check(position, position.side_to_move());
+    // The standing pat is corrected too. Qsearch is the majority of nodes, so leaving
+    // it on the raw eval would confine corrhist to the small minority of nodes where it
+    // matters least, and would also make the standing pat disagree with the parent's
+    // corrected eval about the same position class.
     let mut best_score = if in_check {
         -INFINITY
     } else {
-        evaluate(position)
+        to_corrected_static_eval(evaluate(position), correction_value(position, context, ply))
     };
     if !in_check {
         if best_score >= beta {
@@ -1862,6 +1934,154 @@ fn update_histories(
     }
 }
 
+/// The Zobrist key each hash-keyed correction source is indexed by.
+///
+/// This is the whole reason M1-F3 built five Zobrist keys instead of one. `material`
+/// uses `non_pawn_material`, which is a per-color piece-COUNT hash and is therefore
+/// exactly Caissa's original material-configuration corrhist rather than a placement
+/// hash. `minor` and `major` are placement hashes of {N,B} and {R,Q}, from Sirius.
+#[inline]
+fn correction_key(position: &Position, source: usize) -> u64 {
+    let keys = position.zobrist();
+    match source {
+        CORRECTION_PAWN => keys.pawn(),
+        CORRECTION_MINOR => keys.minor(),
+        CORRECTION_MAJOR => keys.major(),
+        CORRECTION_MATERIAL => keys.non_pawn_material(),
+        _ => unreachable!("correction source index out of range"),
+    }
+}
+
+/// The blended correction value for this position, PRE-division.
+///
+/// Callers divide by [`CORRECTION_SCALE`] to get eval units; the raw magnitude is also
+/// the engine's complexity proxy, so it is returned unscaled.
+///
+/// Absent continuation planes contribute nothing. Stockfish substitutes a nonzero
+/// `64049` when there is no previous move, but that constant is denominated in its
+/// NNUE eval scale; against this engine's hand-crafted eval it would be an unmotivated
+/// bias at exactly the nodes with the least information (mission AGENTS.md 4.55).
+fn correction_value(position: &Position, context: &SearchContext<'_>, ply: usize) -> i32 {
+    if !context.options.use_correction_history {
+        return 0;
+    }
+    let color = position.side_to_move();
+    let mut value = 0;
+    for (source, weight) in CORRECTION_WEIGHTS.iter().enumerate() {
+        if !context.options.use_correction_sources[source] {
+            continue;
+        }
+        value += weight
+            * context
+                .history
+                .correction_score(source, correction_key(position, source), color);
+    }
+
+    if !context.options.use_correction_sources[CORRECTION_SOURCES] {
+        return value;
+    }
+    let mut continuation = 0;
+    for (slot, plane) in context
+        .correction_continuation_planes(ply)
+        .iter()
+        .enumerate()
+    {
+        if let (Some(plane), Some(entry)) = (*plane, context.previous_continuation_key(ply)) {
+            continuation += context
+                .history
+                .correction_continuation_score(slot, plane, entry);
+        }
+    }
+    value + CORRECTION_CONTINUATION_WEIGHT * continuation
+}
+
+/// Applies the learned residual to a static evaluation.
+///
+/// Clamped away from the decisive range so a correction can never manufacture a mate
+/// or tablebase score out of a heuristic residual.
+#[inline]
+fn to_corrected_static_eval(static_eval: i32, correction: i32) -> i32 {
+    (static_eval + correction / CORRECTION_SCALE)
+        .clamp(-TABLEBASE_WIN_IN_MAX_PLY + 1, TABLEBASE_WIN_IN_MAX_PLY - 1)
+}
+
+/// Records the residual between the search result and the static evaluation.
+///
+/// The guard is Stockfish's verbatim, and each clause earns its place:
+///
+/// * `!in_check` — there is no meaningful static eval in check, so there is no residual.
+/// * `!(best_move is a capture)` — a capture's value comes from material the static eval
+///   already sees; crediting it to a position-class hash teaches the wrong feature.
+/// * `(best_score > static_eval) == best_move.is_some()` — the residual must agree with
+///   the bound direction. A fail-high with no move, or a fail-low with one, is a bound
+///   artifact rather than evidence that this position class is mis-evaluated.
+///
+/// Note `best_move ? 12 : 18`: **fail-lows update ~50% more strongly than fail-highs**,
+/// because a fail-low bounds the true value from above and is the more informative side.
+///
+/// **`best_move` here must mean "a move that RAISED ALPHA", not "the highest-scoring
+/// move".** This engine's `pvs` sets its local `best_move` on any score improvement
+/// starting from `-INFINITY`, so it is `Some` at essentially every node with a legal
+/// move; the reference only assigns `bestMove` when `value > alpha`. Passing the local
+/// variable straight through would make the fail-low arm unreachable and silently
+/// delete the `18/128` half of the update rule. The caller therefore passes
+/// `(best_score > original_alpha).then_some(best_move).flatten()`.
+fn update_correction_histories(
+    position: &Position,
+    context: &mut SearchContext<'_>,
+    ply: usize,
+    node: CorrectionNode,
+) {
+    let CorrectionNode {
+        depth,
+        in_check,
+        static_eval,
+        best_score,
+        best_move,
+    } = node;
+    if in_check
+        || best_move.is_some_and(|mv| mv.flag().is_capture())
+        || (best_score > static_eval) != best_move.is_some()
+    {
+        return;
+    }
+
+    let scale = if best_move.is_some() { 12 } else { 18 };
+    let bonus = ((best_score - static_eval) * depth * scale / 128)
+        .clamp(-CORRECTION_MAX / 4, CORRECTION_MAX / 4);
+    let bonus = 1_061 * bonus / 1_024;
+
+    let color = position.side_to_move();
+    for source in 0..CORRECTION_SOURCES {
+        context
+            .history
+            .update_correction(source, correction_key(position, source), color, bonus);
+    }
+    let entry = context.previous_continuation_key(ply);
+    for (slot, plane) in context
+        .correction_continuation_planes(ply)
+        .iter()
+        .enumerate()
+    {
+        if let (Some(plane), Some(entry)) = (*plane, entry) {
+            context
+                .history
+                .update_correction_continuation(slot, plane, entry, bonus);
+        }
+    }
+}
+
+/// The node-local inputs to a correction-history update.
+struct CorrectionNode {
+    depth: i32,
+    in_check: bool,
+    static_eval: i32,
+    best_score: i32,
+    /// A move that RAISED ALPHA, not merely the highest-scoring one. See the note on
+    /// [`update_correction_histories`].
+    best_move: Option<Move>,
+}
+
 /// Applies one bonus across every continuation table, weighted by lookback distance.
 ///
 /// The weights are non-monotone in the reference's full 1-6 set; over the `{1,2,4,6}`
@@ -2139,6 +2359,29 @@ impl<'a> SearchContext<'a> {
             ply.checked_sub(distance)
                 .and_then(|index| self.continuation_keys[index])
         })
+    }
+
+    /// The predecessor plane at each distance in `CORRECTION_CONTINUATION_PLIES`.
+    ///
+    /// Distinct from `continuation_planes`: correction history looks back 2 and 4 plies
+    /// at OUR OWN previous moves, where ordering history looks back 1/2/4/6 to find what
+    /// refutes the opponent's move. Reusing the ordering planes here would index the
+    /// residual on the wrong side's move.
+    fn correction_continuation_planes(
+        &self,
+        ply: usize,
+    ) -> [Option<ContinuationKey>; CORRECTION_CONTINUATION_PLIES.len()] {
+        CORRECTION_CONTINUATION_PLIES.map(|distance| {
+            ply.checked_sub(distance)
+                .and_then(|index| self.continuation_keys[index])
+        })
+    }
+
+    /// The immediately preceding move, which supplies the `[piece][to]` ENTRY index
+    /// inside whichever plane a further-back move selected.
+    fn previous_continuation_key(&self, ply: usize) -> Option<ContinuationKey> {
+        ply.checked_sub(1)
+            .and_then(|index| self.continuation_keys[index])
     }
 
     fn rule_draw_score(&self, position: &Position, ply: usize) -> Option<i32> {

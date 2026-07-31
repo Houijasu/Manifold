@@ -39,6 +39,12 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UsePawnHistory type check default false",
     "option name UseContHistory type check default true",
     "option name UseHistoryPruning type check default false",
+    "option name UseCorrHistory type check default true",
+    "option name UseCorrHistPawn type check default true",
+    "option name UseCorrHistMinor type check default true",
+    "option name UseCorrHistMajor type check default false",
+    "option name UseCorrHistMaterial type check default false",
+    "option name UseCorrHistCont type check default true",
     "option name EvalFile type string default <empty>",
     "uciok",
 ];
@@ -644,6 +650,14 @@ fn handle_setoption<W: Write>(
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_history_pruning = enabled;
         }
+    } else if name.eq_ignore_ascii_case("UseCorrHistory") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_correction_history = enabled;
+        }
+    } else if let Some(source) = correction_source_option(&name) {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_correction_sources[source] = enabled;
+        }
     } else if name.eq_ignore_ascii_case("Hash") {
         let Ok(requested) = value.parse::<i128>() else {
             writeln!(writer, "info string invalid Hash value '{value}'")?;
@@ -690,6 +704,24 @@ fn handle_setoption<W: Write>(
         }
     }
     Ok(())
+}
+
+/// Maps a per-variant correction-history option name to its `use_correction_sources` index.
+///
+/// The trailing slot is continuation correction history, which is a differently-shaped
+/// table and so is not one of the hash-keyed `CORRECTION_*` sources.
+fn correction_source_option(name: &str) -> Option<usize> {
+    const OPTIONS: [(&str, usize); 5] = [
+        ("UseCorrHistPawn", mf_search::CORRECTION_PAWN),
+        ("UseCorrHistMinor", mf_search::CORRECTION_MINOR),
+        ("UseCorrHistMajor", mf_search::CORRECTION_MAJOR),
+        ("UseCorrHistMaterial", mf_search::CORRECTION_MATERIAL),
+        ("UseCorrHistCont", mf_search::CORRECTION_SOURCES),
+    ];
+    OPTIONS
+        .iter()
+        .find(|(option, _)| name.eq_ignore_ascii_case(option))
+        .map(|(_, source)| *source)
 }
 
 fn parse_check_option(value: &str) -> Option<bool> {

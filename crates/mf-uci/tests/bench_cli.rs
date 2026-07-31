@@ -20,10 +20,22 @@ use std::time::{Duration, Instant};
 /// evidence for it (mission AGENTS.md 4.53). Bench is depth 7; continuation history
 /// feeds LMR and pruning, which matter at real depths. From startpos at `go depth 14`
 /// the same change is -25.7% nodes (`469_349` -> `348_683`).
-const BENCH_NODE_COUNT: u64 = 135_257;
-const BENCH_NODES: &str = "Nodes searched: 135257";
+///
+/// M4-F3 then moved it to `131_333` (-2.9%) by adding correction history: a learned
+/// residual applied to the static eval, keyed on pawn structure, minor-piece and
+/// major-piece placement, material, and our own two previous moves. Attribution is
+/// pinned by `correction_history_off_reproduces_the_m4_f2_signature` below, which
+/// reproduces `135_257` exactly.
+const BENCH_NODE_COUNT: u64 = 131_333;
+const BENCH_NODES: &str = "Nodes searched: 131333";
+
+/// The M4-F2 all-on signature, reproduced exactly by `UseCorrHistory=false`.
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 135_257;
 
 /// The M4-F1 all-on signature, reproduced exactly by `UseContHistory=false`.
+///
+/// This is measured with correction history OFF, so it stays an exact M4-F1 value:
+/// the two features are independent and this anchor isolates continuation history.
 const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 138_600;
 
 /// The default-context `UseLMR=false` arm.
@@ -129,9 +141,15 @@ fn run_uci_bench_ablation_session() -> Output {
         // (`4_961_681` and `3_768_488`), which is what makes these anchors comparable
         // across the milestone. History gets its own isolation context in
         // `each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent`.
+        //
+        // Correction history is disabled for the same reason and is load-bearing here
+        // for a second one: it feeds the STATIC EVAL, which RFP, razoring, futility,
+        // ProbCut, and the improving flag all threshold against. Leaving it on would
+        // put an eval correction inside every one of those isolated deltas.
         "setoption name UseButterflyHistory value false\n\
              setoption name UseCaptureHistory value false\n\
              setoption name UseContHistory value false\n\
+             setoption name UseCorrHistory value false\n\
              setoption name UseNMP value false\n\
              setoption name UseRFP value false\n\
              setoption name UseRazoring value false\n\
@@ -349,7 +367,16 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
 #[test]
 fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
     let output = run_uci_session(
-        "bench\n\
+        // Correction history is off for this whole session, so the three deltas below
+        // are the ORDERING tables in isolation. It is not a neutral bystander here:
+        // measured with it on, `UseContHistory=false` moves bench by 0.03%
+        // (`131_333` -> `131_289`) and this test fails its own 2% observability bar.
+        // That is not continuation history becoming worthless, it is correction
+        // history absorbing the loss -- a worse static eval and worse move ordering
+        // both cost nodes, and the corrected eval partly compensates for the ordering
+        // it no longer has. Isolating them keeps each number attributable.
+        "setoption name UseCorrHistory value false\n\
+         bench\n\
          setoption name UseButterflyHistory value false\n\
          bench\n\
          setoption name UseButterflyHistory value true\n\
@@ -369,7 +396,7 @@ fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
     assert_eq!(nodes.len(), 4);
 
     let baseline = nodes[0];
-    assert_eq!(baseline, BENCH_NODE_COUNT);
+    assert_eq!(baseline, BENCH_NODE_COUNT_WITHOUT_CORRECTION);
     for (name, disabled) in ["UseButterflyHistory", "UseCaptureHistory", "UseContHistory"]
         .into_iter()
         .zip(&nodes[1..=3])
@@ -398,7 +425,8 @@ fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
 #[test]
 fn continuation_history_off_reproduces_the_m4_f1_signature() {
     let output = run_uci_session(
-        "setoption name UseContHistory value false\n\
+        "setoption name UseCorrHistory value false\n\
+         setoption name UseContHistory value false\n\
          bench\n\
          quit\n",
         "UCI continuation control session",
@@ -411,6 +439,75 @@ fn continuation_history_off_reproduces_the_m4_f1_signature() {
         metrics(stdout, "Nodes searched: "),
         vec![BENCH_NODE_COUNT_WITHOUT_CONTINUATION],
         "disabling continuation history must restore the exact M4-F1 bench signature"
+    );
+}
+
+/// Turning correction history off must reproduce the M4-F2 signature bit-for-bit.
+///
+/// This is the proof that M4-F3 moved the shipped bench signature by adding correction
+/// history and by nothing else. Correction history touches the static eval on both the
+/// `pvs` and the qsearch standing-pat path, and the raw eval still has to be what goes
+/// into the TT, so a mistake in either place would show up here as drift even with the
+/// feature switched off.
+#[test]
+fn correction_history_off_reproduces_the_m4_f2_signature() {
+    let output = run_uci_session(
+        "setoption name UseCorrHistory value false\n\
+         bench\n\
+         quit\n",
+        "UCI correction control session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT_WITHOUT_CORRECTION],
+        "disabling correction history must restore the exact M4-F2 bench signature"
+    );
+}
+
+/// Major-piece and material correction history must stay OFF by default.
+///
+/// These two variants are the reason this feature needed per-variant toggles. They read
+/// BETTER than the shipped default on bench -- `123_045` and `126_109` against
+/// `131_333` -- and dramatically worse at real depth: enabling both takes startpos
+/// `go depth 14` from `142_873` nodes to `470_678`, a 3.3x regression, and drifts the
+/// score +25 cp. Both were added to Stockfish and later removed ("Remove material
+/// corrHist", "Remove major corrhist"); `research/search-and-eval-sota.md:1482` says to
+/// skip them.
+///
+/// This test exists because bench alone would have shipped them. It pins the direction
+/// that matters, not the one bench reports (mission AGENTS.md 4.53).
+#[test]
+fn saturating_correction_variants_are_off_by_default() {
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseCorrHistMajor value true\n\
+         bench\n\
+         setoption name UseCorrHistMajor value false\n\
+         setoption name UseCorrHistMaterial value true\n\
+         bench\n\
+         quit\n",
+        "UCI correction variant session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 3);
+
+    assert_eq!(
+        nodes[0], BENCH_NODE_COUNT,
+        "major and material correction history must be OFF in the shipped default"
+    );
+    assert!(
+        nodes[1] < nodes[0] && nodes[2] < nodes[0],
+        "each saturating variant must still look CHEAPER than the default on bench \
+         ({nodes:?}); if this ever stops being true the trap this test documents has \
+         changed shape and the depth-14 evidence in the doc comment needs re-measuring"
     );
 }
 
@@ -581,7 +678,14 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
 #[test]
 fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
     let output = run_uci_session(
-        "bench\n\
+        // Correction history is off for this whole session. The property under test is
+        // which values `use_lmr` gates, and all four anchors below are M4-F2 values
+        // held fixed across M4-F3 so that a future coupling regression is still read
+        // off the same numbers. Correction history feeds the static eval that futility
+        // and SEE pruning threshold against, so leaving it on would move all four
+        // anchors for a reason that has nothing to do with LMR gating.
+        "setoption name UseCorrHistory value false\n\
+         bench\n\
          setoption name UseLMR value false\n\
          bench\n\
          setoption name UseLMR value true\n\
@@ -601,7 +705,7 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
     assert_eq!(nodes.len(), 4);
 
     assert_eq!(
-        nodes[0], BENCH_NODE_COUNT,
+        nodes[0], BENCH_NODE_COUNT_WITHOUT_CORRECTION,
         "the split must not move the shipped all-on signature"
     );
     assert_eq!(

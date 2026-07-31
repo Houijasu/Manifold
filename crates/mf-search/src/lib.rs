@@ -12,7 +12,10 @@ mod vote;
 pub use evaluation::{
     DEFAULT_PARAMETERS, EvaluationParameters, TaperedScore, evaluate, evaluate_with_parameters,
 };
-pub use history::SharedHistory;
+pub use history::{
+    CORRECTION_MAJOR, CORRECTION_MATERIAL, CORRECTION_MINOR, CORRECTION_PAWN, CORRECTION_SOURCES,
+    SharedHistory,
+};
 pub use search::{
     IterationInfo, MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, SearchOptions, SearchResult,
     UNEVALUATED_STATIC_EVAL, clamp_centipawn_score, is_mate_score, score_to_uci_mate, search,
