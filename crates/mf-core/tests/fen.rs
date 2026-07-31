@@ -42,3 +42,37 @@ fn a_piece_count_the_material_key_cannot_index_is_rejected_rather_than_panicked_
         "sixteen queens sit exactly on the bound and must remain parseable"
     );
 }
+
+#[test]
+fn a_board_a_promotion_could_push_past_the_material_key_is_rejected_at_parse_time() {
+    // The count the FEN places is only half the problem: `make_move` promotes by
+    // *adding* a piece, so a board carrying sixteen queens AND a pawn parses and then
+    // panics one move later, inside move generation, where nothing names the FEN that
+    // caused it. This exact shape appears in the CC0 Lichess evaluation database.
+    for fen in [
+        "1QQQQQQQ/P7/QQQQQQQQ/7Q/8/8/8/K6k w - - 0 1",
+        "1qqqqqqq/p7/qqqqqqqq/7q/8/8/8/K6k b - - 0 1",
+    ] {
+        let error = Position::from_fen(fen, false)
+            .err()
+            .unwrap_or_else(|| panic!("a promotable overflow must be an error: {fen}"));
+        assert!(
+            format!("{error}").contains("material key"),
+            "the error must name the real limit: {error}"
+        );
+    }
+
+    // A pawn is only a threat to its own side's count, so the mirrored material must
+    // still parse: sixteen white queens with a BLACK pawn overflows nothing.
+    assert!(
+        Position::from_fen("1QQQQQQQ/p7/QQQQQQQQ/7Q/8/8/8/K6k w - - 0 1", false).is_ok(),
+        "a pawn cannot promote into the other side's material count"
+    );
+
+    // And the ordinary case must be untouched: eight queens and eight pawns is 16,
+    // exactly on the bound.
+    assert!(
+        Position::from_fen("QQQQQQQQ/PPPPPPPP/8/8/8/8/4K3/4k3 w - - 0 1", false).is_ok(),
+        "a full set of promotions landing exactly on the bound must remain parseable"
+    );
+}

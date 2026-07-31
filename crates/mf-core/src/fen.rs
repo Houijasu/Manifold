@@ -43,6 +43,7 @@ impl Position {
         let mut position = Position::empty(side_to_move);
         parse_board(&mut position, fields[0])?;
         validate_kings(&position)?;
+        reject_unpromotable_material(&position)?;
         parse_castling(&mut position, fields[2], chess960)?;
         position.set_en_passant(parse_en_passant(&position, fields[3])?);
         position.set_halfmove_clock(
@@ -148,6 +149,9 @@ fn validate_kings(position: &Position) -> Result<(), FenError> {
 /// this shape are unreachable in a legal game — eight pawns promoting leaves at most ten
 /// of a kind — so the bound is generous and only rejects boards that were already
 /// impossible.
+///
+/// See also [`reject_unpromotable_material`], which covers the same table being
+/// overrun one move later rather than at placement time.
 fn reject_unindexable_material(position: &Position, piece: Piece) -> Result<(), FenError> {
     if !piece.kind().is_non_pawn_material() {
         return Ok(());
@@ -159,6 +163,39 @@ fn reject_unindexable_material(position: &Position, piece: Piece) -> Result<(), 
             piece.color(),
             piece.kind()
         )));
+    }
+    Ok(())
+}
+
+/// Rejects a board a legal promotion could push past the material Zobrist key.
+///
+/// [`reject_unindexable_material`] bounds what the FEN itself places, but the same table
+/// is indexed again by `make_move`, which promotes a pawn by *adding* a piece. A board
+/// carrying the maximum 16 queens **and** a pawn is therefore accepted by the parser and
+/// then panics one move later, inside move generation, where the caller has no FEN to
+/// blame. Rejecting it here keeps the failure at the boundary the untrusted input
+/// crossed.
+///
+/// The bound is per side and per kind: a promotion can only ever add to the promoting
+/// side's count, and each side has at most 8 pawns, so `count + pawns` is the ceiling any
+/// sequence of promotions from this position can reach. Legal chess tops out at 9 queens
+/// or 10 of a minor, so nothing reachable in a real game comes close.
+///
+/// Found by M5-F1B on the CC0 Lichess evaluation database, which contains user-composed
+/// analysis positions such as `1QQQQQQQ/P7/QQQQQQQQ/7Q/8/8/8/K6k w - -` — 16 white queens
+/// with a pawn on the seventh.
+fn reject_unpromotable_material(position: &Position) -> Result<(), FenError> {
+    for color in Color::ALL {
+        let pawns = position.pieces(color, PieceKind::Pawn).count() as usize;
+        for kind in PieceKind::NON_PAWN_MATERIAL {
+            let count = position.pieces(color, kind).count() as usize;
+            if count + pawns > MAX_MATERIAL_COUNT {
+                return Err(FenError::new(format!(
+                    "{color:?} can promote to more than the {MAX_MATERIAL_COUNT} {kind:?}s \
+                     the material key can represent"
+                )));
+            }
+        }
     }
     Ok(())
 }
