@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move, perft_divide};
 use mf_search::{
     IterationInfo, PoolError, PoolSearchResult, SearchLimits, SearchOptions, SearchPool,
-    SearchResult, TranspositionTable, clamp_centipawn_score, score_to_uci_mate,
-    search_with_options,
+    SearchResult, SharedHistory, TranspositionTable, clamp_centipawn_score, score_to_uci_mate,
+    search_with_shared_history_options,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
@@ -509,12 +509,24 @@ fn write_bench<W: Write>(writer: &mut W, options: SearchOptions) -> Result<(), S
         .collect::<Result<Vec<_>, _>>()?;
     let transposition_table = TranspositionTable::new(BENCH_HASH_MIB)
         .map_err(|error| format!("unable to allocate bench Hash: {error}"))?;
+    // Constructed ONCE, outside the timed region, and cleared between positions.
+    // `search_with_options` builds a fresh `SharedHistory` per call, so bench used to
+    // allocate and zero the whole history zoo six times inside its own timing and
+    // therefore misreported the throughput cost of adding tables -- by ~3 percentage
+    // points in the WRONG direction on M4-F2 (mission AGENTS.md 4.54). Match play
+    // allocates once per game; this now matches it. The node signature is unchanged
+    // because a cleared table is bit-identical to a fresh one.
+    let shared_history = SharedHistory::new(1);
 
-    let started = Instant::now();
+    // Only the searches are timed. The per-position table resets are setup, not search
+    // work, and leaving them inside the measurement is what made bench NPS unusable.
+    let mut elapsed = Duration::ZERO;
     let mut total = 0u64;
     for position in &positions {
         transposition_table.clear();
-        let result = search_with_options(
+        shared_history.clear();
+        let started = Instant::now();
+        let result = search_with_shared_history_options(
             position,
             &transposition_table,
             SearchLimits {
@@ -522,12 +534,13 @@ fn write_bench<W: Write>(writer: &mut W, options: SearchOptions) -> Result<(), S
                 ..SearchLimits::default()
             },
             options,
+            &shared_history,
         );
+        elapsed += started.elapsed();
         total = total
             .checked_add(result.nodes)
             .ok_or_else(|| "bench node count overflowed u64".to_string())?;
     }
-    let elapsed = started.elapsed();
     let nanos = elapsed.as_nanos().max(1);
     let nps = ((u128::from(total) * 1_000_000_000) / nanos) as u64;
 

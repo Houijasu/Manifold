@@ -91,7 +91,7 @@ impl ContinuationKey {
 /// knowledge another worker already paid for. Updates race exactly like the
 /// transposition table does: each `apply` performs one load and one store, so a torn
 /// interleaving can lose an update but can never store a value outside `[-D, D]`.
-pub(crate) struct SharedHistory {
+pub struct SharedHistory {
     butterfly: CacheAligned<Box<[AtomicI16]>>,
     capture: CacheAligned<Box<[AtomicI16]>>,
     pawn: CacheAligned<Box<[AtomicI16]>>,
@@ -102,7 +102,7 @@ pub(crate) struct SharedHistory {
 }
 
 impl SharedHistory {
-    pub(crate) fn new(thread_count: usize) -> Self {
+    pub fn new(thread_count: usize) -> Self {
         assert!(thread_count > 0, "thread count must be nonzero");
 
         let buckets = PAWN_BASE_BUCKETS
@@ -127,8 +127,9 @@ impl SharedHistory {
     }
 
     /// Resets every table. Called on `ucinewgame` so a new game does not inherit the
-    /// previous game's ordering statistics.
-    pub(crate) fn clear(&self) {
+    /// previous game's ordering statistics, and by `bench` between positions so one
+    /// allocation serves all six without polluting the timed region.
+    pub fn clear(&self) {
         for entry in self
             .butterfly
             .0

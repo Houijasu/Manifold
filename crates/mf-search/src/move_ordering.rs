@@ -277,7 +277,13 @@ pub(crate) fn quiescence_moves(
         .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
         .filter(|&mv| static_exchange_evaluation(position, mv) >= see_threshold)
         .collect();
-    moves.sort_unstable_by_key(|&mv| core::cmp::Reverse(capture_score(position, mv, ordering)));
+    // `sort_by_cached_key` for the same reason as the main loop above, and this site is
+    // the more expensive of the two: `capture_score` opens with a full
+    // `static_exchange_evaluation()` and closes with a capture-history table read, and
+    // `sort_unstable_by_key` re-evaluates its key on EVERY comparison. That made both
+    // the SEE and the table read run O(n log n) times per qsearch node instead of O(n),
+    // and qsearch is the majority of nodes (mission AGENTS.md 4.54 trap 1).
+    moves.sort_by_cached_key(|&mv| core::cmp::Reverse(capture_score(position, mv, ordering)));
     moves
 }
 
@@ -324,4 +330,50 @@ fn quiet_score(
     ordering.ordering_history(position, color, mv)
         + piece_square_value(piece.kind(), piece.color(), mv.to())
         - piece_square_value(piece.kind(), piece.color(), mv.from())
+}
+
+#[cfg(test)]
+mod tests {
+    /// No sort site in this module may re-evaluate its key per comparison.
+    ///
+    /// This is a SOURCE-level guard on purpose. The defect it catches is invisible to
+    /// every behavioural test and every node-count anchor: on this workload
+    /// `sort_unstable_by_key` and `sort_by_cached_key` produce the same move order, so
+    /// the tree is bit-for-bit identical and only throughput moves (mission AGENTS.md
+    /// 4.54 trap 1).
+    ///
+    /// It has now been introduced twice. M4-F1 hit it on the three main-loop sites for
+    /// -12% NPS. M4-F2 fixed those three and missed `quiescence_moves`, whose key calls
+    /// `static_exchange_evaluation()` AND `capture_history()`; qsearch is the majority
+    /// of nodes and SEE is far dearer than a table read, so that one line cost 6.7% NPS
+    /// on a capture-rich position (`experiments/M4-F3-defects/`). The defect appears at
+    /// a call site nobody edited, whenever a term is added to a scoring function, which
+    /// is exactly what a reviewer does not think to grep for.
+    #[test]
+    fn no_sort_site_re_evaluates_its_key_per_comparison() {
+        // The needles are split so this test's own source does not match them.
+        let uncached = ["sort_unstable_by", "_key"].concat();
+        let by_key = ["sort_by", "_key("].concat();
+        let source = include_str!("move_ordering.rs");
+        let offenders: Vec<_> = source
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| {
+                let code = line.split("//").next().unwrap_or(line);
+                code.contains('.') && (code.contains(&uncached) || code.contains(&by_key))
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "these sort sites re-evaluate their key on every comparison; \
+             use sort_by_cached_key instead: {offenders:?}"
+        );
+
+        let cached = ["sort_by", "_cached_key("].concat();
+        assert_eq!(
+            source.lines().filter(|line| line.contains(&cached)).count(),
+            4,
+            "the four sort sites are three in MovePicker::new and one in quiescence_moves"
+        );
+    }
 }

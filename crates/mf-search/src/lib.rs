@@ -12,12 +12,13 @@ mod vote;
 pub use evaluation::{
     DEFAULT_PARAMETERS, EvaluationParameters, TaperedScore, evaluate, evaluate_with_parameters,
 };
+pub use history::SharedHistory;
 pub use search::{
     IterationInfo, MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, SearchOptions, SearchResult,
     UNEVALUATED_STATIC_EVAL, clamp_centipawn_score, is_mate_score, score_to_uci_mate, search,
     search_with_callback, search_with_callback_options, search_with_history,
     search_with_history_callback, search_with_history_callback_options,
-    search_with_history_options, search_with_options,
+    search_with_history_options, search_with_options, search_with_shared_history_options,
 };
 pub use thread_pool::{PoolError, PoolSearchResult, SearchPool};
 pub use transposition_table::{

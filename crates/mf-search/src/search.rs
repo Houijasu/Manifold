@@ -192,6 +192,38 @@ pub fn search_with_options(
     search_with_history_options(position, &history, transposition_table, limits, options)
 }
 
+/// Single-threaded search reusing a caller-owned [`SharedHistory`].
+///
+/// Every other single-threaded entry point constructs a `SharedHistory` internally,
+/// which allocates and zeroes tens of MiB. That is correct for a one-shot search but
+/// wrong inside a timed benchmark loop: `bench` used to pay the allocation once per
+/// position *inside its own timed region*, so bench NPS misstated the cost of adding
+/// history tables (mission AGENTS.md 4.54). Match play allocates once per game, so the
+/// benchmark now matches it by hoisting the construction out and calling `clear()`
+/// between positions instead. Node counts are unaffected: a cleared table is
+/// bit-identical to a fresh one.
+pub fn search_with_shared_history_options(
+    position: &Position,
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+    options: SearchOptions,
+    shared_history: &SharedHistory,
+) -> SearchResult {
+    let position_history = [position.repetition_key()];
+    let node_counters = [AtomicU64::new(0)];
+    let stop = AtomicBool::new(false);
+    search_worker_with_history_callback_options(
+        position,
+        &position_history,
+        transposition_table,
+        limits,
+        options,
+        &stop,
+        WorkerParameters::new(0, 0, &node_counters, shared_history),
+        |_| {},
+    )
+}
+
 pub fn search_with_history(
     position: &Position,
     history: &[u64],
