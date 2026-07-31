@@ -45,12 +45,28 @@ fn record_allocation() {
 }
 
 fn local_network() -> Option<Network> {
-    let path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+    let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+    let path = explicit_path.clone().map_or_else(
         || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
         PathBuf::from,
     );
-    path.is_file()
-        .then(|| Network::load(path).expect("local FullThreats net should load"))
+    if !path.is_file() {
+        assert!(
+            explicit_path.is_none(),
+            "MF_NNUE_TEST_NET requires an existing network file: {}",
+            path.display()
+        );
+        eprintln!(
+            "SKIPPED: NNUE accumulator-stack allocation test is missing {}",
+            path.display()
+        );
+        return None;
+    }
+    Some(
+        Network::load(&path).unwrap_or_else(|error| {
+            panic!("failed to load NNUE network {}: {error}", path.display())
+        }),
+    )
 }
 
 #[test]

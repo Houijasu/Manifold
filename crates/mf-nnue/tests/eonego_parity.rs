@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use mf_core::{Color, Position};
@@ -28,10 +28,25 @@ fn read_dump() -> Vec<u8> {
         .unwrap_or_else(|error| panic!("failed to read fixture {}: {error}", path.display()))
 }
 
-fn network_path() -> PathBuf {
-    std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+fn local_network(gate: &str) -> Option<Network> {
+    let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+    let path = explicit_path.clone().map_or_else(
         || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
         PathBuf::from,
+    );
+    if !path.is_file() {
+        assert!(
+            explicit_path.is_none(),
+            "MF_NNUE_TEST_NET requires an existing network file: {}",
+            path.display()
+        );
+        eprintln!("SKIPPED: {gate} is missing {}", path.display());
+        return None;
+    }
+    Some(
+        Network::load(&path).unwrap_or_else(|error| {
+            panic!("failed to load NNUE network {}: {error}", path.display())
+        }),
     )
 }
 
@@ -100,20 +115,9 @@ fn manifold_matches_eonego_on_10k_reference_positions() {
     let dump = read_dump();
     assert_eq!(dump.len(), DUMP_BYTES, "fixture dump byte size");
 
-    let network_path = network_path();
-    if !Path::new(&network_path).is_file() {
-        eprintln!(
-            "skipping 10k Eonego parity gate: network is absent at {}",
-            network_path.display()
-        );
+    let Some(network) = local_network("10k Eonego parity gate") else {
         return;
-    }
-    let network = Network::load(&network_path).unwrap_or_else(|error| {
-        panic!(
-            "failed to load NNUE network {}: {error}",
-            network_path.display()
-        )
-    });
+    };
 
     let mut transformed = [0_u8; L1];
     for backend in [
@@ -184,27 +188,20 @@ fn manifold_matches_eonego_on_10k_reference_positions() {
 }
 
 #[test]
-#[ignore = "large local 10k-position root-stack parity gate"]
 fn root_accumulator_stack_matches_eonego_on_10k_reference_positions() {
+    if cfg!(debug_assertions) {
+        eprintln!("SKIPPED: 10k Eonego root-stack parity gate runs only in release builds");
+        return;
+    }
+
     let fens = read_fens();
     assert_eq!(fens.len(), RECORDS, "fixture FEN line count");
     let dump = read_dump();
     assert_eq!(dump.len(), DUMP_BYTES, "fixture dump byte size");
 
-    let network_path = network_path();
-    if !Path::new(&network_path).is_file() {
-        eprintln!(
-            "skipping 10k Eonego root-stack parity gate: network is absent at {}",
-            network_path.display()
-        );
+    let Some(network) = local_network("10k Eonego root-stack parity gate") else {
         return;
-    }
-    let network = Network::load(&network_path).unwrap_or_else(|error| {
-        panic!(
-            "failed to load NNUE network {}: {error}",
-            network_path.display()
-        )
-    });
+    };
 
     let started = Instant::now();
     let mut transformed = [0_u8; L1];
