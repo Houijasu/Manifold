@@ -8,3 +8,12 @@ authors.workspace = true
 [dependencies]
 mf-core = { path = "../mf-core" }
 mf-nnue = { path = "../mf-nnue" }
+mf-search = { path = "../mf-search" }
+
+# `bulletformat` (MIT, zero dependencies) is a DEV-DEPENDENCY ONLY, used as a
+# round-trip oracle exactly as `cozy-chess` is used for perft in `mf-core`. It must
+# never become a runtime dependency: the emitted format is defined by
+# `src/record.rs`, and the oracle's job is to prove that definition agrees with the
+# trainer that will actually consume the data.
+[dev-dependencies]
+bulletformat = "1.8.0"

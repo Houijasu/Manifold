@@ -1,5 +1,9 @@
 //! Universal Chess Interface protocol handling for Manifold.
 
+mod datagen_cli;
+
+pub use datagen_cli::run_datagen_subcommand;
+
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

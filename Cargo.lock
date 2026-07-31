@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "bulletformat"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d171953264e8dc3aa62757255e602e507fdd358a94e3cdacb9e481ff3a1c6b0"
+
+[[package]]
 name = "cozy-chess"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -28,8 +34,10 @@ dependencies = [
 name = "mf-datagen"
 version = "0.1.0"
 dependencies = [
+ "bulletformat",
  "mf-core",
  "mf-nnue",
+ "mf-search",
 ]
 
 [[package]]
@@ -68,6 +76,7 @@ name = "mf-uci"
 version = "0.1.0"
 dependencies = [
  "mf-core",
+ "mf-datagen",
  "mf-nnue",
  "mf-search",
 ]

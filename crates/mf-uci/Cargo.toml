@@ -11,5 +11,6 @@ path = "src/main.rs"
 
 [dependencies]
 mf-core = { path = "../mf-core" }
+mf-datagen = { path = "../mf-datagen" }
 mf-nnue = { path = "../mf-nnue" }
 mf-search = { path = "../mf-search" }

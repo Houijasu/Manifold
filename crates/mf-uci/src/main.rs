@@ -9,11 +9,12 @@ fn main() -> ExitCode {
             "perft" => mf_uci::run_perft_subcommand(arguments, stdout.lock()),
             "bench" => mf_uci::run_bench_subcommand(arguments, stdout.lock()),
             "mtbench" => mf_uci::run_mtbench_subcommand(arguments, stdout.lock()),
+            "datagen" => mf_uci::run_datagen_subcommand(arguments, stdout.lock()),
             _ => {
                 eprintln!("Error: unknown command '{command}'");
                 eprintln!(
-                    "Hint: use 'manifold perft --help', 'manifold bench', 'manifold mtbench', or \
-                     run without arguments for UCI mode."
+                    "Hint: use 'manifold perft --help', 'manifold bench', 'manifold mtbench', \
+                     'manifold datagen --help', or run without arguments for UCI mode."
                 );
                 return ExitCode::FAILURE;
             }
