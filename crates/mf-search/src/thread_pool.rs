@@ -6,6 +6,7 @@ use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 
 use mf_core::Position;
+use mf_nnue::Network;
 
 use crate::history::SharedHistory;
 use crate::search::{WorkerParameters, search_worker_with_history_callback_options};
@@ -145,6 +146,35 @@ impl SearchPool {
             limits,
             options,
             stop,
+            None,
+            DispatchMode::AllWorkers,
+            on_iteration,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_with_history_callback_network_options<F>(
+        &self,
+        position: &Position,
+        history: &[u64],
+        table: Arc<TranspositionTable>,
+        limits: SearchLimits,
+        options: SearchOptions,
+        stop: Arc<AtomicBool>,
+        network: Option<Arc<Network>>,
+        on_iteration: F,
+    ) -> Result<PoolSearchResult, PoolError>
+    where
+        F: FnMut(&IterationInfo),
+    {
+        self.search_impl(
+            position,
+            history,
+            table,
+            limits,
+            options,
+            stop,
+            network,
             DispatchMode::AllWorkers,
             on_iteration,
         )
@@ -171,6 +201,35 @@ impl SearchPool {
             limits,
             options,
             stop,
+            None,
+            DispatchMode::WorkerZeroOnly,
+            on_iteration,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_fixed_depth_with_history_callback_network_options<F>(
+        &self,
+        position: &Position,
+        history: &[u64],
+        table: Arc<TranspositionTable>,
+        limits: SearchLimits,
+        options: SearchOptions,
+        stop: Arc<AtomicBool>,
+        network: Option<Arc<Network>>,
+        on_iteration: F,
+    ) -> Result<PoolSearchResult, PoolError>
+    where
+        F: FnMut(&IterationInfo),
+    {
+        self.search_impl(
+            position,
+            history,
+            table,
+            limits,
+            options,
+            stop,
+            network,
             DispatchMode::WorkerZeroOnly,
             on_iteration,
         )
@@ -197,6 +256,35 @@ impl SearchPool {
             limits,
             options,
             stop,
+            None,
+            DispatchMode::AllWorkers,
+            on_iteration,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_fixed_depth_smp_with_history_callback_network_options<F>(
+        &self,
+        position: &Position,
+        history: &[u64],
+        table: Arc<TranspositionTable>,
+        limits: SearchLimits,
+        options: SearchOptions,
+        stop: Arc<AtomicBool>,
+        network: Option<Arc<Network>>,
+        on_iteration: F,
+    ) -> Result<PoolSearchResult, PoolError>
+    where
+        F: FnMut(&IterationInfo),
+    {
+        self.search_impl(
+            position,
+            history,
+            table,
+            limits,
+            options,
+            stop,
+            network,
             DispatchMode::AllWorkers,
             on_iteration,
         )
@@ -211,6 +299,7 @@ impl SearchPool {
         limits: SearchLimits,
         options: SearchOptions,
         stop: Arc<AtomicBool>,
+        network: Option<Arc<Network>>,
         dispatch_mode: DispatchMode,
         mut on_iteration: F,
     ) -> Result<PoolSearchResult, PoolError>
@@ -275,6 +364,7 @@ impl SearchPool {
                 limits: worker_limits,
                 options,
                 stop: Arc::clone(&stop),
+                network: network.as_ref().map(Arc::clone),
                 counters: Arc::clone(&counters),
                 events: events.clone(),
             };
@@ -407,6 +497,7 @@ struct SearchJob {
     limits: SearchLimits,
     options: SearchOptions,
     stop: Arc<AtomicBool>,
+    network: Option<Arc<Network>>,
     counters: Arc<[AtomicU64]>,
     events: mpsc::Sender<WorkerEvent>,
 }
@@ -441,7 +532,8 @@ fn worker_loop(receiver: mpsc::Receiver<WorkerCommand>) {
                         job.generation,
                         &job.counters,
                         &job.shared_history,
-                    ),
+                    )
+                    .with_network(job.network.as_deref()),
                     |iteration| {
                         if job.worker_id == 0 {
                             let _ = events.send(WorkerEvent::Progress(iteration.clone()));

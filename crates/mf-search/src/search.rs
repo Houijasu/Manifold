@@ -3,10 +3,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use mf_core::{
-    Bitboard, CastlingSide, Color, Move, PieceKind, Position, Square, bishop_attacks,
+    Bitboard, CastlingSide, Color, Move, PieceKind, Position, Square, Undo, bishop_attacks,
     generate_legal_moves, has_legal_move, is_in_check, king_attacks, knight_attacks, pawn_attacks,
     rook_attacks, static_exchange_evaluation,
 };
+use mf_nnue::{ACCUMULATOR_STACK_CAPACITY, AccumulatorStack, AccumulatorStackError, Network};
 
 use crate::evaluation::{EVALUATION_LIMIT, evaluate};
 use crate::history::{
@@ -21,6 +22,7 @@ use crate::{Bound, EntryData, TranspositionTable};
 
 pub const MATE_SCORE: i32 = 30_000;
 pub const MAX_SEARCH_PLY: usize = 128;
+const _: () = assert!(MAX_SEARCH_PLY == ACCUMULATOR_STACK_CAPACITY);
 /// Marks a TT entry whose static evaluation was intentionally not computed.
 pub const UNEVALUATED_STATIC_EVAL: i16 = i16::MIN;
 const INFINITY: i32 = MATE_SCORE + 1;
@@ -44,6 +46,89 @@ const PROBCUT_IMPROVING_MARGIN: i32 = 64;
 const QSEARCH_SEE_THRESHOLD: i32 = -74;
 const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
 const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
+
+struct SearchEvaluator<'network> {
+    accumulators: Option<AccumulatorStack<'network>>,
+    #[cfg(test)]
+    network: Option<&'network Network>,
+    #[cfg(test)]
+    verify_incremental: bool,
+}
+
+impl<'network> SearchEvaluator<'network> {
+    fn new(network: Option<&'network Network>, root: &Position) -> Self {
+        Self {
+            accumulators: network.map(|network| AccumulatorStack::new_production(network, root)),
+            #[cfg(test)]
+            network,
+            #[cfg(test)]
+            verify_incremental: false,
+        }
+    }
+
+    #[inline]
+    fn evaluate(&self, position: &Position) -> i32 {
+        #[cfg(test)]
+        if self.verify_incremental {
+            let network = self.network.expect("verification requires an NNUE network");
+            let expected = mf_nnue::AccumulatorState::from_position_production(network, position);
+            assert_eq!(
+                self.accumulators
+                    .as_ref()
+                    .expect("verification requires an accumulator stack")
+                    .current(),
+                &expected
+            );
+        }
+        self.accumulators
+            .as_ref()
+            .map_or_else(|| evaluate(position), |stack| stack.evaluate(position))
+    }
+
+    fn push_real(
+        &mut self,
+        child: &Position,
+        mv: Move,
+        undo: &Undo,
+    ) -> Result<(), AccumulatorStackError> {
+        self.accumulators
+            .as_mut()
+            .map_or(Ok(()), |stack| stack.push_real(child, mv, undo))
+    }
+
+    fn push_null(&mut self) -> Result<(), AccumulatorStackError> {
+        self.accumulators
+            .as_mut()
+            .map_or(Ok(()), AccumulatorStack::push_null)
+    }
+
+    fn pop(&mut self) -> Result<(), AccumulatorStackError> {
+        self.accumulators
+            .as_mut()
+            .map_or(Ok(()), AccumulatorStack::pop)
+    }
+
+    #[cfg(test)]
+    fn depth(&self) -> usize {
+        self.accumulators
+            .as_ref()
+            .map_or(0, AccumulatorStack::depth)
+    }
+
+    #[cfg(test)]
+    fn current(&self) -> &mf_nnue::AccumulatorState {
+        self.accumulators
+            .as_ref()
+            .expect("current NNUE state requires a network")
+            .current()
+    }
+
+    #[cfg(test)]
+    fn enable_verification(&mut self) {
+        assert!(self.network.is_some());
+        self.verify_incremental = true;
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SearchLimits {
@@ -191,6 +276,7 @@ pub(crate) struct WorkerParameters<'a> {
     generation: u8,
     node_counters: &'a [AtomicU64],
     history: &'a SharedHistory,
+    network: Option<&'a Network>,
 }
 
 impl<'a> WorkerParameters<'a> {
@@ -206,7 +292,13 @@ impl<'a> WorkerParameters<'a> {
             generation: generation & 31,
             node_counters,
             history,
+            network: None,
         }
+    }
+
+    pub(crate) fn with_network(mut self, network: Option<&'a Network>) -> Self {
+        self.network = network;
+        self
     }
 }
 
@@ -229,8 +321,30 @@ pub fn search_with_options(
     limits: SearchLimits,
     options: SearchOptions,
 ) -> SearchResult {
+    search_with_network_options(position, transposition_table, limits, options, None)
+}
+
+pub fn search_with_network_options(
+    position: &Position,
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+    options: SearchOptions,
+    network: Option<&Network>,
+) -> SearchResult {
     let history = [position.repetition_key()];
-    search_with_history_options(position, &history, transposition_table, limits, options)
+    let node_counters = [AtomicU64::new(0)];
+    let stop = AtomicBool::new(false);
+    let shared_history = SharedHistory::new(1);
+    search_worker_with_history_callback_options(
+        position,
+        &history,
+        transposition_table,
+        limits,
+        options,
+        &stop,
+        WorkerParameters::new(0, 0, &node_counters, &shared_history).with_network(network),
+        |_| {},
+    )
 }
 
 /// Single-threaded search reusing a caller-owned [`SharedHistory`].
@@ -250,6 +364,24 @@ pub fn search_with_shared_history_options(
     options: SearchOptions,
     shared_history: &SharedHistory,
 ) -> SearchResult {
+    search_with_shared_history_network_options(
+        position,
+        transposition_table,
+        limits,
+        options,
+        shared_history,
+        None,
+    )
+}
+
+pub fn search_with_shared_history_network_options(
+    position: &Position,
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+    options: SearchOptions,
+    shared_history: &SharedHistory,
+    network: Option<&Network>,
+) -> SearchResult {
     let position_history = [position.repetition_key()];
     let node_counters = [AtomicU64::new(0)];
     let stop = AtomicBool::new(false);
@@ -260,7 +392,7 @@ pub fn search_with_shared_history_options(
         limits,
         options,
         &stop,
-        WorkerParameters::new(0, 0, &node_counters, shared_history),
+        WorkerParameters::new(0, 0, &node_counters, shared_history).with_network(network),
         |_| {},
     )
 }
@@ -437,6 +569,7 @@ where
         worker_id,
         worker.generation,
         worker.node_counters,
+        worker.network,
     );
     let root_moves = generate_legal_moves(position);
 
@@ -518,7 +651,7 @@ where
     let completed = completed.unwrap_or_else(|| IterationInfo {
         depth: 0,
         seldepth: 0,
-        score: evaluate(position),
+        score: context.static_eval(position),
         nodes: context.reported_nodes(),
         hashfull: context.transposition_table.hashfull_per_mille(),
         elapsed: context.elapsed(),
@@ -619,7 +752,7 @@ fn root_search(
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(&position, 1, mv, continuation);
+        context.push_position(&position, 1, mv, continuation, &undo);
         let mut child_pv = Vec::new();
         let score = if searched == 0 {
             pvs(
@@ -757,7 +890,7 @@ fn pvs(
         return Some(draw_score);
     }
     if ply >= MAX_SEARCH_PLY {
-        return Some(evaluate(position));
+        return Some(context.static_eval(position));
     }
     if depth <= 0 {
         return quiescence(position, alpha, beta, ply, false, context, pv);
@@ -803,7 +936,10 @@ fn pvs(
     // top of itself on every re-probe. The reference is explicit about this.
     let raw_static_eval = tt_entry
         .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
-        .map_or_else(|| evaluate(position), |entry| i32::from(entry.static_eval));
+        .map_or_else(
+            || context.static_eval(position),
+            |entry| i32::from(entry.static_eval),
+        );
     let correction = correction_value(position, context, ply);
     let static_eval = to_corrected_static_eval(raw_static_eval, correction);
     // `improving` is a shared derived value: it feeds the LMR reduction, which feeds
@@ -943,7 +1079,7 @@ fn pvs(
                     position.unmake_move(mv, undo);
                     continue;
                 }
-                context.push_position(position, ply + 1, mv, continuation);
+                context.push_position(position, ply + 1, mv, continuation, &undo);
                 let mut probcut_pv = Vec::new();
                 let mut value = quiescence(
                     position,
@@ -1198,7 +1334,7 @@ fn pvs(
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(position, ply + 1, mv, continuation);
+        context.push_position(position, ply + 1, mv, continuation, &undo);
         child_pv.clear();
         let score = if searched == 0 {
             pvs(
@@ -1405,7 +1541,7 @@ fn quiescence(
         return Some(draw_score);
     }
     if ply >= MAX_SEARCH_PLY {
-        return Some(evaluate(position));
+        return Some(context.static_eval(position));
     }
 
     let in_check = is_in_check(position, position.side_to_move());
@@ -1416,7 +1552,10 @@ fn quiescence(
     let mut best_score = if in_check {
         -INFINITY
     } else {
-        to_corrected_static_eval(evaluate(position), correction_value(position, context, ply))
+        to_corrected_static_eval(
+            context.static_eval(position),
+            correction_value(position, context, ply),
+        )
     };
     if !in_check {
         if best_score >= beta {
@@ -1450,7 +1589,7 @@ fn quiescence(
             position.unmake_move(mv, undo);
             continue;
         }
-        context.push_position(position, ply + 1, mv, continuation);
+        context.push_position(position, ply + 1, mv, continuation, &undo);
         child_pv.clear();
         let score = quiescence(
             position,
@@ -2192,6 +2331,7 @@ struct SearchContext<'a> {
     seldepth: u32,
     iterations: Vec<IterationInfo>,
     history: &'a SharedHistory,
+    evaluator: SearchEvaluator<'a>,
     killers: KillerTable,
     static_evals: [Option<i32>; MAX_SEARCH_PLY],
     repetition_history: RepetitionHistory,
@@ -2221,6 +2361,7 @@ impl<'a> SearchContext<'a> {
         worker_id: usize,
         generation: u8,
         node_counters: &'a [AtomicU64],
+        network: Option<&'a Network>,
     ) -> Self {
         Self {
             transposition_table,
@@ -2234,6 +2375,7 @@ impl<'a> SearchContext<'a> {
             seldepth: 0,
             iterations: Vec::new(),
             history,
+            evaluator: SearchEvaluator::new(network, position),
             killers: KillerTable::new(),
             static_evals: [None; MAX_SEARCH_PLY],
             repetition_history: RepetitionHistory::new(position, position_history),
@@ -2328,22 +2470,37 @@ impl<'a> SearchContext<'a> {
         ply: usize,
         mv: Move,
         continuation: Option<ContinuationKey>,
+        undo: &Undo,
     ) {
+        self.evaluator
+            .push_real(position, mv, undo)
+            .expect("search ply is bounded by the NNUE accumulator capacity");
         self.current_moves[ply - 1] = Some(mv);
         self.continuation_keys[ply - 1] = continuation;
         self.repetition_history.push_position(position);
     }
 
     fn push_null_position(&mut self, ply: usize) {
+        self.evaluator
+            .push_null()
+            .expect("search ply is bounded by the NNUE accumulator capacity");
         self.current_moves[ply - 1] = None;
         self.continuation_keys[ply - 1] = None;
         self.repetition_history.push_null();
     }
 
     fn pop_position(&mut self, ply: usize) {
+        self.evaluator
+            .pop()
+            .expect("every searched child position has a matching accumulator frame");
         self.repetition_history.pop();
         self.current_moves[ply - 1] = None;
         self.continuation_keys[ply - 1] = None;
+    }
+
+    #[inline]
+    fn static_eval(&self, position: &Position) -> i32 {
+        self.evaluator.evaluate(position)
     }
 
     /// The predecessor plane at each lookback distance in `CONTINUATION_PLIES`.
@@ -2426,7 +2583,228 @@ pub fn clamp_centipawn_score(score: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+
     use super::*;
+
+    fn local_network() -> Option<&'static mf_nnue::Network> {
+        static NETWORK: OnceLock<Option<mf_nnue::Network>> = OnceLock::new();
+        NETWORK
+            .get_or_init(|| {
+                let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+                if !path.is_file() {
+                    eprintln!("SKIPPED: NNUE search tests are missing {}", path.display());
+                    return None;
+                }
+                Some(mf_nnue::Network::load(&path).unwrap_or_else(|error| {
+                    panic!("test NNUE network {}: {error}", path.display())
+                }))
+            })
+            .as_ref()
+    }
+
+    #[test]
+    fn search_evaluator_selects_nnue_or_hce_without_rescaling() {
+        let position = Position::from_fen(
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            false,
+        )
+        .expect("test FEN should parse");
+        let Some(network) = local_network() else {
+            return;
+        };
+        let nnue = SearchEvaluator::new(Some(network), &position);
+        let hce = SearchEvaluator::new(None, &position);
+
+        assert_eq!(
+            nnue.evaluate(&position),
+            network.evaluate_production(&position)
+        );
+        assert_eq!(hce.evaluate(&position), evaluate(&position));
+        assert_ne!(nnue.evaluate(&position), hce.evaluate(&position));
+    }
+
+    #[test]
+    fn search_evaluator_tracks_real_and_null_moves_and_unwinds_to_root() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let mut position = Position::startpos();
+        let root = position.clone();
+        let mut evaluator = SearchEvaluator::new(Some(network), &position);
+        let mv = mf_core::parse_uci_move(&position, "e2e4", false).expect("test move should parse");
+        let undo = position.make_move(mv);
+
+        evaluator
+            .push_real(&position, mv, &undo)
+            .expect("first child should fit");
+        assert_eq!(evaluator.depth(), 1);
+        assert_eq!(
+            evaluator.evaluate(&position),
+            network.evaluate_production(&position)
+        );
+
+        let null_undo = position.make_null_move();
+        evaluator.push_null().expect("null child should fit");
+        assert_eq!(evaluator.depth(), 2);
+        assert_eq!(
+            evaluator.evaluate(&position),
+            network.evaluate_production(&position)
+        );
+
+        evaluator.pop().expect("null child should pop");
+        position.unmake_null_move(null_undo);
+        evaluator.pop().expect("real child should pop");
+        position.unmake_move(mv, undo);
+
+        assert_eq!(position, root);
+        assert_eq!(evaluator.depth(), 0);
+        assert_eq!(
+            evaluator.evaluate(&position),
+            network.evaluate_production(&position)
+        );
+    }
+
+    #[test]
+    fn search_evaluator_capacity_exactly_matches_search_ply_limit() {
+        let position = Position::startpos();
+        let Some(network) = local_network() else {
+            return;
+        };
+        let mut evaluator = SearchEvaluator::new(Some(network), &position);
+
+        for _ in 0..MAX_SEARCH_PLY {
+            evaluator
+                .push_null()
+                .expect("every searchable child ply should fit");
+        }
+
+        assert_eq!(evaluator.depth(), MAX_SEARCH_PLY);
+    }
+
+    #[test]
+    fn search_context_position_stack_keeps_nnue_in_lockstep() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let mut position = Position::startpos();
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits::default(),
+            None,
+            &stop,
+            &position,
+            &history,
+            &shared_history,
+            SearchOptions::default(),
+            0,
+            0,
+            &counters,
+            Some(network),
+        );
+        let mv = mf_core::parse_uci_move(&position, "e2e4", false).expect("test move should parse");
+        let continuation = continuation_key(&position, mv);
+        let undo = position.make_move(mv);
+
+        context.push_position(&position, 1, mv, continuation, &undo);
+        assert_eq!(context.evaluator.depth(), 1);
+        assert_eq!(
+            context.static_eval(&position),
+            network.evaluate_production(&position)
+        );
+
+        let null_undo = position.make_null_move();
+        context.push_null_position(2);
+        assert_eq!(context.evaluator.depth(), 2);
+        context.pop_position(2);
+        position.unmake_null_move(null_undo);
+        context.pop_position(1);
+        position.unmake_move(mv, undo);
+
+        assert_eq!(context.evaluator.depth(), 0);
+        assert_eq!(position, Position::startpos());
+    }
+
+    #[test]
+    fn public_search_uses_nnue_when_a_network_is_supplied() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position = Position::from_fen("4k3/8/8/8/8/8/8/3QK3 w - - 0 1", false)
+            .expect("test FEN should parse");
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let limits = SearchLimits {
+            nodes: Some(0),
+            ..SearchLimits::default()
+        };
+
+        let nnue = search_with_network_options(
+            &position,
+            &table,
+            limits,
+            SearchOptions::default(),
+            Some(network),
+        );
+        let hce = search_with_options(&position, &table, limits, SearchOptions::default());
+
+        assert_eq!(nnue.score, network.evaluate_production(&position));
+        assert_eq!(hce.score, evaluate(&position));
+        assert_ne!(nnue.score, hce.score);
+    }
+
+    #[test]
+    #[ignore = "slow incremental NNUE verification at every search evaluation"]
+    fn incremental_nnue_matches_full_rebuild_at_every_search_evaluation() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        for (fen, chess960) in [
+            (
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+                false,
+            ),
+            ("rk6/8/8/8/8/8/8/RK6 w Aa - 0 1", true),
+        ] {
+            let position =
+                Position::from_fen(fen, chess960).expect("verification FEN should parse");
+            let table = TranspositionTable::new(4).expect("test TT should allocate");
+            let stop = AtomicBool::new(false);
+            let counters = [AtomicU64::new(0)];
+            let history = [position.repetition_key()];
+            let shared_history = SharedHistory::new(1);
+            let mut context = SearchContext::new(
+                &table,
+                SearchLimits {
+                    depth: Some(4),
+                    ..SearchLimits::default()
+                },
+                None,
+                &stop,
+                &position,
+                &history,
+                &shared_history,
+                SearchOptions::default(),
+                0,
+                0,
+                &counters,
+                Some(network),
+            );
+            let root_state = context.evaluator.current().clone();
+            context.evaluator.enable_verification();
+
+            let result = root_search(&position, 4, -INFINITY, INFINITY, &mut context);
+
+            assert!(result.is_some());
+            assert_eq!(context.evaluator.depth(), 0);
+            assert_eq!(context.evaluator.current(), &root_state);
+        }
+    }
 
     #[test]
     fn worker_zero_preserves_the_original_aspiration_delta() {
@@ -2498,6 +2876,7 @@ mod tests {
                 0,
                 0,
                 &counters,
+                None,
             );
 
             for node in 1..=limit {
@@ -2873,6 +3252,7 @@ mod tests {
             0,
             0,
             &counters,
+            None,
         );
 
         assert!(context.repetition_history.is_repetition(0));
@@ -3036,6 +3416,7 @@ mod tests {
             0,
             0,
             &counters,
+            None,
         );
         let mut searched = position.clone();
         let mut pv = Vec::new();
@@ -3082,6 +3463,7 @@ mod tests {
             0,
             0,
             &counters,
+            None,
         );
         let mut searched = position.clone();
         let mut pv = Vec::new();

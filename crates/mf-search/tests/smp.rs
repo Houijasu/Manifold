@@ -4,6 +4,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use mf_core::{Position, generate_legal_moves};
+use mf_nnue::Network;
 use mf_search::{
     Bound, EntryData, PoolError, SearchLimits, SearchOptions, SearchPool, TranspositionTable,
 };
@@ -59,6 +60,17 @@ fn infinite_limits() -> SearchLimits {
 
 fn history(position: &Position) -> Vec<u64> {
     vec![position.repetition_key()]
+}
+
+fn local_network() -> Option<Arc<Network>> {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+    if !path.is_file() {
+        eprintln!("SKIPPED: NNUE SMP tests are missing {}", path.display());
+        return None;
+    }
+    Some(Arc::new(Network::load(&path).unwrap_or_else(|error| {
+        panic!("test NNUE network {}: {error}", path.display())
+    })))
 }
 
 fn assert_legal_result(position: &Position, result: &mf_search::SearchResult) {
@@ -167,6 +179,76 @@ fn explicit_fixed_depth_smp_path_returns_a_legal_result() {
 
         assert!(pooled.selected_worker < 4);
         assert!(stop.load(Ordering::Relaxed));
+        assert_legal_result(&position, &pooled.result);
+    });
+}
+
+#[test]
+fn nnue_fixed_depth_is_identical_across_pool_sizes() {
+    run_bounded(|| {
+        let one = SearchPool::new(1).expect("single worker pool should start");
+        let eight = SearchPool::new(8).expect("eight worker pool should start");
+        let position = Position::from_fen(KIWIPETE, false).expect("test FEN should parse");
+        let Some(network) = local_network() else {
+            return;
+        };
+
+        let one_result = one
+            .search_fixed_depth_with_history_callback_network_options(
+                &position,
+                &history(&position),
+                Arc::new(TranspositionTable::new(8).expect("test TT should allocate")),
+                depth_limits(4),
+                SearchOptions::default(),
+                Arc::new(AtomicBool::new(false)),
+                Some(Arc::clone(&network)),
+                |_| {},
+            )
+            .expect("single worker NNUE search should complete");
+        let eight_result = eight
+            .search_fixed_depth_with_history_callback_network_options(
+                &position,
+                &history(&position),
+                Arc::new(TranspositionTable::new(8).expect("test TT should allocate")),
+                depth_limits(4),
+                SearchOptions::default(),
+                Arc::new(AtomicBool::new(false)),
+                Some(network),
+                |_| {},
+            )
+            .expect("eight worker NNUE search should complete");
+
+        assert_eq!(one_result.selected_worker, 0);
+        assert_eq!(eight_result.selected_worker, 0);
+        assert_eq!(one_result.result.score, eight_result.result.score);
+        assert_eq!(one_result.result.nodes, eight_result.result.nodes);
+        assert_eq!(one_result.result.pv, eight_result.result.pv);
+        assert_legal_result(&position, &eight_result.result);
+    });
+}
+
+#[test]
+fn nnue_fixed_depth_smp_uses_a_network_on_every_worker() {
+    run_bounded(|| {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let pool = SearchPool::new(4).expect("worker pool should start");
+        let position = Position::from_fen(KIWIPETE, false).expect("test FEN should parse");
+        let pooled = pool
+            .search_fixed_depth_smp_with_history_callback_network_options(
+                &position,
+                &history(&position),
+                Arc::new(TranspositionTable::new(8).expect("test TT should allocate")),
+                depth_limits(3),
+                SearchOptions::default(),
+                Arc::new(AtomicBool::new(false)),
+                Some(network),
+                |_| {},
+            )
+            .expect("SMP NNUE search should complete");
+
+        assert!(pooled.selected_worker < 4);
         assert_legal_result(&position, &pooled.result);
     });
 }
