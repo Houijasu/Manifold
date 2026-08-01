@@ -706,29 +706,13 @@ fn gather_changed_square<const CAPACITY: usize, const PROFILE: bool>(
         {
             let mut targets = outgoing_targets(position, affected);
             while let Some(target) = targets.pop_first() {
-                record_known_changed_pair(
-                    parent,
-                    child,
-                    position,
-                    source_is_parent,
-                    affected,
-                    target,
-                    changed,
-                );
+                record_source_edge(position, source_is_parent, affected, target, changed);
             }
         }
 
         let mut incoming = non_slider_attackers_to(position, affected);
         while let Some(attacker) = incoming.pop_first() {
-            record_known_changed_pair(
-                parent,
-                child,
-                position,
-                source_is_parent,
-                attacker,
-                affected,
-                changed,
-            );
+            record_source_edge(position, source_is_parent, attacker, affected, changed);
         }
 
         let occupancy = position.occupancy();
@@ -747,50 +731,30 @@ fn gather_changed_square<const CAPACITY: usize, const PROFILE: bool>(
         }
         while let Some(attacker) = sliders.pop_first() {
             if position.piece_at(affected).is_some() {
-                record_known_changed_pair(
-                    parent,
-                    child,
-                    position,
-                    source_is_parent,
-                    attacker,
-                    affected,
-                    changed,
-                );
+                record_source_edge(position, source_is_parent, attacker, affected, changed);
             }
 
             let mut beyond =
                 ray_beyond(attacker, affected) & slider_attacks(position, attacker) & occupancy;
             if let Some(target) = beyond.pop_first() {
-                record_known_changed_pair(
-                    parent,
-                    child,
-                    position,
-                    source_is_parent,
-                    attacker,
-                    target,
-                    changed,
-                );
+                record_source_edge(position, source_is_parent, attacker, target, changed);
             }
         }
     }
 }
 
-fn record_known_changed_pair<const CAPACITY: usize>(
-    parent: &Position,
-    child: &Position,
+fn record_source_edge<const CAPACITY: usize>(
     source: &Position,
     source_is_parent: bool,
     attacker: Square,
     target: Square,
     changed: &mut ChangedThreatBuffer<CAPACITY>,
 ) {
-    let known = known_physical_edge(source, attacker, target);
-    let (before, after) = if source_is_parent {
-        (known, physical_edge(child, attacker, target))
-    } else {
-        (physical_edge(parent, attacker, target), known)
-    };
-    record_edge_delta(before, after, changed);
+    // The parent and child scans emit opposite signs, so unchanged physical edges cancel here
+    // without regenerating the attack set in the other position.
+    if let Some(edge) = known_physical_edge(source, attacker, target) {
+        changed.push_netted(edge.with_sign(if source_is_parent { -1 } else { 1 }));
+    }
 }
 
 fn known_physical_edge(position: &Position, from: Square, to: Square) -> Option<DirtyThreat> {
@@ -808,58 +772,6 @@ fn known_physical_edge(position: &Position, from: Square, to: Square) -> Option<
         ThreatPiece::from(attacked),
         1,
     ))
-}
-
-fn record_edge_delta<const CAPACITY: usize>(
-    before: Option<DirtyThreat>,
-    after: Option<DirtyThreat>,
-    changed: &mut ChangedThreatBuffer<CAPACITY>,
-) {
-    if before == after {
-        return;
-    }
-    if let Some(edge) = before {
-        changed.push_netted(edge.with_sign(-1));
-    }
-    if let Some(edge) = after {
-        changed.push_netted(edge.with_sign(1));
-    }
-}
-
-fn physical_edge(position: &Position, from: Square, to: Square) -> Option<DirtyThreat> {
-    let attacker = position.piece_at(from)?;
-    let attacked = position.piece_at(to)?;
-    if attacker.kind() == PieceKind::King {
-        return None;
-    }
-
-    let attacks = match attacker.kind() {
-        PieceKind::Pawn => {
-            let push = match attacker.color() {
-                Color::White if from.index() < 56 => 1_u64 << (from.index() + 8),
-                Color::Black if from.index() >= 8 => 1_u64 << (from.index() - 8),
-                Color::White | Color::Black => 0,
-            };
-            pawn_attacks(from, attacker.color())
-                | (Bitboard::new(push)
-                    & (position.pieces(Color::White, PieceKind::Pawn)
-                        | position.pieces(Color::Black, PieceKind::Pawn)))
-        }
-        PieceKind::Knight => knight_attacks(from),
-        PieceKind::Bishop => bishop_attacks(from, position.occupancy()),
-        PieceKind::Rook => rook_attacks(from, position.occupancy()),
-        PieceKind::Queen => queen_attacks(from, position.occupancy()),
-        PieceKind::King => unreachable!(),
-    };
-    attacks.contains(to).then(|| {
-        DirtyThreat::new(
-            ThreatPiece::from(attacker),
-            from,
-            to,
-            ThreatPiece::from(attacked),
-            1,
-        )
-    })
 }
 
 fn outgoing_targets(position: &Position, from: Square) -> Bitboard {
@@ -1323,10 +1235,11 @@ mod tests {
     fn move_local_discovery_matches_full_physical_diff_on_random_walk() {
         let mut position = Position::startpos();
         let mut random = 0xD1B5_4A32_D192_ED03_u64;
-        for ply in 0..512 {
+        for ply in 0..4_000 {
             let moves = generate_legal_moves(&position);
             if moves.is_empty() {
-                break;
+                position = Position::startpos();
+                continue;
             }
             random ^= random << 13;
             random ^= random >> 7;
