@@ -9,6 +9,8 @@ mod provision;
 mod simd;
 pub mod threats;
 
+#[cfg(feature = "instrumentation")]
+pub use accumulator::UpdateProfile;
 pub use accumulator::{
     ACCUMULATOR_STACK_CAPACITY, AccumulatorStack, AccumulatorStackError, AccumulatorState,
 };

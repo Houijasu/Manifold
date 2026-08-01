@@ -10,8 +10,10 @@ use crate::halfka;
 use crate::network::{L1, Network, PSQT_BUCKETS};
 use crate::simd::{
     ForwardMode, SimdBackend, UnsupportedBackend, add_i8_row, add_i16_row, add_psqt_row,
-    production_forward_mode, subtract_i8_row, subtract_i16_row, subtract_psqt_row,
+    fused_accumulator_update, production_forward_mode,
 };
+#[cfg(feature = "instrumentation")]
+use crate::threats::discover_changed_threats_profiled;
 use crate::threats::{
     ChangedThreatBuffer, MAX_ACTIVE, MAX_CHANGED, append_active_threats,
     append_changed_threat_indices, discover_changed_threats,
@@ -96,146 +98,6 @@ impl Accumulator {
 
         accumulator
     }
-
-    fn remove_threats(&mut self, network: &Network, features: &[usize], backend: SimdBackend) {
-        for &feature in features {
-            subtract_i8_row(
-                backend,
-                &mut self.values,
-                network
-                    .threat_weights()
-                    .row(feature)
-                    .expect("stored FullThreats feature must be in range"),
-            );
-            subtract_psqt_row(
-                backend,
-                &mut self.psqt,
-                network
-                    .threat_psqt_row(feature)
-                    .expect("stored FullThreats PSQT feature must be in range"),
-            );
-        }
-    }
-
-    fn add_threats(&mut self, network: &Network, features: &[usize], backend: SimdBackend) {
-        for &feature in features {
-            add_i8_row(
-                backend,
-                &mut self.values,
-                network
-                    .threat_weights()
-                    .row(feature)
-                    .expect("child FullThreats feature must be in range"),
-            );
-            add_psqt_row(
-                backend,
-                &mut self.psqt,
-                network
-                    .threat_psqt_row(feature)
-                    .expect("child FullThreats PSQT feature must be in range"),
-            );
-        }
-    }
-
-    fn update_halfka(
-        &mut self,
-        context: UpdateContext<'_>,
-        perspective: Color,
-        previous_king: Square,
-        child_king: Square,
-        removed: &[PieceDelta],
-        added: &[PieceDelta],
-    ) {
-        if previous_king == child_king {
-            for &delta in removed {
-                self.remove_halfka(
-                    context.network,
-                    perspective,
-                    delta,
-                    previous_king,
-                    context.backend,
-                );
-            }
-            for &delta in added {
-                self.add_halfka(
-                    context.network,
-                    perspective,
-                    delta,
-                    previous_king,
-                    context.backend,
-                );
-            }
-            return;
-        }
-
-        self.values = *context.network.feature_transformer_biases();
-        self.psqt = [0; PSQT_BUCKETS];
-        for square in context.child.occupancy() {
-            let piece = context
-                .child
-                .piece_at(square)
-                .expect("occupied child square must contain a piece");
-            self.add_halfka(
-                context.network,
-                perspective,
-                PieceDelta { square, piece },
-                child_king,
-                context.backend,
-            );
-        }
-    }
-
-    fn add_halfka(
-        &mut self,
-        network: &Network,
-        perspective: Color,
-        delta: PieceDelta,
-        king_square: Square,
-        backend: SimdBackend,
-    ) {
-        let feature = halfka::make_index(perspective, delta.piece, delta.square, king_square);
-        add_i16_row(
-            backend,
-            &mut self.values,
-            network
-                .half_ka_weights()
-                .row(feature)
-                .expect("added HalfKA feature must be in range"),
-        );
-        add_psqt_row(
-            backend,
-            &mut self.psqt,
-            network
-                .psqt_row(feature)
-                .expect("added HalfKA PSQT feature must be in range"),
-        );
-    }
-
-    fn remove_halfka(
-        &mut self,
-        network: &Network,
-        perspective: Color,
-        delta: PieceDelta,
-        king_square: Square,
-        backend: SimdBackend,
-    ) {
-        let feature = halfka::make_index(perspective, delta.piece, delta.square, king_square);
-        subtract_i16_row(
-            backend,
-            &mut self.values,
-            network
-                .half_ka_weights()
-                .row(feature)
-                .expect("removed HalfKA feature must be in range"),
-        );
-        subtract_psqt_row(
-            backend,
-            &mut self.psqt,
-            network
-                .psqt_row(feature)
-                .expect("removed HalfKA PSQT feature must be in range"),
-        );
-    }
 }
 
 /// Complete merged NNUE accumulator state for both king perspectives.
@@ -283,14 +145,18 @@ impl AccumulatorState {
         &self.accumulators[perspective.index()]
     }
 
-    fn update<const CAPACITY: usize>(
+    #[allow(clippy::too_many_arguments)]
+    fn update_from<const CAPACITY: usize>(
         &mut self,
+        parent: &Self,
         context: UpdateContext<'_>,
         previous_metadata: &FrameMetadata,
         child_metadata: &mut FrameMetadata,
         changed_threats: &ChangedThreatBuffer<CAPACITY>,
         removed: &[PieceDelta],
         added: &[PieceDelta],
+        threat_additions: &mut [u32; MAX_CHANGED],
+        threat_removals: &mut [u32; MAX_CHANGED],
     ) {
         if changed_threats.overflowed() {
             *self = Self::build_with_backend(context.network, context.child, context.backend);
@@ -298,14 +164,16 @@ impl AccumulatorState {
             return;
         }
 
-        let mut threat_additions = [0_usize; MAX_CHANGED];
-        let mut threat_removals = [0_usize; MAX_CHANGED];
+        let mut halfka_removals = [0_usize; MAX_PIECE_DELTAS];
+        let mut halfka_additions = [0_usize; MAX_PIECE_DELTAS];
+
         for perspective in Color::ALL {
             let index = perspective.index();
+            let previous_king = previous_metadata.king_squares[index];
             let child_king = context.child.king_square(perspective);
             child_metadata.king_squares[index] = child_king;
 
-            if previous_metadata.king_squares[index] != child_king {
+            if previous_king != child_king {
                 self.accumulators[index] = Accumulator::build(
                     context.network,
                     context.child,
@@ -315,31 +183,34 @@ impl AccumulatorState {
                 continue;
             }
 
-            let accumulator = &mut self.accumulators[index];
-            accumulator.update_halfka(
-                context,
-                perspective,
-                previous_metadata.king_squares[index],
-                child_king,
-                removed,
-                added,
-            );
+            for (feature, delta) in halfka_removals.iter_mut().zip(removed) {
+                *feature =
+                    halfka::make_index(perspective, delta.piece, delta.square, previous_king);
+            }
+            for (feature, delta) in halfka_additions.iter_mut().zip(added) {
+                *feature =
+                    halfka::make_index(perspective, delta.piece, delta.square, previous_king);
+            }
             let (addition_count, removal_count) = append_changed_threat_indices(
                 perspective,
                 context.child,
                 changed_threats,
-                &mut threat_additions,
-                &mut threat_removals,
+                threat_additions,
+                threat_removals,
             );
-            accumulator.remove_threats(
+            let parent_accumulator = &parent.accumulators[index];
+            let child_accumulator = &mut self.accumulators[index];
+            fused_accumulator_update(
+                context.backend,
                 context.network,
+                &parent_accumulator.values,
+                &mut child_accumulator.values,
+                &parent_accumulator.psqt,
+                &mut child_accumulator.psqt,
+                &halfka_removals[..removed.len()],
+                &halfka_additions[..added.len()],
                 &threat_removals[..removal_count],
-                context.backend,
-            );
-            accumulator.add_threats(
-                context.network,
                 &threat_additions[..addition_count],
-                context.backend,
             );
         }
     }
@@ -366,6 +237,24 @@ impl FrameMetadata {
 struct AccumulatorFrame {
     state: AccumulatorState,
     metadata: FrameMetadata,
+    // FullThreats depends only on physical piece placement, so null frames can reuse this snapshot.
+    position: Position,
+}
+
+struct UpdateScratch {
+    changed_threats: ChangedThreatBuffer<MAX_CHANGED>,
+    threat_additions: [u32; MAX_CHANGED],
+    threat_removals: [u32; MAX_CHANGED],
+}
+
+impl UpdateScratch {
+    const fn new() -> Self {
+        Self {
+            changed_threats: ChangedThreatBuffer::new(),
+            threat_additions: [0; MAX_CHANGED],
+            threat_removals: [0; MAX_CHANGED],
+        }
+    }
 }
 
 /// Recoverable accumulator-stack depth errors.
@@ -375,6 +264,20 @@ pub enum AccumulatorStackError {
     CapacityExceeded { capacity: usize },
     /// The caller attempted to pop the root state.
     AtRoot,
+}
+
+/// Per-move work discovered before an incremental accumulator update.
+#[cfg(feature = "instrumentation")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UpdateProfile {
+    /// Number of removed HalfKA piece features.
+    pub halfka_removals: usize,
+    /// Number of added HalfKA piece features.
+    pub halfka_additions: usize,
+    /// Number of net physical FullThreats edge changes.
+    pub changed_threat_edges: usize,
+    /// Number of slider candidates inspected around affected squares.
+    pub sliders_scanned: usize,
 }
 
 impl fmt::Display for AccumulatorStackError {
@@ -394,11 +297,33 @@ impl std::error::Error for AccumulatorStackError {}
 pub struct AccumulatorStack<'network> {
     network: &'network Network,
     frames: Box<[AccumulatorFrame]>,
+    scratch: UpdateScratch,
     depth: usize,
     mode: ForwardMode,
 }
 
 impl<'network> AccumulatorStack<'network> {
+    /// Profiles the move-local work used by a real accumulator push.
+    #[cfg(feature = "instrumentation")]
+    #[must_use]
+    pub fn profile_real_update(child: &Position, mv: Move, undo: &Undo) -> UpdateProfile {
+        let mut removed = [EMPTY_DELTA; MAX_PIECE_DELTAS];
+        let mut added = [EMPTY_DELTA; MAX_PIECE_DELTAS];
+        let (halfka_removals, halfka_additions) = move_deltas(mv, undo, &mut removed, &mut added);
+        let mut parent = child.clone();
+        parent.unmake_move(mv, undo.clone());
+        let mut changed_threats = ChangedThreatBuffer::<MAX_CHANGED>::new();
+        let sliders_scanned =
+            discover_changed_threats_profiled(&parent, child, mv, undo, &mut changed_threats);
+
+        UpdateProfile {
+            halfka_removals,
+            halfka_additions,
+            changed_threat_edges: changed_threats.len(),
+            sliders_scanned,
+        }
+    }
+
     /// Allocates a stack using the scalar oracle implementation.
     #[must_use]
     pub fn new(network: &'network Network, root: &Position) -> Self {
@@ -435,10 +360,12 @@ impl<'network> AccumulatorStack<'network> {
         let root = AccumulatorFrame {
             state: AccumulatorState::build_with_backend(network, root, mode.backend()),
             metadata: FrameMetadata::from_position(root),
+            position: root.clone(),
         };
         Self {
             network,
             frames: vec![root; STACK_STATES].into_boxed_slice(),
+            scratch: UpdateScratch::new(),
             depth: 0,
             mode,
         }
@@ -472,9 +399,46 @@ impl<'network> AccumulatorStack<'network> {
         mv: Move,
         undo: &Undo,
     ) -> Result<(), AccumulatorStackError> {
-        self.push_real_with_threat_capacity::<MAX_CHANGED>(child, mv, undo)
+        if self.depth == ACCUMULATOR_STACK_CAPACITY {
+            return Err(AccumulatorStackError::CapacityExceeded {
+                capacity: ACCUMULATOR_STACK_CAPACITY,
+            });
+        }
+
+        let mut removed = [EMPTY_DELTA; MAX_PIECE_DELTAS];
+        let mut added = [EMPTY_DELTA; MAX_PIECE_DELTAS];
+        let (removed_count, added_count) = move_deltas(mv, undo, &mut removed, &mut added);
+        self.scratch.changed_threats.reset();
+        let next_depth = self.depth + 1;
+        let (parents, children) = self.frames.split_at_mut(next_depth);
+        discover_changed_threats(
+            &parents[self.depth].position,
+            child,
+            mv,
+            undo,
+            &mut self.scratch.changed_threats,
+        );
+        children[0].position.clone_from(child);
+        children[0].state.update_from(
+            &parents[self.depth].state,
+            UpdateContext {
+                network: self.network,
+                child,
+                backend: self.mode.backend(),
+            },
+            &parents[self.depth].metadata,
+            &mut children[0].metadata,
+            &self.scratch.changed_threats,
+            &removed[..removed_count],
+            &added[..added_count],
+            &mut self.scratch.threat_additions,
+            &mut self.scratch.threat_removals,
+        );
+        self.depth = next_depth;
+        Ok(())
     }
 
+    #[cfg(test)]
     fn push_real_with_threat_capacity<const CAPACITY: usize>(
         &mut self,
         child: &Position,
@@ -490,15 +454,21 @@ impl<'network> AccumulatorStack<'network> {
         let mut removed = [EMPTY_DELTA; MAX_PIECE_DELTAS];
         let mut added = [EMPTY_DELTA; MAX_PIECE_DELTAS];
         let (removed_count, added_count) = move_deltas(mv, undo, &mut removed, &mut added);
-        let mut parent = child.clone();
-        parent.unmake_move(mv, undo.clone());
         let mut changed_threats = ChangedThreatBuffer::<CAPACITY>::new();
-        discover_changed_threats(&parent, child, mv, undo, &mut changed_threats);
-
+        let mut threat_additions = [0; MAX_CHANGED];
+        let mut threat_removals = [0; MAX_CHANGED];
         let next_depth = self.depth + 1;
         let (parents, children) = self.frames.split_at_mut(next_depth);
-        children[0].clone_from(&parents[self.depth]);
-        children[0].state.update(
+        discover_changed_threats(
+            &parents[self.depth].position,
+            child,
+            mv,
+            undo,
+            &mut changed_threats,
+        );
+        children[0].position.clone_from(child);
+        children[0].state.update_from(
+            &parents[self.depth].state,
             UpdateContext {
                 network: self.network,
                 child,
@@ -509,6 +479,8 @@ impl<'network> AccumulatorStack<'network> {
             &changed_threats,
             &removed[..removed_count],
             &added[..added_count],
+            &mut threat_additions,
+            &mut threat_removals,
         );
         self.depth = next_depth;
         Ok(())
@@ -749,10 +721,12 @@ mod tests {
     use mf_core::{Color, Position};
 
     use super::{
-        Accumulator, AccumulatorFrame, AccumulatorStack, AccumulatorState, FrameMetadata,
-        STACK_STATES, build_i32_oracle,
+        Accumulator, AccumulatorFrame, AccumulatorStack, AccumulatorState, EMPTY_DELTA,
+        FrameMetadata, MAX_PIECE_DELTAS, STACK_STATES, UpdateContext, build_i32_oracle,
+        move_deltas,
     };
     use crate::simd::{reset_sparse_fc0_calls, sparse_fc0_calls};
+    use crate::threats::{ChangedThreatBuffer, MAX_CHANGED, discover_changed_threats};
     use crate::{ForwardMode, L1, Network, SimdBackend};
 
     fn resolve_network_path(explicit_path: Option<OsString>) -> (PathBuf, bool) {
@@ -789,11 +763,36 @@ mod tests {
         assert_eq!(core::mem::size_of::<FrameMetadata>(), 2);
         assert_eq!(core::mem::size_of::<AccumulatorState>(), 4_224);
         assert_eq!(core::mem::align_of::<AccumulatorFrame>(), 64);
-        assert_eq!(core::mem::size_of::<AccumulatorFrame>(), 4_288);
+        assert_eq!(core::mem::size_of::<AccumulatorFrame>(), 4_544);
         assert_eq!(
             core::mem::size_of::<AccumulatorFrame>() * STACK_STATES,
-            553_152
+            586_176
         );
+    }
+
+    #[test]
+    fn reusable_update_scratch_keeps_threat_indices_narrow() {
+        assert!(core::mem::size_of::<super::UpdateScratch>() <= 1_600);
+    }
+
+    #[test]
+    fn real_push_retains_the_child_for_the_next_incremental_update() {
+        let Some(network) = local_network("retained child position test") else {
+            return;
+        };
+        let root = Position::startpos();
+        let mut child = root.clone();
+        let mv = mf_core::parse_uci_move(&root, "e2e4", false)
+            .expect("retained-position move should be legal");
+        let undo = child.make_move(mv);
+        let mut stack = AccumulatorStack::new(&network, &root);
+
+        stack
+            .push_real(&child, mv, &undo)
+            .expect("retained-position push should fit");
+
+        assert_eq!(stack.frames[0].position, root);
+        assert_eq!(stack.frames[1].position, child);
     }
 
     #[test]
@@ -810,6 +809,22 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue")
         );
         assert!(!is_explicit);
+    }
+
+    #[cfg(feature = "instrumentation")]
+    #[test]
+    fn real_update_profile_reports_piece_and_threat_work() {
+        let parent = Position::startpos();
+        let mv =
+            mf_core::parse_uci_move(&parent, "e2e4", false).expect("profile move should be legal");
+        let mut child = parent.clone();
+        let undo = child.make_move(mv);
+
+        let profile = AccumulatorStack::profile_real_update(&child, mv, &undo);
+
+        assert_eq!(profile.halfka_removals, 1);
+        assert_eq!(profile.halfka_additions, 1);
+        assert!(profile.changed_threat_edges > 0);
     }
 
     #[test]
@@ -837,6 +852,71 @@ mod tests {
                 );
                 assert_eq!(production.psqt, oracle.1, "{fen}, {perspective:?}");
             }
+        }
+    }
+
+    #[test]
+    fn fused_accumulator_update_matches_full_rebuilds() {
+        let Some(network) = local_network("fused accumulator update test") else {
+            return;
+        };
+        let backend = [SimdBackend::Avx2Vnni, SimdBackend::Avx2]
+            .into_iter()
+            .find(|backend| backend.is_supported())
+            .unwrap_or(SimdBackend::Scalar);
+
+        for (fen, notation, chess960) in [
+            (
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                "e2e4",
+                false,
+            ),
+            ("4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1", "e4d5", false),
+            ("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6", false),
+            ("4k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8q", false),
+            ("4k3/8/8/8/8/8/8/R1K2R2 w FA - 0 1", "c1f1", true),
+        ] {
+            let parent =
+                Position::from_fen(fen, chess960).expect("update comparison FEN should parse");
+            let mv = mf_core::parse_uci_move(&parent, notation, chess960)
+                .expect("update comparison move should be legal");
+            let mut child = parent.clone();
+            let undo = child.make_move(mv);
+            let mut removed = [EMPTY_DELTA; MAX_PIECE_DELTAS];
+            let mut added = [EMPTY_DELTA; MAX_PIECE_DELTAS];
+            let (removed_count, added_count) = move_deltas(mv, &undo, &mut removed, &mut added);
+            let mut changed_threats = ChangedThreatBuffer::<MAX_CHANGED>::new();
+            discover_changed_threats(&parent, &child, mv, &undo, &mut changed_threats);
+            let parent_metadata = FrameMetadata::from_position(&parent);
+            let parent_state = AccumulatorState::build_with_backend(&network, &parent, backend);
+            let expected = AccumulatorState::build_with_backend(&network, &child, backend);
+            let expected_metadata = FrameMetadata::from_position(&child);
+
+            let mut fused = parent_state.clone();
+            let mut fused_metadata = parent_metadata;
+            let mut threat_additions = [0; MAX_CHANGED];
+            let mut threat_removals = [0; MAX_CHANGED];
+            fused.update_from(
+                &parent_state,
+                UpdateContext {
+                    network: &network,
+                    child: &child,
+                    backend,
+                },
+                &parent_metadata,
+                &mut fused_metadata,
+                &changed_threats,
+                &removed[..removed_count],
+                &added[..added_count],
+                &mut threat_additions,
+                &mut threat_removals,
+            );
+
+            assert_eq!(fused, expected, "{fen} {notation}");
+            assert_eq!(
+                fused_metadata.king_squares, expected_metadata.king_squares,
+                "{fen} {notation}"
+            );
         }
     }
 

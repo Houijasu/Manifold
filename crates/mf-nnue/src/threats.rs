@@ -145,7 +145,7 @@ impl<const CAPACITY: usize> ChangedThreatBuffer<CAPACITY> {
     }
 
     #[inline]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "instrumentation"))]
     pub(crate) const fn len(&self) -> usize {
         self.len
     }
@@ -153,6 +153,12 @@ impl<const CAPACITY: usize> ChangedThreatBuffer<CAPACITY> {
     #[inline]
     pub(crate) const fn overflowed(&self) -> bool {
         self.overflowed
+    }
+
+    #[inline]
+    pub(crate) fn reset(&mut self) {
+        self.len = 0;
+        self.overflowed = false;
     }
 
     #[inline]
@@ -604,6 +610,45 @@ pub(crate) fn discover_changed_threats<const CAPACITY: usize>(
     undo: &Undo,
     changed: &mut ChangedThreatBuffer<CAPACITY>,
 ) {
+    let mut ignored_sliders = 0;
+    discover_changed_threats_impl::<CAPACITY, false>(
+        parent,
+        child,
+        mv,
+        undo,
+        changed,
+        &mut ignored_sliders,
+    );
+}
+
+#[cfg(feature = "instrumentation")]
+pub(crate) fn discover_changed_threats_profiled<const CAPACITY: usize>(
+    parent: &Position,
+    child: &Position,
+    mv: Move,
+    undo: &Undo,
+    changed: &mut ChangedThreatBuffer<CAPACITY>,
+) -> usize {
+    let mut sliders_scanned = 0;
+    discover_changed_threats_impl::<CAPACITY, true>(
+        parent,
+        child,
+        mv,
+        undo,
+        changed,
+        &mut sliders_scanned,
+    );
+    sliders_scanned
+}
+
+fn discover_changed_threats_impl<const CAPACITY: usize, const PROFILE: bool>(
+    parent: &Position,
+    child: &Position,
+    mv: Move,
+    undo: &Undo,
+    changed: &mut ChangedThreatBuffer<CAPACITY>,
+    sliders_scanned: &mut usize,
+) {
     let mut affected = [A1; 4];
     let mut count = 0;
     let mut append_square = |candidate: Square| {
@@ -629,7 +674,13 @@ pub(crate) fn discover_changed_threats<const CAPACITY: usize>(
     }
 
     for &affected_square in &affected[..count] {
-        gather_changed_square(parent, child, affected_square, changed);
+        gather_changed_square::<CAPACITY, PROFILE>(
+            parent,
+            child,
+            affected_square,
+            changed,
+            sliders_scanned,
+        );
         if changed.overflowed() {
             return;
         }
@@ -641,26 +692,43 @@ const A1: Square = match Square::new(0) {
     None => unreachable!(),
 };
 
-fn gather_changed_square<const CAPACITY: usize>(
+fn gather_changed_square<const CAPACITY: usize, const PROFILE: bool>(
     parent: &Position,
     child: &Position,
     affected: Square,
     changed: &mut ChangedThreatBuffer<CAPACITY>,
+    sliders_scanned: &mut usize,
 ) {
-    for position in [parent, child] {
+    for (position, source_is_parent) in [(parent, true), (child, false)] {
         if position
             .piece_at(affected)
             .is_some_and(|piece| piece.kind() != PieceKind::King)
         {
             let mut targets = outgoing_targets(position, affected);
             while let Some(target) = targets.pop_first() {
-                record_changed_pair(parent, child, affected, target, changed);
+                record_known_changed_pair(
+                    parent,
+                    child,
+                    position,
+                    source_is_parent,
+                    affected,
+                    target,
+                    changed,
+                );
             }
         }
 
         let mut incoming = non_slider_attackers_to(position, affected);
         while let Some(attacker) = incoming.pop_first() {
-            record_changed_pair(parent, child, attacker, affected, changed);
+            record_known_changed_pair(
+                parent,
+                child,
+                position,
+                source_is_parent,
+                attacker,
+                affected,
+                changed,
+            );
         }
 
         let occupancy = position.occupancy();
@@ -674,29 +742,79 @@ fn gather_changed_square<const CAPACITY: usize>(
             | position.pieces(Color::Black, PieceKind::Queen);
         let mut sliders = (rook_attacks(affected, occupancy) & rook_queens)
             | (bishop_attacks(affected, occupancy) & bishop_queens);
+        if PROFILE {
+            *sliders_scanned += sliders.count() as usize;
+        }
         while let Some(attacker) = sliders.pop_first() {
             if position.piece_at(affected).is_some() {
-                record_changed_pair(parent, child, attacker, affected, changed);
+                record_known_changed_pair(
+                    parent,
+                    child,
+                    position,
+                    source_is_parent,
+                    attacker,
+                    affected,
+                    changed,
+                );
             }
 
             let mut beyond =
                 ray_beyond(attacker, affected) & slider_attacks(position, attacker) & occupancy;
             if let Some(target) = beyond.pop_first() {
-                record_changed_pair(parent, child, attacker, target, changed);
+                record_known_changed_pair(
+                    parent,
+                    child,
+                    position,
+                    source_is_parent,
+                    attacker,
+                    target,
+                    changed,
+                );
             }
         }
     }
 }
 
-fn record_changed_pair<const CAPACITY: usize>(
+fn record_known_changed_pair<const CAPACITY: usize>(
     parent: &Position,
     child: &Position,
+    source: &Position,
+    source_is_parent: bool,
     attacker: Square,
     target: Square,
     changed: &mut ChangedThreatBuffer<CAPACITY>,
 ) {
-    let before = physical_edge(parent, attacker, target);
-    let after = physical_edge(child, attacker, target);
+    let known = known_physical_edge(source, attacker, target);
+    let (before, after) = if source_is_parent {
+        (known, physical_edge(child, attacker, target))
+    } else {
+        (physical_edge(parent, attacker, target), known)
+    };
+    record_edge_delta(before, after, changed);
+}
+
+fn known_physical_edge(position: &Position, from: Square, to: Square) -> Option<DirtyThreat> {
+    // Callers obtained this pair from an attack set, so re-generating attacks would duplicate
+    // the most expensive part of changed-edge discovery.
+    let attacker = position.piece_at(from)?;
+    let attacked = position.piece_at(to)?;
+    if attacker.kind() == PieceKind::King {
+        return None;
+    }
+    Some(DirtyThreat::new(
+        ThreatPiece::from(attacker),
+        from,
+        to,
+        ThreatPiece::from(attacked),
+        1,
+    ))
+}
+
+fn record_edge_delta<const CAPACITY: usize>(
+    before: Option<DirtyThreat>,
+    after: Option<DirtyThreat>,
+    changed: &mut ChangedThreatBuffer<CAPACITY>,
+) {
     if before == after {
         return;
     }
@@ -818,8 +936,8 @@ pub(crate) fn append_changed_threat_indices<const CAPACITY: usize>(
     perspective: Color,
     position: &Position,
     changed: &ChangedThreatBuffer<CAPACITY>,
-    additions: &mut [usize],
-    removals: &mut [usize],
+    additions: &mut [u32],
+    removals: &mut [u32],
 ) -> (usize, usize) {
     let king_square = position.king_square(perspective);
     let mut added = 0;
@@ -837,10 +955,10 @@ pub(crate) fn append_changed_threat_indices<const CAPACITY: usize>(
             continue;
         }
         if edge.sign() > 0 {
-            additions[added] = index;
+            additions[added] = index as u32;
             added += 1;
         } else {
-            removals[removed] = index;
+            removals[removed] = index as u32;
             removed += 1;
         }
     }
@@ -1030,8 +1148,8 @@ mod tests {
                             .map(|index| (index, 1)),
                     ),
             );
-            let mut additions = [0_usize; 128];
-            let mut removals = [0_usize; 128];
+            let mut additions = [0_u32; 128];
+            let mut removals = [0_u32; 128];
             let (added, removed) = append_changed_threat_indices(
                 perspective,
                 &child,
@@ -1043,8 +1161,13 @@ mod tests {
                 removals[..removed]
                     .iter()
                     .copied()
-                    .map(|index| (index, -1))
-                    .chain(additions[..added].iter().copied().map(|index| (index, 1))),
+                    .map(|index| (index as usize, -1))
+                    .chain(
+                        additions[..added]
+                            .iter()
+                            .copied()
+                            .map(|index| (index as usize, 1)),
+                    ),
             );
             assert_eq!(
                 actual_indices, expected_indices,
@@ -1107,6 +1230,25 @@ mod tests {
     }
 
     #[test]
+    fn changed_threat_buffer_reset_reuses_storage_without_stale_entries() {
+        let edge = DirtyThreat::new(
+            ThreatPiece::new(super::Color::White, PieceKind::Knight),
+            square(1),
+            square(18),
+            ThreatPiece::new(super::Color::Black, PieceKind::Pawn),
+            1,
+        );
+        let mut buffer = ChangedThreatBuffer::<2>::new();
+        assert!(buffer.push(edge));
+
+        buffer.reset();
+
+        assert_eq!(buffer.len(), 0);
+        assert!(!buffer.overflowed());
+        assert_eq!(buffer.iter().count(), 0);
+    }
+
+    #[test]
     fn changed_edges_cover_quiets_captures_en_passant_and_promotions() {
         for (fen, notation) in [
             (
@@ -1151,8 +1293,8 @@ mod tests {
     fn changed_edges_cover_defences_same_type_rules_and_king_targets() {
         let (_, child, _, _, changed) =
             assert_changed_edges_match_full_diff("4k3/8/8/8/8/8/P7/R3K3 w - - 0 1", "a2a3", false);
-        let mut additions = [0_usize; 128];
-        let mut removals = [0_usize; 128];
+        let mut additions = [0_u32; 128];
+        let mut removals = [0_u32; 128];
         for perspective in super::Color::ALL {
             let (added, removed) = append_changed_threat_indices(
                 perspective,

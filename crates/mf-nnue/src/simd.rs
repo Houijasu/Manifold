@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::fmt;
 use std::sync::OnceLock;
 
-use crate::network::{L1, PSQT_BUCKETS};
+use crate::network::{L1, Network, PSQT_BUCKETS};
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86::{
@@ -245,6 +245,7 @@ pub(crate) fn add_i16_row(backend: SimdBackend, accumulator: &mut [i16; L1], row
 }
 
 #[inline]
+#[cfg(test)]
 pub(crate) fn subtract_i16_row(backend: SimdBackend, accumulator: &mut [i16; L1], row: &[i16; L1]) {
     match backend {
         SimdBackend::Scalar => subtract_i16_row_scalar(accumulator, row),
@@ -271,6 +272,7 @@ pub(crate) fn add_i8_row(backend: SimdBackend, accumulator: &mut [i16; L1], row:
 }
 
 #[inline]
+#[cfg(test)]
 pub(crate) fn subtract_i8_row(backend: SimdBackend, accumulator: &mut [i16; L1], row: &[i8; L1]) {
     match backend {
         SimdBackend::Scalar => subtract_i8_row_scalar(accumulator, row),
@@ -301,6 +303,7 @@ pub(crate) fn add_psqt_row(
 }
 
 #[inline]
+#[cfg(test)]
 pub(crate) fn subtract_psqt_row(
     backend: SimdBackend,
     accumulator: &mut [i32; PSQT_BUCKETS],
@@ -313,6 +316,52 @@ pub(crate) fn subtract_psqt_row(
             // SAFETY: support was checked immediately above, and both arrays
             // contain exactly one AVX2 register of i32 lanes.
             unsafe { subtract_psqt_row_avx2(accumulator, row) };
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fused_accumulator_update(
+    backend: SimdBackend,
+    network: &Network,
+    parent_values: &[i16; L1],
+    child_values: &mut [i16; L1],
+    parent_psqt: &[i32; PSQT_BUCKETS],
+    child_psqt: &mut [i32; PSQT_BUCKETS],
+    halfka_removals: &[usize],
+    halfka_additions: &[usize],
+    threat_removals: &[u32],
+    threat_additions: &[u32],
+) {
+    match backend {
+        SimdBackend::Scalar => fused_accumulator_update_scalar(
+            network,
+            parent_values,
+            child_values,
+            parent_psqt,
+            child_psqt,
+            halfka_removals,
+            halfka_additions,
+            threat_removals,
+            threat_additions,
+        ),
+        SimdBackend::Avx2 | SimdBackend::Avx2Vnni => {
+            assert_supported(backend);
+            // SAFETY: support was checked immediately above. All fixed-size
+            // accumulators and network rows cover the complete AVX2 loops.
+            unsafe {
+                fused_accumulator_update_avx2(
+                    network,
+                    parent_values,
+                    child_values,
+                    parent_psqt,
+                    child_psqt,
+                    halfka_removals,
+                    halfka_additions,
+                    threat_removals,
+                    threat_additions,
+                );
+            }
         }
     }
 }
@@ -496,6 +545,85 @@ fn add_psqt_row_scalar(accumulator: &mut [i32; PSQT_BUCKETS], row: &[i32; PSQT_B
 fn subtract_psqt_row_scalar(accumulator: &mut [i32; PSQT_BUCKETS], row: &[i32; PSQT_BUCKETS]) {
     for (value, &weight) in accumulator.iter_mut().zip(row) {
         *value = value.wrapping_sub(weight);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fused_accumulator_update_scalar(
+    network: &Network,
+    parent_values: &[i16; L1],
+    child_values: &mut [i16; L1],
+    parent_psqt: &[i32; PSQT_BUCKETS],
+    child_psqt: &mut [i32; PSQT_BUCKETS],
+    halfka_removals: &[usize],
+    halfka_additions: &[usize],
+    threat_removals: &[u32],
+    threat_additions: &[u32],
+) {
+    child_values.copy_from_slice(parent_values);
+    child_psqt.copy_from_slice(parent_psqt);
+
+    for &feature in halfka_removals {
+        subtract_i16_row_scalar(
+            child_values,
+            network
+                .half_ka_weights()
+                .row(feature)
+                .expect("removed HalfKA feature must be in range"),
+        );
+        subtract_psqt_row_scalar(
+            child_psqt,
+            network
+                .psqt_row(feature)
+                .expect("removed HalfKA PSQT feature must be in range"),
+        );
+    }
+    for &feature in halfka_additions {
+        add_i16_row_scalar(
+            child_values,
+            network
+                .half_ka_weights()
+                .row(feature)
+                .expect("added HalfKA feature must be in range"),
+        );
+        add_psqt_row_scalar(
+            child_psqt,
+            network
+                .psqt_row(feature)
+                .expect("added HalfKA PSQT feature must be in range"),
+        );
+    }
+    for &feature in threat_removals {
+        let feature = feature as usize;
+        subtract_i8_row_scalar(
+            child_values,
+            network
+                .threat_weights()
+                .row(feature)
+                .expect("removed FullThreats feature must be in range"),
+        );
+        subtract_psqt_row_scalar(
+            child_psqt,
+            network
+                .threat_psqt_row(feature)
+                .expect("removed FullThreats PSQT feature must be in range"),
+        );
+    }
+    for &feature in threat_additions {
+        let feature = feature as usize;
+        add_i8_row_scalar(
+            child_values,
+            network
+                .threat_weights()
+                .row(feature)
+                .expect("added FullThreats feature must be in range"),
+        );
+        add_psqt_row_scalar(
+            child_psqt,
+            network
+                .threat_psqt_row(feature)
+                .expect("added FullThreats PSQT feature must be in range"),
+        );
     }
 }
 
@@ -803,6 +931,159 @@ unsafe fn affine_dense_avx2_vnni<const INPUTS: usize, const OUTPUTS: usize>(
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+/// # Safety
+///
+/// The caller must verify that AVX2 is available in the current process.
+unsafe fn fused_accumulator_update_avx2(
+    network: &Network,
+    parent_values: &[i16; L1],
+    child_values: &mut [i16; L1],
+    parent_psqt: &[i32; PSQT_BUCKETS],
+    child_psqt: &mut [i32; PSQT_BUCKETS],
+    halfka_removals: &[usize],
+    halfka_additions: &[usize],
+    threat_removals: &[u32],
+    threat_additions: &[u32],
+) {
+    const TILE_REGISTERS: usize = 8;
+    const LANES_PER_REGISTER: usize = 16;
+    const TILE_LANES: usize = TILE_REGISTERS * LANES_PER_REGISTER;
+
+    for tile in (0..L1).step_by(TILE_LANES) {
+        let mut values = [_mm256_setzero_si256(); TILE_REGISTERS];
+        for (register, value) in values.iter_mut().enumerate() {
+            let offset = tile + register * LANES_PER_REGISTER;
+            // SAFETY: each tile contains eight complete 16-lane registers.
+            *value =
+                unsafe { _mm256_loadu_si256(parent_values.as_ptr().add(offset).cast::<__m256i>()) };
+        }
+
+        for &feature in halfka_removals {
+            let row = network
+                .half_ka_weights()
+                .row(feature)
+                .expect("removed HalfKA feature must be in range");
+            for (register, value) in values.iter_mut().enumerate() {
+                let offset = tile + register * LANES_PER_REGISTER;
+                // SAFETY: every HalfKA row has L1 complete lanes.
+                let weights =
+                    unsafe { _mm256_loadu_si256(row.as_ptr().add(offset).cast::<__m256i>()) };
+                *value = _mm256_sub_epi16(*value, weights);
+            }
+        }
+        for &feature in halfka_additions {
+            let row = network
+                .half_ka_weights()
+                .row(feature)
+                .expect("added HalfKA feature must be in range");
+            for (register, value) in values.iter_mut().enumerate() {
+                let offset = tile + register * LANES_PER_REGISTER;
+                // SAFETY: every HalfKA row has L1 complete lanes.
+                let weights =
+                    unsafe { _mm256_loadu_si256(row.as_ptr().add(offset).cast::<__m256i>()) };
+                *value = _mm256_add_epi16(*value, weights);
+            }
+        }
+        for &feature in threat_removals {
+            let feature = feature as usize;
+            let row = network
+                .threat_weights()
+                .row(feature)
+                .expect("removed FullThreats feature must be in range");
+            for (register, value) in values.iter_mut().enumerate() {
+                let offset = tile + register * LANES_PER_REGISTER;
+                // SAFETY: every FullThreats row has L1 complete lanes.
+                let bytes = unsafe { _mm_loadu_si128(row.as_ptr().add(offset).cast::<__m128i>()) };
+                *value = _mm256_sub_epi16(*value, _mm256_cvtepi8_epi16(bytes));
+            }
+        }
+        for &feature in threat_additions {
+            let feature = feature as usize;
+            let row = network
+                .threat_weights()
+                .row(feature)
+                .expect("added FullThreats feature must be in range");
+            for (register, value) in values.iter_mut().enumerate() {
+                let offset = tile + register * LANES_PER_REGISTER;
+                // SAFETY: every FullThreats row has L1 complete lanes.
+                let bytes = unsafe { _mm_loadu_si128(row.as_ptr().add(offset).cast::<__m128i>()) };
+                *value = _mm256_add_epi16(*value, _mm256_cvtepi8_epi16(bytes));
+            }
+        }
+
+        for (register, value) in values.into_iter().enumerate() {
+            let offset = tile + register * LANES_PER_REGISTER;
+            // SAFETY: each tile contains eight complete 16-lane registers.
+            unsafe {
+                _mm256_storeu_si256(
+                    child_values.as_mut_ptr().add(offset).cast::<__m256i>(),
+                    value,
+                );
+            }
+        }
+    }
+
+    // SAFETY: both arrays contain exactly one complete AVX2 register.
+    let mut psqt = unsafe { _mm256_loadu_si256(parent_psqt.as_ptr().cast::<__m256i>()) };
+    for &feature in halfka_removals {
+        let row = network
+            .psqt_row(feature)
+            .expect("removed HalfKA PSQT feature must be in range");
+        // SAFETY: each PSQT row contains exactly one complete AVX2 register.
+        let weights = unsafe { _mm256_loadu_si256(row.as_ptr().cast::<__m256i>()) };
+        psqt = _mm256_sub_epi32(psqt, weights);
+    }
+    for &feature in halfka_additions {
+        let row = network
+            .psqt_row(feature)
+            .expect("added HalfKA PSQT feature must be in range");
+        // SAFETY: each PSQT row contains exactly one complete AVX2 register.
+        let weights = unsafe { _mm256_loadu_si256(row.as_ptr().cast::<__m256i>()) };
+        psqt = _mm256_add_epi32(psqt, weights);
+    }
+    for &feature in threat_removals {
+        let feature = feature as usize;
+        let row = network
+            .threat_psqt_row(feature)
+            .expect("removed FullThreats PSQT feature must be in range");
+        // SAFETY: each PSQT row contains exactly one complete AVX2 register.
+        let weights = unsafe { _mm256_loadu_si256(row.as_ptr().cast::<__m256i>()) };
+        psqt = _mm256_sub_epi32(psqt, weights);
+    }
+    for &feature in threat_additions {
+        let feature = feature as usize;
+        let row = network
+            .threat_psqt_row(feature)
+            .expect("added FullThreats PSQT feature must be in range");
+        // SAFETY: each PSQT row contains exactly one complete AVX2 register.
+        let weights = unsafe { _mm256_loadu_si256(row.as_ptr().cast::<__m256i>()) };
+        psqt = _mm256_add_epi32(psqt, weights);
+    }
+    // SAFETY: the child PSQT array contains one complete AVX2 register.
+    unsafe {
+        _mm256_storeu_si256(child_psqt.as_mut_ptr().cast::<__m256i>(), psqt);
+    }
+}
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+#[allow(clippy::too_many_arguments)]
+unsafe fn fused_accumulator_update_avx2(
+    _: &Network,
+    _: &[i16; L1],
+    _: &mut [i16; L1],
+    _: &[i32; PSQT_BUCKETS],
+    _: &mut [i32; PSQT_BUCKETS],
+    _: &[usize],
+    _: &[usize],
+    _: &[u32],
+    _: &[u32],
+) {
+    unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "avx2")]
 /// # Safety
 ///
 /// The caller must verify that AVX2 is available in the current process.
@@ -827,6 +1108,7 @@ unsafe fn add_i16_row_avx2(_: &mut [i16; L1], _: &[i16; L1]) {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(test)]
 #[target_feature(enable = "avx2")]
 /// # Safety
 ///
@@ -847,6 +1129,7 @@ unsafe fn subtract_i16_row_avx2(accumulator: &mut [i16; L1], row: &[i16; L1]) {
 }
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(test)]
 unsafe fn subtract_i16_row_avx2(_: &mut [i16; L1], _: &[i16; L1]) {
     unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
 }
@@ -878,6 +1161,7 @@ unsafe fn add_i8_row_avx2(_: &mut [i16; L1], _: &[i8; L1]) {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(test)]
 #[target_feature(enable = "avx2")]
 /// # Safety
 ///
@@ -899,6 +1183,7 @@ unsafe fn subtract_i8_row_avx2(accumulator: &mut [i16; L1], row: &[i8; L1]) {
 }
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(test)]
 unsafe fn subtract_i8_row_avx2(_: &mut [i16; L1], _: &[i8; L1]) {
     unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
 }
@@ -927,6 +1212,7 @@ unsafe fn add_psqt_row_avx2(_: &mut [i32; PSQT_BUCKETS], _: &[i32; PSQT_BUCKETS]
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[cfg(test)]
 #[target_feature(enable = "avx2")]
 /// # Safety
 ///
@@ -945,6 +1231,7 @@ unsafe fn subtract_psqt_row_avx2(accumulator: &mut [i32; PSQT_BUCKETS], row: &[i
 }
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+#[cfg(test)]
 unsafe fn subtract_psqt_row_avx2(_: &mut [i32; PSQT_BUCKETS], _: &[i32; PSQT_BUCKETS]) {
     unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
 }
