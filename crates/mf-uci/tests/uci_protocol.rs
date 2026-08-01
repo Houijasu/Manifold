@@ -570,6 +570,38 @@ fn setoption_name_and_boolean_value_are_case_insensitive() {
 }
 
 #[test]
+fn search_reports_whether_nnue_or_hce_is_active() {
+    let network = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+    if !network.is_file() {
+        eprintln!(
+            "SKIPPED: evaluator protocol test is missing {}",
+            network.display()
+        );
+        return;
+    }
+    let eval_file = format!("setoption name EvalFile value {}", network.display());
+    let output = run_uci(&[
+        &eval_file,
+        "position fen 4k3/8/8/8/8/8/8/3QK3 w - - 0 1",
+        "setoption name UseNnue value true",
+        "go depth 1",
+        "setoption name UseNnue value false",
+        "go depth 1",
+        "quit",
+    ]);
+
+    assert!(output.status.success());
+    let lines = stdout_lines(&output);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("info string evaluation NNUE from explicit path "))
+    );
+    assert!(lines.contains(&"info string evaluation HCE"));
+    assert_eq!(bestmoves(&output).len(), 2);
+}
+
+#[test]
 fn hash_option_resizes_case_insensitively_and_rejects_extremes_without_crashing() {
     let output = run_uci(&[
         "SeToPtIoN NaMe hAsH VaLuE 3",

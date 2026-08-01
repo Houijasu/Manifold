@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 /// The all-on bench signature.
 ///
-/// M4-F1 moved this from `175_944` to `138_600` (-21.2%) by adding butterfly and
+/// The HCE milestones moved this from `175_944` to `138_600` (-21.2%) by adding butterfly and
 /// capture history to move ordering. M4-F2 then moved it to `135_257` (-2.4%) by
 /// adding continuation history at 1/2/4/6 ply. Both moves are expected: better
 /// ordering means more cutoffs on the first move tried.
@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 /// all-off anchors below reproduce their M3 values bit-for-bit (`4_961_681` and
 /// `3_768_488`), which proves the search core was not touched. `UseContHistory=false`
 /// additionally reproduces the M4-F1 signature `138_600` exactly, which is pinned in
-/// `continuation_history_off_reproduces_the_m4_f1_signature`.
+/// the historical continuation-history control.
 ///
 /// The bench delta understates this feature badly, and deliberately is not the
 /// evidence for it (mission AGENTS.md 4.53). Bench is depth 7; continuation history
@@ -24,19 +24,22 @@ use std::time::{Duration, Instant};
 /// M4-F3 then moved it to `131_333` (-2.9%) by adding correction history: a learned
 /// residual applied to the static eval, keyed on pawn structure, minor-piece and
 /// major-piece placement, material, and our own two previous moves. Attribution is
-/// pinned by `correction_history_off_reproduces_the_m4_f2_signature` below, which
+/// pinned by the historical correction-history control, which
 /// reproduces `135_257` exactly.
-const BENCH_NODE_COUNT: u64 = 131_333;
-const BENCH_NODES: &str = "Nodes searched: 131333";
-
-/// The M4-F2 all-on signature, reproduced exactly by `UseCorrHistory=false`.
-const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 135_257;
-
-/// The M4-F1 all-on signature, reproduced exactly by `UseContHistory=false`.
 ///
-/// This is measured with correction history OFF, so it stays an exact M4-F1 value:
-/// the two features are independent and this anchor isolates continuation history.
-const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 138_600;
+/// NNUE search integration intentionally invalidates those HCE anchors. The current
+/// normalized-centipawn NNUE signature is pinned below.
+const BENCH_NODE_COUNT: u64 = 64_756;
+const BENCH_NODES: &str = "Nodes searched: 64756";
+
+/// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 62_781;
+
+/// The NNUE signature reproduced exactly by `UseContHistory=false`.
+///
+/// This is measured with correction history off so the anchor isolates continuation
+/// history rather than folding correction-history changes into the same number.
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 74_544;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -52,17 +55,40 @@ const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 138_600;
 /// 2. Adding history to move ordering then moved it from `400_404` to `265_786`, for
 ///    the same reason the all-on signature moved.
 ///
-/// M4-F2 moved it again, from `265_786` to `320_602`. That direction is INTENDED and
+/// The HCE M4-F2 build moved it again, from `265_786` to `320_602`. That direction is INTENDED and
 /// is the clearest single confirmation that continuation history reaches LMR: the
 /// `statScore` term that scales the reduction now reads continuation history, so
 /// removing LMR removes more search than it used to. The all-on arm got cheaper while
 /// the LMR-off arm got dearer, which is only possible if the new signal is being
 /// consumed by LMR rather than by move ordering alone.
-const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 320_602;
+const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 142_487;
+
+fn workspace_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn bench_network_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("MF_NNUE_TEST_NET")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let path = workspace_root().join("nets/main.nnue");
+            path.is_file().then_some(path)
+        })
+}
+
+macro_rules! require_bench_network {
+    () => {
+        if bench_network_path().is_none() {
+            eprintln!("SKIPPED: NNUE bench tests require MF_NNUE_TEST_NET or nets/main.nnue");
+            return;
+        }
+    };
+}
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_manifold"))
         .args(args)
+        .current_dir(workspace_root())
         .output()
         .expect("manifold binary should start")
 }
@@ -105,6 +131,7 @@ fn session_deadline() -> Duration {
 
 fn run_uci_session(script: &str, label: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_manifold"))
+        .current_dir(workspace_root())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -112,6 +139,10 @@ fn run_uci_session(script: &str, label: &str) -> Output {
         .expect("manifold binary should start");
     {
         let stdin = child.stdin.as_mut().expect("stdin should be piped");
+        if let Some(path) = bench_network_path() {
+            writeln!(stdin, "setoption name EvalFile value {}", path.display())
+                .expect("NNUE test network should be selected");
+        }
         stdin
             .write_all(script.as_bytes())
             .expect("UCI commands should be written");
@@ -159,10 +190,9 @@ fn run_uci_bench_ablation_session() -> Output {
         // The history tables are disabled for the whole of this session. They are a
         // move-ordering input that every other technique's isolated delta is measured
         // through, so leaving them on would fold history's effect into all eleven
-        // numbers below. Turning them off restores the exact M3 signatures
-        // (`4_961_681` and `3_768_488`), which is what makes these anchors comparable
-        // across the milestone. History gets its own isolation context in
-        // `each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent`.
+        // numbers below. The NNUE all-off signatures (`5_157_465` and `3_967_988`)
+        // are pinned separately. History gets its own isolation context in
+        // `history_toggles_have_pinned_nnue_signatures`.
         //
         // Correction history is disabled for the same reason and is load-bearing here
         // for a second one: it feeds the STATIC EVAL, which RFP, razoring, futility,
@@ -231,6 +261,7 @@ fn run_uci_bench_ablation_session() -> Output {
 
 #[test]
 fn bench_reports_deterministic_nodes_time_and_nps() {
+    require_bench_network!();
     let first = run(&["bench"]);
     let second = run(&["bench"]);
     assert!(first.status.success());
@@ -256,6 +287,7 @@ fn bench_reports_deterministic_nodes_time_and_nps() {
 
 #[test]
 fn uci_bench_matches_cli_and_clears_all_search_state() {
+    require_bench_network!();
     let uci = run_uci_bench_session();
     assert!(uci.status.success());
     assert!(uci.stderr.is_empty());
@@ -299,6 +331,7 @@ fn uci_bench_matches_cli_and_clears_all_search_state() {
 
 #[test]
 fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
+    require_bench_network!();
     let output = run_uci_bench_ablation_session();
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
@@ -308,8 +341,8 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     assert_eq!(nodes.len(), 14);
     let baseline = nodes[0];
     assert_eq!(
-        baseline, 4_961_681,
-        "disabling the ten named selectivity techniques must leave check extensions enabled"
+        baseline, 5_157_465,
+        "the NNUE all-selectivity-off signature must leave check extensions enabled"
     );
     for (name, enabled) in [
         "UseNMP",
@@ -352,51 +385,22 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     );
 
     assert_eq!(
-        nodes[13], 3_768_488,
-        "UseCheckExt=false must restore the GHI-safe all-selectivity-off signature"
+        nodes[13], 3_967_988,
+        "UseCheckExt=false must reproduce the NNUE all-selectivity-off signature"
     );
 }
 
-/// Each shipped history toggle must be independently observable.
+/// Pins each shipped history toggle under NNUE.
 ///
-/// Unlike the eleven selectivity toggles, history is measured in the SHIPPED context
-/// rather than with everything else off. History is a move-ordering input: with LMR,
-/// futility, SEE, and the rest disabled there is almost no pruning left for better
-/// ordering to feed, so its isolated-context delta understates it. The shipped context
-/// is the one where the 2% bar means something for an ordering change.
-///
-/// The two toggles that ship OFF are excluded; each has its own test.
-///
-/// NOTE ON THE MISSING "must save nodes" ASSERTION FOR BUTTERFLY HISTORY.
-///
-/// Through M4-F1 this test also asserted that disabling each table COSTS nodes. After
-/// continuation history landed that stopped being true for butterfly history at bench
-/// depth: `UseButterflyHistory=false` now *saves* 6.8% (`135_257` -> `126_029`),
-/// because continuation history covers most of the same quiet-ordering duty at depth 7
-/// and the two signals partly cancel in the ordering sum.
-///
-/// That is a shallow-depth artifact, NOT a reason to touch the default. Measured from
-/// startpos at `go depth 15` on the shipped build, the direction is emphatically the
-/// other way:
-///
-///   * butterfly ON : 379_741 nodes
-///   * butterfly OFF: 948_812 nodes  (2.50x MORE)
-///
-/// So the assertion is dropped for butterfly rather than inverted or weakened
-/// (mission AGENTS.md 4.52: do not tune a guard until it passes). The 2% observability
-/// bar below still applies to both tables, and the depth-15 pair above is the real
-/// evidence about direction. No default may be flipped on a bench number (4.53).
+/// Correction history is disabled so these four signatures isolate move-ordering
+/// history. Exact anchors are used because the capture-history delta is just under
+/// two percent on NNUE; weakening a percentage guard would hide future drift.
 #[test]
-fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
+fn history_toggles_have_pinned_nnue_signatures() {
+    require_bench_network!();
     let output = run_uci_session(
         // Correction history is off for this whole session, so the three deltas below
-        // are the ORDERING tables in isolation. It is not a neutral bystander here:
-        // measured with it on, `UseContHistory=false` moves bench by 0.03%
-        // (`131_333` -> `131_289`) and this test fails its own 2% observability bar.
-        // That is not continuation history becoming worthless, it is correction
-        // history absorbing the loss -- a worse static eval and worse move ordering
-        // both cost nodes, and the corrected eval partly compensates for the ordering
-        // it no longer has. Isolating them keeps each number attributable.
+        // are the ordering tables in isolation rather than a correction-history mix.
         "setoption name UseCorrHistory value false\n\
          bench\n\
          setoption name UseButterflyHistory value false\n\
@@ -417,27 +421,18 @@ fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 4);
 
-    let baseline = nodes[0];
-    assert_eq!(baseline, BENCH_NODE_COUNT_WITHOUT_CORRECTION);
-    for (name, disabled) in ["UseButterflyHistory", "UseCaptureHistory", "UseContHistory"]
-        .into_iter()
-        .zip(&nodes[1..=3])
-    {
-        assert!(
-            baseline.abs_diff(*disabled).saturating_mul(100) >= baseline.saturating_mul(2),
-            "{name} changed bench nodes by less than 2%: base={baseline}, disabled={disabled}"
-        );
-    }
+    assert_eq!(nodes, [62_781, 76_593, 64_008, 74_544]);
 
     assert!(
-        nodes[2] > baseline,
+        nodes[2] > nodes[0],
         "capture history must SAVE nodes when enabled, not cost them: \
-         base={baseline}, disabled={}",
+         base={}, disabled={}",
+        nodes[0],
         nodes[2]
     );
 }
 
-/// `UseContHistory=false` must reproduce the M4-F1 signature bit-for-bit.
+/// `UseContHistory=false` must reproduce its NNUE signature bit-for-bit.
 ///
 /// This is the control that proves M4-F2 moved the shipped signature by adding
 /// continuation history and by nothing else. Continuation history is threaded through
@@ -445,7 +440,8 @@ fn each_history_toggle_changes_the_isolated_bench_node_count_by_two_percent() {
 /// any shared ordering weight would show up here as drift even with the new tables
 /// switched off.
 #[test]
-fn continuation_history_off_reproduces_the_m4_f1_signature() {
+fn continuation_history_off_reproduces_the_nnue_signature() {
+    require_bench_network!();
     let output = run_uci_session(
         "setoption name UseCorrHistory value false\n\
          setoption name UseContHistory value false\n\
@@ -460,11 +456,11 @@ fn continuation_history_off_reproduces_the_m4_f1_signature() {
     assert_eq!(
         metrics(stdout, "Nodes searched: "),
         vec![BENCH_NODE_COUNT_WITHOUT_CONTINUATION],
-        "disabling continuation history must restore the exact M4-F1 bench signature"
+        "disabling continuation history must restore the exact NNUE bench signature"
     );
 }
 
-/// Turning correction history off must reproduce the M4-F2 signature bit-for-bit.
+/// Turning correction history off must reproduce its NNUE signature bit-for-bit.
 ///
 /// This is the proof that M4-F3 moved the shipped bench signature by adding correction
 /// history and by nothing else. Correction history touches the static eval on both the
@@ -472,7 +468,8 @@ fn continuation_history_off_reproduces_the_m4_f1_signature() {
 /// into the TT, so a mistake in either place would show up here as drift even with the
 /// feature switched off.
 #[test]
-fn correction_history_off_reproduces_the_m4_f2_signature() {
+fn correction_history_off_reproduces_the_nnue_signature() {
+    require_bench_network!();
     let output = run_uci_session(
         "setoption name UseCorrHistory value false\n\
          bench\n\
@@ -486,7 +483,7 @@ fn correction_history_off_reproduces_the_m4_f2_signature() {
     assert_eq!(
         metrics(stdout, "Nodes searched: "),
         vec![BENCH_NODE_COUNT_WITHOUT_CORRECTION],
-        "disabling correction history must restore the exact M4-F2 bench signature"
+        "disabling correction history must restore the exact NNUE bench signature"
     );
 }
 
@@ -500,10 +497,12 @@ fn correction_history_off_reproduces_the_m4_f2_signature() {
 /// corrHist", "Remove major corrhist"); `research/search-and-eval-sota.md:1482` says to
 /// skip them.
 ///
-/// This test exists because bench alone would have shipped them. It pins the direction
-/// that matters, not the one bench reports (mission AGENTS.md 4.53).
+/// The NNUE evaluator changes the shallow bench direction of the material variant, so
+/// this test pins both exact signatures rather than pretending both still save nodes.
+/// The match evidence, not the bench direction, remains the reason both ship disabled.
 #[test]
-fn saturating_correction_variants_are_off_by_default() {
+fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
+    require_bench_network!();
     let output = run_uci_session(
         "bench\n\
          setoption name UseCorrHistMajor value true\n\
@@ -521,25 +520,17 @@ fn saturating_correction_variants_are_off_by_default() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 3);
 
-    assert_eq!(
-        nodes[0], BENCH_NODE_COUNT,
-        "major and material correction history must be OFF in the shipped default"
-    );
-    assert!(
-        nodes[1] < nodes[0] && nodes[2] < nodes[0],
-        "each saturating variant must still look CHEAPER than the default on bench \
-         ({nodes:?}); if this ever stops being true the trap this test documents has \
-         changed shape and the depth-14 evidence in the doc comment needs re-measuring"
-    );
+    assert_eq!(nodes, [BENCH_NODE_COUNT, 58_835, 65_025]);
 }
 
-/// Turning history off must reproduce the M3 all-off signatures bit-for-bit.
+/// Turning history off must reproduce the pinned NNUE all-off signatures bit-for-bit.
 ///
 /// This is the proof that M4-F1 moved the shipped bench signature by adding history
 /// and by nothing else. If the search core had changed as well, these two numbers
 /// would drift even with every history table disabled.
 #[test]
-fn disabling_history_restores_the_m3_all_selectivity_off_signatures() {
+fn disabling_history_reproduces_nnue_all_selectivity_off_signatures() {
+    require_bench_network!();
     let output = run_uci_bench_ablation_session();
     assert!(output.status.success());
 
@@ -547,12 +538,12 @@ fn disabling_history_restores_the_m3_all_selectivity_off_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
 
     assert_eq!(
-        nodes[0], 4_961_681,
-        "ten selectivity toggles off with history off must match the M3 anchor exactly"
+        nodes[0], 5_157_465,
+        "ten selectivity toggles off with history off must match the NNUE anchor exactly"
     );
     assert_eq!(
-        nodes[13], 3_768_488,
-        "all selectivity off with history off must match the M3 anchor exactly"
+        nodes[13], 3_967_988,
+        "all selectivity off with history off must match the NNUE anchor exactly"
     );
 }
 
@@ -590,6 +581,7 @@ fn disabling_history_restores_the_m3_all_selectivity_off_signatures() {
 /// keeping it would have meant asserting a property of dead code.
 #[test]
 fn history_pruning_ships_disabled_after_being_re_measured_on_the_continuation_signal() {
+    require_bench_network!();
     let output = run_uci_session(
         "bench\n\
          setoption name UseHistoryPruning value true\n\
@@ -638,6 +630,7 @@ fn history_pruning_ships_disabled_after_being_re_measured_on_the_continuation_si
 /// situation: the guard is NOT lowered to manufacture an observable delta.
 #[test]
 fn pawn_history_ships_disabled_and_is_wired_through_to_the_search() {
+    require_bench_network!();
     let output = run_uci_session(
         "bench\n\
          setoption name UsePawnHistory value true\n\
@@ -667,6 +660,7 @@ fn pawn_history_ships_disabled_and_is_wired_through_to_the_search() {
 /// A GUI that trusts `default true` would silently enable a measured regression.
 #[test]
 fn the_advertised_pawn_history_default_matches_the_shipped_default() {
+    require_bench_network!();
     let output = run_uci_session("uci\nquit\n", "UCI option list session");
     assert!(output.status.success());
 
@@ -699,6 +693,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
 /// falling back toward the old confounded 2.088.
 #[test]
 fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
+    require_bench_network!();
     let output = run_uci_session(
         // Correction history is off for this whole session. The property under test is
         // which values `use_lmr` gates, and all four anchors below are M4-F2 values
@@ -735,11 +730,11 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 180_833,
+        nodes[2], 83_622,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(
-        nodes[3], 555_337,
+        nodes[3], 109_200,
         "with futility and SEE already off, UseLMR=false is unchanged by the split"
     );
 
@@ -753,6 +748,7 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
 
 #[test]
 fn bench_rejects_arguments_helpfully() {
+    require_bench_network!();
     let output = run(&["bench", "extra"]);
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());

@@ -16,7 +16,7 @@ use mf_nnue::{Network, NetworkSource, production_forward_mode, resolve_network};
 use mf_search::{
     IterationInfo, PoolError, PoolSearchResult, SearchLimits, SearchOptions, SearchPool,
     SearchResult, SharedHistory, TranspositionTable, clamp_centipawn_score, score_to_uci_mate,
-    search_with_shared_history_options,
+    search_with_shared_history_network_options,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
@@ -220,7 +220,18 @@ where
             let mut writer = writer
                 .lock()
                 .expect("UCI writer lock should not be poisoned");
-            write_bench(&mut *writer, state.search_options).map_err(io::Error::other)?;
+            match active_bench_network(&state) {
+                Ok(network) => {
+                    write_bench(&mut *writer, state.search_options, network.as_deref())
+                        .map_err(io::Error::other)?;
+                }
+                Err(error) => {
+                    writeln!(
+                        writer,
+                        "info string unable to run bench: NNUE resolution failed: {error}"
+                    )?;
+                }
+            }
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("setoption") {
             stop_active_search(&mut active_search);
@@ -246,6 +257,8 @@ where
                     writer.flush()?;
                 }
                 GoRequest::Search(parameters) if parameters.infinite => {
+                    let network = active_search_network(&state);
+                    let evaluator_diagnostic = active_evaluator_diagnostic(&state);
                     active_search = Some(start_search(
                         state.position.clone(),
                         state.position_history.clone(),
@@ -253,6 +266,8 @@ where
                         Arc::clone(&state.transposition_table),
                         parameters.search_limits(&state.position),
                         state.search_options,
+                        network,
+                        evaluator_diagnostic,
                         state.chess960,
                         Arc::clone(&writer),
                         true,
@@ -261,6 +276,8 @@ where
                 }
                 GoRequest::Search(parameters) => {
                     let fixed_depth = parameters.depth.is_some();
+                    let network = active_search_network(&state);
+                    let evaluator_diagnostic = active_evaluator_diagnostic(&state);
                     active_search = Some(start_search(
                         state.position.clone(),
                         state.position_history.clone(),
@@ -268,6 +285,8 @@ where
                         Arc::clone(&state.transposition_table),
                         parameters.search_limits(&state.position),
                         state.search_options,
+                        network,
+                        evaluator_diagnostic,
                         state.chess960,
                         Arc::clone(&writer),
                         false,
@@ -288,6 +307,48 @@ fn stop_active_search(active_search: &mut Option<ActiveSearch>) {
     }
 }
 
+fn active_search_network(state: &EngineState) -> Option<Arc<Network>> {
+    state
+        .use_nnue
+        .then(|| state.network.as_ref().map(Arc::clone))
+        .flatten()
+}
+
+fn active_bench_network(state: &EngineState) -> Result<Option<Arc<Network>>, &str> {
+    if state.use_nnue
+        && state.network.is_none()
+        && let Some(error) = state.network_resolution_error.as_deref()
+    {
+        return Err(error);
+    }
+    Ok(active_search_network(state))
+}
+
+fn active_evaluator_diagnostic(state: &EngineState) -> String {
+    if state.use_nnue
+        && state.network.is_none()
+        && let Some(error) = state.network_resolution_error.as_ref()
+    {
+        return format!("info string evaluation HCE because NNUE resolution failed: {error}");
+    }
+    match (
+        state.use_nnue,
+        state.network.as_ref(),
+        state.network_source.as_ref(),
+    ) {
+        (true, Some(network), Some(source)) => {
+            let mode = production_forward_mode();
+            format!(
+                "info string evaluation NNUE from {source}; network \"{}\"; backend {:?}; sparse FC0 {}",
+                network.description(),
+                mode.backend(),
+                mode.sparse_fc0()
+            )
+        }
+        _ => "info string evaluation HCE".to_string(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn start_search<W>(
     position: Position,
@@ -296,6 +357,8 @@ fn start_search<W>(
     transposition_table: Arc<TranspositionTable>,
     limits: SearchLimits,
     options: SearchOptions,
+    network: Option<Arc<Network>>,
+    evaluator_diagnostic: String,
     chess960: bool,
     writer: Arc<Mutex<W>>,
     wait_for_stop: bool,
@@ -307,6 +370,10 @@ where
     let stop = Arc::new(AtomicBool::new(false));
     let search_stop = Arc::clone(&stop);
     let handle = thread::spawn(move || {
+        if let Ok(mut writer) = writer.lock() {
+            let _ = writeln!(writer, "{evaluator_diagnostic}");
+            let _ = writer.flush();
+        }
         let on_iteration = |iteration: &IterationInfo| {
             if let Ok(mut writer) = writer.lock() {
                 let _ = write_iteration_info(&mut *writer, &position, iteration, chess960);
@@ -314,23 +381,25 @@ where
             }
         };
         let result = if fixed_depth {
-            search_pool.search_fixed_depth_with_history_callback_options(
+            search_pool.search_fixed_depth_with_history_callback_network_options(
                 &position,
                 &position_history,
                 Arc::clone(&transposition_table),
                 limits,
                 options,
                 Arc::clone(&search_stop),
+                network.as_ref().map(Arc::clone),
                 on_iteration,
             )
         } else {
-            search_pool.search_with_history_callback_options(
+            search_pool.search_with_history_callback_network_options(
                 &position,
                 &position_history,
                 Arc::clone(&transposition_table),
                 limits,
                 options,
                 Arc::clone(&search_stop),
+                network,
                 on_iteration,
             )
         };
@@ -409,7 +478,15 @@ where
         return Err(bench_usage("bench does not accept arguments"));
     }
 
-    write_bench(&mut writer, SearchOptions::default())
+    let resolution = benchmark_network_resolution();
+    if let Some(error) = resolution.error {
+        return Err(format!("unable to resolve bench NNUE network: {error}"));
+    }
+    write_bench(
+        &mut writer,
+        SearchOptions::default(),
+        resolution.network.as_deref(),
+    )
 }
 
 /// Runs the standalone multi-thread search scaling benchmark.
@@ -420,6 +497,11 @@ where
     W: Write,
 {
     let options = parse_mtbench_arguments(arguments)?;
+    let resolution = benchmark_network_resolution();
+    if let Some(error) = resolution.error {
+        return Err(format!("unable to resolve mtbench NNUE network: {error}"));
+    }
+    let network = resolution.network;
     let positions = BENCH_CASES
         .iter()
         .map(|fen| {
@@ -445,7 +527,7 @@ where
                 .map_err(|error| format!("unable to clear mtbench search state: {error}"))?;
             let history = [position.repetition_key()];
             let pooled = pool
-                .search_fixed_depth_smp_with_history_callback_options(
+                .search_fixed_depth_smp_with_history_callback_network_options(
                     position,
                     &history,
                     Arc::clone(&transposition_table),
@@ -455,6 +537,7 @@ where
                     },
                     SearchOptions::default(),
                     Arc::new(AtomicBool::new(false)),
+                    network.as_ref().map(Arc::clone),
                     |_| {},
                 )
                 .map_err(|error| format!("mtbench search failed: {error}"))?;
@@ -474,6 +557,28 @@ where
     }
 
     Ok(())
+}
+
+fn benchmark_network_resolution() -> SharedNetworkResolution {
+    let Some(path) = std::env::var_os("MF_NNUE_TEST_NET") else {
+        return default_network_resolution();
+    };
+    match resolve_network(Some(Path::new(&path))) {
+        Ok(Some(resolved)) => {
+            let (network, source) = resolved.into_parts();
+            SharedNetworkResolution {
+                network: Some(Arc::new(network)),
+                source: Some(source),
+                error: None,
+            }
+        }
+        Ok(None) => unreachable!("an explicit benchmark network never resolves to none"),
+        Err(error) => SharedNetworkResolution {
+            network: None,
+            source: None,
+            error: Some(Arc::from(error.to_string())),
+        },
+    }
 }
 
 struct MtbenchOptions {
@@ -554,7 +659,11 @@ fn parse_mtbench_thread_list(value: &str) -> Result<Vec<usize>, String> {
     Ok(threads)
 }
 
-fn write_bench<W: Write>(writer: &mut W, options: SearchOptions) -> Result<(), String> {
+fn write_bench<W: Write>(
+    writer: &mut W,
+    options: SearchOptions,
+    network: Option<&Network>,
+) -> Result<(), String> {
     let positions = BENCH_CASES
         .iter()
         .map(|fen| {
@@ -581,7 +690,7 @@ fn write_bench<W: Write>(writer: &mut W, options: SearchOptions) -> Result<(), S
         transposition_table.clear();
         shared_history.clear();
         let started = Instant::now();
-        let result = search_with_shared_history_options(
+        let result = search_with_shared_history_network_options(
             position,
             &transposition_table,
             SearchLimits {
@@ -590,6 +699,7 @@ fn write_bench<W: Write>(writer: &mut W, options: SearchOptions) -> Result<(), S
             },
             options,
             &shared_history,
+            network,
         );
         elapsed += started.elapsed();
         total = total
@@ -632,8 +742,11 @@ fn handle_setoption<W: Write>(
             state.chess960 = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseNnue") {
-        if let Some(enabled) = parse_check_option(&value) {
+        if let Some(enabled) = parse_check_option(&value)
+            && state.use_nnue != enabled
+        {
             state.use_nnue = enabled;
+            clear_eval_dependent_search_state(state, writer, "UseNnue")?;
         }
     } else if name.eq_ignore_ascii_case("UseNMP") {
         if let Some(enabled) = parse_check_option(&value) {
@@ -761,6 +874,23 @@ fn handle_setoption<W: Write>(
     Ok(())
 }
 
+fn clear_eval_dependent_search_state<W: Write>(
+    state: &EngineState,
+    writer: &mut W,
+    option: &str,
+) -> io::Result<()> {
+    if let Err(error) = state
+        .search_pool
+        .clear(Arc::clone(&state.transposition_table))
+    {
+        writeln!(
+            writer,
+            "info string unable to clear search state after {option}: {error}"
+        )?;
+    }
+    Ok(())
+}
+
 fn handle_eval_file<W: Write>(
     value: &str,
     state: &mut EngineState,
@@ -781,6 +911,7 @@ fn handle_eval_file<W: Write>(
         state.network = resolution.network;
         state.network_source = resolution.source;
         state.network_resolution_error = None;
+        clear_eval_dependent_search_state(state, writer, "EvalFile")?;
         return write_network_selection(writer, state, "automatic resolution");
     }
 
@@ -790,6 +921,7 @@ fn handle_eval_file<W: Write>(
             state.network = Some(Arc::new(network));
             state.network_source = Some(source);
             state.network_resolution_error = None;
+            clear_eval_dependent_search_state(state, writer, "EvalFile")?;
             write_network_selection(writer, state, "EvalFile")
         }
         Ok(None) => unreachable!("an explicit EvalFile never resolves to no network"),
@@ -1507,6 +1639,109 @@ mod tests {
     }
 
     #[test]
+    fn use_nnue_controls_search_network_without_unloading_it() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+        handle_setoption(
+            &format!("setoption name EvalFile value {}", path.display()),
+            &mut state,
+            &mut output,
+        )
+        .expect("test EvalFile should load");
+        let loaded = Arc::clone(state.network.as_ref().expect("network should be loaded"));
+
+        assert!(Arc::ptr_eq(
+            active_search_network(&state)
+                .as_ref()
+                .expect("enabled NNUE should reach search"),
+            &loaded
+        ));
+
+        handle_setoption(
+            "setoption name UseNnue value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("UseNnue false should be writable");
+        assert!(active_search_network(&state).is_none());
+        assert!(Arc::ptr_eq(
+            state
+                .network
+                .as_ref()
+                .expect("disabling NNUE must not unload it"),
+            &loaded
+        ));
+
+        handle_setoption("setoption name UseNnue value true", &mut state, &mut output)
+            .expect("UseNnue true should be writable");
+        assert!(Arc::ptr_eq(
+            active_search_network(&state)
+                .as_ref()
+                .expect("re-enabled NNUE should reach search"),
+            &loaded
+        ));
+    }
+
+    #[test]
+    fn changing_use_nnue_clears_eval_dependent_search_state() {
+        let mut state = EngineState::default();
+        let key = state.position.zobrist().main();
+        state.transposition_table.store(
+            key,
+            EntryData {
+                best_move: None,
+                score: 11,
+                static_eval: 22,
+                depth: 3,
+                bound: Bound::Exact,
+                age: 0,
+                pv: false,
+            },
+        );
+        let mut output = Vec::new();
+
+        handle_setoption(
+            "setoption name UseNnue value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("UseNnue change should be writable");
+
+        assert_eq!(state.transposition_table.probe(key), None);
+    }
+
+    #[test]
+    fn failed_default_network_resolution_is_not_reported_as_plain_hce() {
+        let state = EngineState {
+            use_nnue: true,
+            network: None,
+            network_source: None,
+            network_resolution_error: Some(Arc::from("invalid discovered network")),
+            ..EngineState::default()
+        };
+
+        let diagnostic = active_evaluator_diagnostic(&state);
+
+        assert!(diagnostic.contains("NNUE resolution failed"));
+        assert!(diagnostic.contains("invalid discovered network"));
+    }
+
+    #[test]
+    fn bench_rejects_a_failed_required_nnue_resolution() {
+        let state = EngineState {
+            use_nnue: true,
+            network: None,
+            network_source: None,
+            network_resolution_error: Some(Arc::from("invalid discovered network")),
+            ..EngineState::default()
+        };
+
+        assert!(active_bench_network(&state).is_err());
+    }
+
+    #[test]
     fn bad_explicit_eval_file_preserves_the_previous_network_arc() {
         let valid =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
@@ -1586,6 +1821,36 @@ mod tests {
     }
 
     #[test]
+    fn changing_eval_file_clears_eval_dependent_search_state() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let mut state = EngineState::default();
+        let key = state.position.zobrist().main();
+        state.transposition_table.store(
+            key,
+            EntryData {
+                best_move: None,
+                score: 11,
+                static_eval: 22,
+                depth: 3,
+                bound: Bound::Exact,
+                age: 0,
+                pv: false,
+            },
+        );
+        let mut output = Vec::new();
+
+        handle_setoption(
+            &format!("setoption name EvalFile value {}", path.display()),
+            &mut state,
+            &mut output,
+        )
+        .expect("EvalFile change should be writable");
+
+        assert_eq!(state.transposition_table.probe(key), None);
+    }
+
+    #[test]
     fn empty_marker_eval_file_value_returns_to_automatic_resolution() {
         let path =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
@@ -1655,6 +1920,32 @@ mod tests {
         let output = String::from_utf8(output).expect("protocol output should be UTF-8");
         assert!(output.starts_with("info string unable to load EvalFile"));
         assert!(output.contains("unexpected NNUE version"));
+    }
+
+    #[test]
+    fn bench_uses_the_supplied_nnue_network() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let network = Network::load(&path)
+            .unwrap_or_else(|error| panic!("test NNUE network {}: {error}", path.display()));
+        let mut nnue_output = Vec::new();
+        let mut hce_output = Vec::new();
+
+        write_bench(&mut nnue_output, SearchOptions::default(), Some(&network))
+            .expect("NNUE bench should complete");
+        write_bench(&mut hce_output, SearchOptions::default(), None)
+            .expect("HCE bench should complete");
+
+        let nodes = |output: Vec<u8>| {
+            String::from_utf8(output)
+                .expect("bench output should be UTF-8")
+                .lines()
+                .find_map(|line| line.strip_prefix("Nodes searched: "))
+                .expect("bench nodes should be reported")
+                .parse::<u64>()
+                .expect("bench nodes should be numeric")
+        };
+        assert_ne!(nodes(nnue_output), nodes(hce_output));
     }
 
     #[test]
