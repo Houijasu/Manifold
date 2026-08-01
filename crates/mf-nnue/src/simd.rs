@@ -11,21 +11,23 @@ use crate::network::{L1, Network, PSQT_BUCKETS};
 
 #[cfg(target_arch = "x86")]
 use std::arch::x86::{
-    __m128i, __m256i, _mm_loadu_si128, _mm256_add_epi16, _mm256_add_epi32, _mm256_cmpeq_epi8,
-    _mm256_cvtepi8_epi16, _mm256_dpbusd_avx_epi32, _mm256_loadu_si256, _mm256_madd_epi16,
-    _mm256_maddubs_epi16, _mm256_max_epi16, _mm256_min_epi16, _mm256_movemask_epi8,
-    _mm256_mullo_epi16, _mm256_packus_epi16, _mm256_permute4x64_epi64, _mm256_set1_epi16,
-    _mm256_set1_epi32, _mm256_setzero_si256, _mm256_srli_epi16, _mm256_storeu_si256,
-    _mm256_sub_epi16, _mm256_sub_epi32,
+    __m128i, __m256i, _mm_add_epi32, _mm_loadu_si128, _mm_storeu_si128, _mm256_add_epi16,
+    _mm256_add_epi32, _mm256_castsi256_si128, _mm256_cmpeq_epi8, _mm256_cvtepi8_epi16,
+    _mm256_dpbusd_avx_epi32, _mm256_extracti128_si256, _mm256_hadd_epi32, _mm256_loadu_si256,
+    _mm256_madd_epi16, _mm256_maddubs_epi16, _mm256_max_epi16, _mm256_min_epi16,
+    _mm256_movemask_epi8, _mm256_mullo_epi16, _mm256_packus_epi16, _mm256_permute4x64_epi64,
+    _mm256_set1_epi16, _mm256_set1_epi32, _mm256_setzero_si256, _mm256_srli_epi16,
+    _mm256_storeu_si256, _mm256_sub_epi16, _mm256_sub_epi32,
 };
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::{
-    __m128i, __m256i, _mm_loadu_si128, _mm256_add_epi16, _mm256_add_epi32, _mm256_cmpeq_epi8,
-    _mm256_cvtepi8_epi16, _mm256_dpbusd_avx_epi32, _mm256_loadu_si256, _mm256_madd_epi16,
-    _mm256_maddubs_epi16, _mm256_max_epi16, _mm256_min_epi16, _mm256_movemask_epi8,
-    _mm256_mullo_epi16, _mm256_packus_epi16, _mm256_permute4x64_epi64, _mm256_set1_epi16,
-    _mm256_set1_epi32, _mm256_setzero_si256, _mm256_srli_epi16, _mm256_storeu_si256,
-    _mm256_sub_epi16, _mm256_sub_epi32,
+    __m128i, __m256i, _mm_add_epi32, _mm_loadu_si128, _mm_storeu_si128, _mm256_add_epi16,
+    _mm256_add_epi32, _mm256_castsi256_si128, _mm256_cmpeq_epi8, _mm256_cvtepi8_epi16,
+    _mm256_dpbusd_avx_epi32, _mm256_extracti128_si256, _mm256_hadd_epi32, _mm256_loadu_si256,
+    _mm256_madd_epi16, _mm256_maddubs_epi16, _mm256_max_epi16, _mm256_min_epi16,
+    _mm256_movemask_epi8, _mm256_mullo_epi16, _mm256_packus_epi16, _mm256_permute4x64_epi64,
+    _mm256_set1_epi16, _mm256_set1_epi32, _mm256_setzero_si256, _mm256_srli_epi16,
+    _mm256_storeu_si256, _mm256_sub_epi16, _mm256_sub_epi32,
 };
 
 /// Runtime NNUE kernel implementation.
@@ -698,7 +700,39 @@ unsafe fn affine_dense_avx2<const INPUTS: usize, const OUTPUTS: usize>(
     biases: &[i32; OUTPUTS],
     output: &mut [i32; OUTPUTS],
 ) {
-    for neuron in 0..OUTPUTS {
+    let grouped_outputs = OUTPUTS / 4 * 4;
+    for neuron in (0..grouped_outputs).step_by(4) {
+        let mut sums = [_mm256_setzero_si256(); 4];
+        for offset in (0..INPUTS).step_by(32) {
+            // SAFETY: INPUTS is a multiple of 32 and each of the four rows
+            // contains a complete INPUTS-byte weight vector.
+            unsafe {
+                let activations = _mm256_loadu_si256(input.as_ptr().add(offset).cast::<__m256i>());
+                for (lane, sum) in sums.iter_mut().enumerate() {
+                    let row = _mm256_loadu_si256(
+                        weights
+                            .as_ptr()
+                            .add((neuron + lane) * INPUTS + offset)
+                            .cast::<__m256i>(),
+                    );
+                    let pairs = _mm256_maddubs_epi16(activations, row);
+                    let quads = _mm256_madd_epi16(pairs, _mm256_set1_epi16(1));
+                    *sum = _mm256_add_epi32(*sum, quads);
+                }
+            }
+        }
+        // SAFETY: the source and destination each contain four complete i32 lanes.
+        unsafe {
+            let reduced = horizontal_sum_four_avx2(sums);
+            let bias = _mm_loadu_si128(biases.as_ptr().add(neuron).cast::<__m128i>());
+            _mm_storeu_si128(
+                output.as_mut_ptr().add(neuron).cast::<__m128i>(),
+                _mm_add_epi32(reduced, bias),
+            );
+        }
+    }
+
+    for neuron in grouped_outputs..OUTPUTS {
         let mut sums = _mm256_setzero_si256();
         for offset in (0..INPUTS).step_by(32) {
             // SAFETY: INPUTS is a multiple of 32 and the row-major weights
@@ -744,7 +778,37 @@ unsafe fn affine_dense_avx2_vnni<const INPUTS: usize, const OUTPUTS: usize>(
     biases: &[i32; OUTPUTS],
     output: &mut [i32; OUTPUTS],
 ) {
-    for neuron in 0..OUTPUTS {
+    let grouped_outputs = OUTPUTS / 4 * 4;
+    for neuron in (0..grouped_outputs).step_by(4) {
+        let mut sums = [_mm256_setzero_si256(); 4];
+        for offset in (0..INPUTS).step_by(32) {
+            // SAFETY: INPUTS is a multiple of 32 and each of the four rows
+            // contains a complete INPUTS-byte weight vector.
+            unsafe {
+                let activations = _mm256_loadu_si256(input.as_ptr().add(offset).cast::<__m256i>());
+                for (lane, sum) in sums.iter_mut().enumerate() {
+                    let row = _mm256_loadu_si256(
+                        weights
+                            .as_ptr()
+                            .add((neuron + lane) * INPUTS + offset)
+                            .cast::<__m256i>(),
+                    );
+                    *sum = _mm256_dpbusd_avx_epi32(*sum, activations, row);
+                }
+            }
+        }
+        // SAFETY: the source and destination each contain four complete i32 lanes.
+        unsafe {
+            let reduced = horizontal_sum_four_avx2(sums);
+            let bias = _mm_loadu_si128(biases.as_ptr().add(neuron).cast::<__m128i>());
+            _mm_storeu_si128(
+                output.as_mut_ptr().add(neuron).cast::<__m128i>(),
+                _mm_add_epi32(reduced, bias),
+            );
+        }
+    }
+
+    for neuron in grouped_outputs..OUTPUTS {
         let mut sums = _mm256_setzero_si256();
         for offset in (0..INPUTS).step_by(32) {
             // SAFETY: INPUTS is a multiple of 32 and the row-major weights
@@ -765,6 +829,21 @@ unsafe fn affine_dense_avx2_vnni<const INPUTS: usize, const OUTPUTS: usize>(
         unsafe { _mm256_storeu_si256(lanes.as_mut_ptr().cast::<__m256i>(), sums) };
         output[neuron] = lanes.into_iter().fold(biases[neuron], i32::wrapping_add);
     }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "avx2")]
+/// # Safety
+///
+/// The caller must verify AVX2 support.
+unsafe fn horizontal_sum_four_avx2(sums: [__m256i; 4]) -> __m128i {
+    let first = _mm256_hadd_epi32(sums[0], sums[1]);
+    let second = _mm256_hadd_epi32(sums[2], sums[3]);
+    let quarters = _mm256_hadd_epi32(first, second);
+    _mm_add_epi32(
+        _mm256_castsi256_si128(quarters),
+        _mm256_extracti128_si256::<1>(quarters),
+    )
 }
 
 #[inline]
@@ -1238,6 +1317,8 @@ unsafe fn subtract_psqt_row_avx2(_: &mut [i32; PSQT_BUCKETS], _: &[i32; PSQT_BUC
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    use super::horizontal_sum_four_avx2;
     use super::{
         ForwardMode, SimdBackend, UnsupportedBackendReason, add_i8_row, add_i16_row, add_psqt_row,
         affine_dense, affine_sparse_fc0, feature_transform, nonzero_chunk_mask,
@@ -1246,6 +1327,10 @@ mod tests {
     };
     use crate::network::build_fc0_sparse_weights;
     use crate::{FC0_OUT, HALF, L1};
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86::{_mm_storeu_si128, _mm256_loadu_si256};
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::{_mm_storeu_si128, _mm256_loadu_si256};
     fn supported_backends() -> impl Iterator<Item = SimdBackend> {
         [
             SimdBackend::Scalar,
@@ -1254,6 +1339,32 @@ mod tests {
         ]
         .into_iter()
         .filter(|backend| backend.is_supported())
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[test]
+    fn four_way_horizontal_reduction_wraps_like_scalar() {
+        if !SimdBackend::Avx2.is_supported() {
+            return;
+        }
+
+        let lanes = [
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [i32::MAX, 1, -3, 5, 7, 11, 13, 17],
+            [i32::MIN, -1, 3, -5, -7, -11, -13, -17],
+            [99, -99, 101, -101, 103, -103, 107, -107],
+        ];
+        let registers = lanes.map(|values| {
+            // SAFETY: each lane array contains one complete unaligned AVX2 register.
+            unsafe { _mm256_loadu_si256(values.as_ptr().cast()) }
+        });
+        let sums = unsafe { horizontal_sum_four_avx2(registers) };
+        let mut actual = [0_i32; 4];
+        // SAFETY: the destination contains one complete unaligned SSE register.
+        unsafe { _mm_storeu_si128(actual.as_mut_ptr().cast(), sums) };
+        let expected = lanes.map(|values| values.into_iter().fold(0_i32, i32::wrapping_add));
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
