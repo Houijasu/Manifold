@@ -72,7 +72,23 @@ const MTBENCH_DEFAULT_DEPTH: u32 = 10;
 const MTBENCH_HASH_MIB: usize = 64;
 const MTBENCH_MAX_THREADS: usize = 256;
 const DEFAULT_MOVES_TO_GO: u64 = 30;
+/// Upper bound on `movestogo`, so a tournament that announces a very distant time
+/// control does not shrink each move's budget to nothing.
+const MAX_MOVES_TO_GO: u64 = 50;
 const TIME_OVERHEAD_MILLIS: u64 = 10;
+/// Fraction of the increment folded into the per-move budget, in percent.
+const INCREMENT_FRACTION_PERCENT: u64 = 75;
+/// Fraction of the remaining clock held back as a safety reserve, in percent.
+const CLOCK_SAFETY_PERCENT: u64 = 2;
+/// Ceiling on a single move's hard limit as a fraction of the remaining clock, in
+/// percent.
+const HARD_LIMIT_CLOCK_PERCENT: u64 = 40;
+/// Ceiling on a single move's hard limit as a multiple of its soft limit.
+///
+/// This is the whole point of having two limits. At 5/4 the hard limit sat so close to
+/// the soft one that a position whose score was collapsing could not be given materially
+/// more time than a quiet one, which makes the soft/hard split decorative.
+const HARD_LIMIT_SOFT_MULTIPLE: u64 = 4;
 const NULL_BESTMOVE: &str = "0000";
 
 struct EngineState {
@@ -1150,19 +1166,32 @@ impl GoParameters {
         } else {
             self.binc.unwrap_or(0)
         };
-        let moves = self.movestogo.unwrap_or(DEFAULT_MOVES_TO_GO).max(1);
-        let ideal = (remaining / moves)
-            .saturating_add(increment.saturating_mul(3) / 4)
-            .max(1);
-        let hard = ideal
-            .saturating_mul(5)
-            .checked_div(4)
-            .unwrap_or(ideal)
+        let moves = self
+            .movestogo
+            .unwrap_or(DEFAULT_MOVES_TO_GO)
+            .clamp(1, MAX_MOVES_TO_GO);
+        // A safety reserve is withheld from the clock BEFORE the per-move share is
+        // taken, so the reserve survives being divided by `movestogo` and is still there
+        // on the last move of the control.
+        let safety = remaining.saturating_mul(CLOCK_SAFETY_PERCENT) / 100;
+        let available = remaining
             .saturating_sub(TIME_OVERHEAD_MILLIS)
+            .saturating_sub(safety)
+            .max(1);
+        let soft = (available / moves)
+            .saturating_add(increment.saturating_mul(INCREMENT_FRACTION_PERCENT) / 100)
             .max(1)
-            .min(remaining.saturating_sub(TIME_OVERHEAD_MILLIS).max(1));
+            .min(available);
+        // The hard limit is what lets one critical move borrow from the moves after it.
+        // It is bounded twice: by a multiple of the soft limit, so a single move cannot
+        // run away with the game, and by a fraction of the clock, so the borrowing can
+        // never approach flag fall.
+        let hard = soft
+            .saturating_mul(HARD_LIMIT_SOFT_MULTIPLE)
+            .min(remaining.saturating_mul(HARD_LIMIT_CLOCK_PERCENT) / 100)
+            .clamp(1, available);
         (
-            Some(Duration::from_millis(ideal.min(hard))),
+            Some(Duration::from_millis(soft.min(hard))),
             Some(Duration::from_millis(hard)),
         )
     }
@@ -1965,6 +1994,55 @@ mod tests {
 
         assert_eq!(limits.soft_time, Some(Duration::from_millis(100)));
         assert_eq!(limits.hard_time, Some(Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn clock_limits_reserve_a_safety_margin_and_let_the_hard_limit_borrow_from_later_moves() {
+        let parameters = GoParameters::parse(&["wtime", "60000", "winc", "600"])
+            .expect("clock parameters should parse");
+        let limits = parameters.search_limits(&Position::startpos());
+        let soft = limits.soft_time.expect("a clock implies a soft limit");
+        let hard = limits.hard_time.expect("a clock implies a hard limit");
+
+        // 60000 - 10 overhead - 1200 safety = 58790 available; 58790/30 + 450 = 2409.
+        assert_eq!(soft, Duration::from_millis(2_409));
+        // The hard limit must be a genuine multiple of the soft one, not the 5/4 that
+        // made the two limits interchangeable.
+        assert_eq!(hard, Duration::from_millis(2_409 * 4));
+        assert!(hard <= Duration::from_millis(60_000 * 40 / 100));
+    }
+
+    #[test]
+    fn a_short_clock_caps_the_hard_limit_at_a_fraction_of_what_remains() {
+        let parameters =
+            GoParameters::parse(&["btime", "300", "movestogo", "1"]).expect("clock should parse");
+        let mut position = Position::startpos();
+        position.make_move(
+            mf_core::generate_legal_moves(&position)
+                .first()
+                .copied()
+                .expect("startpos has moves"),
+        );
+        let limits = parameters.search_limits(&position);
+        let hard = limits.hard_time.expect("a clock implies a hard limit");
+
+        // With one move to go the soft limit takes the whole available clock, so only
+        // the 40% ceiling stands between the engine and forfeiting on time.
+        assert_eq!(hard, Duration::from_millis(300 * 40 / 100));
+        assert!(limits.soft_time.expect("soft limit") <= hard);
+    }
+
+    #[test]
+    fn a_distant_movestogo_is_clamped_so_the_per_move_budget_stays_usable() {
+        let far = GoParameters::parse(&["wtime", "60000", "movestogo", "200"])
+            .expect("clock should parse");
+        let clamped = GoParameters::parse(&["wtime", "60000", "movestogo", "50"])
+            .expect("clock should parse");
+
+        assert_eq!(
+            far.search_limits(&Position::startpos()).soft_time,
+            clamped.search_limits(&Position::startpos()).soft_time
+        );
     }
 
     #[test]

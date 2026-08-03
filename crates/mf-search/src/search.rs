@@ -70,6 +70,19 @@ const _: () = assert!(
 /// `u8` field. Interior depths are stored biased and compared after decoding, so the
 /// ordering between all three domains is preserved exactly.
 const TT_DEPTH_OFFSET: i32 = -QSEARCH_CAPTURES_TT_DEPTH;
+/// Number of consecutive iterations agreeing on the root move after which no further
+/// time is saved. Past this the move is settled and the saving has been banked.
+const TIME_STABILITY_CAP: u32 = 6;
+/// Soft-limit percentage for a root move that has just changed, before any saving.
+const TIME_STABILITY_BASE_PERCENT: u32 = 110;
+/// Percentage points removed per consecutive iteration that kept the same root move.
+const TIME_STABILITY_STEP_PERCENT: u32 = 5;
+/// Centipawns of score drop that buy a full extra `TIME_FALLING_STEP_PERCENT`.
+const TIME_FALLING_SCORE_STEP: i32 = 50;
+const TIME_FALLING_STEP_PERCENT: u32 = 20;
+/// Ceiling on the soft-limit scale. The hard limit is the real bound; this only stops
+/// the scale itself from compounding without limit.
+const TIME_SCALE_MAX_PERCENT: u32 = 180;
 const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
 const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
 
@@ -641,6 +654,8 @@ where
     }
     let mut completed = None;
     let mut previous_score = 0;
+    let mut previous_best_move = None;
+    let mut stability = 0u32;
 
     for depth in 1..=maximum_depth {
         let iteration_start_nodes = context.nodes;
@@ -654,6 +669,23 @@ where
         let Some((score, pv)) = attempt else {
             break;
         };
+        // The hard limit is several times the soft one, which only pays for itself if
+        // something decides WHEN to reach for it. Left ungoverned every iteration that
+        // began just under the soft limit ran on to the hard one, so the engine
+        // overspent on every move and lost three games on time in a 424-game match.
+        //
+        // Stability is that governor: while the root move keeps changing, or the score
+        // is falling, the position is still being worked out and the extra time buys
+        // something. Once the same move survives several iterations, the budget shrinks
+        // back below the nominal share and the saved time funds the moves that need it.
+        let best_move = pv.first().copied();
+        if best_move.is_some() && best_move == previous_best_move {
+            stability = (stability + 1).min(TIME_STABILITY_CAP);
+        } else {
+            stability = 0;
+        }
+        previous_best_move = best_move;
+        context.set_time_scale(time_scale_percent(stability, score - previous_score));
         previous_score = score;
         context.publish_nodes();
         let elapsed = context.elapsed();
@@ -1783,6 +1815,21 @@ fn draw_value(nodes: u64) -> i32 {
     -1 + (nodes & 0x2) as i32
 }
 
+/// Percentage to scale the soft time limit by before the next iteration.
+///
+/// Two independent reasons to keep thinking, composed additively: the root move is
+/// still moving, and the score is falling. A rising score buys nothing -- finding out
+/// that the position is even better than believed does not change the move.
+fn time_scale_percent(stability: u32, score_change: i32) -> u32 {
+    let stability_percent = TIME_STABILITY_BASE_PERCENT
+        .saturating_sub(TIME_STABILITY_STEP_PERCENT * stability.min(TIME_STABILITY_CAP));
+    let falling = (-score_change).max(0);
+    let falling_percent = (falling / TIME_FALLING_SCORE_STEP) as u32 * TIME_FALLING_STEP_PERCENT;
+    stability_percent
+        .saturating_add(falling_percent)
+        .min(TIME_SCALE_MAX_PERCENT)
+}
+
 /// Encodes a search depth into the biased `u8` the TT entry carries.
 #[inline]
 fn tt_stored_depth(depth: i32) -> u8 {
@@ -2501,6 +2548,8 @@ struct SearchContext<'a> {
     nmp_min_ply: usize,
     stopped: bool,
     soft_time_reached: bool,
+    /// Percentage the soft limit is scaled by, updated between iterations.
+    time_scale_percent: u32,
     generation: u8,
 }
 
@@ -2541,6 +2590,7 @@ impl<'a> SearchContext<'a> {
             nmp_min_ply: 0,
             stopped: false,
             soft_time_reached: false,
+            time_scale_percent: 100,
             generation,
         }
     }
@@ -2589,7 +2639,7 @@ impl<'a> SearchContext<'a> {
         }
         if self.worker_id == 0 && self.nodes.is_multiple_of(TIME_CHECK_INTERVAL) {
             let elapsed = self.elapsed();
-            self.soft_time_reached = self.limits.soft_time.is_some_and(|limit| elapsed >= limit);
+            self.soft_time_reached = self.scaled_soft_time().is_some_and(|limit| elapsed >= limit);
             if self.limits.hard_time.is_some_and(|limit| elapsed >= limit) {
                 self.stopped = true;
                 return false;
@@ -2602,6 +2652,26 @@ impl<'a> SearchContext<'a> {
         self.stopped
             || self.limits.nodes.is_some_and(|limit| self.nodes >= limit)
             || self.soft_time_reached
+    }
+
+    /// Sets the percentage the soft limit is scaled by before the next iteration.
+    fn set_time_scale(&mut self, percent: u32) {
+        self.time_scale_percent = percent;
+    }
+
+    /// The soft limit actually in force, after stability scaling.
+    fn scaled_soft_time(&self) -> Option<Duration> {
+        self.limits.soft_time.map(|limit| {
+            let scaled = limit
+                .saturating_mul(self.time_scale_percent)
+                .checked_div(100)
+                .unwrap_or(limit);
+            // Scaling may only ever move the soft limit within the hard one; the hard
+            // limit is the promise that the engine does not forfeit.
+            self.limits
+                .hard_time
+                .map_or(scaled, |hard| scaled.min(hard))
+        })
     }
 
     fn publish_nodes(&self) {
@@ -3538,6 +3608,58 @@ mod tests {
             mf_core::material_value(PieceKind::Pawn)
         );
         assert_eq!(QSEARCH_DELTA_MARGIN, 196);
+    }
+
+    #[test]
+    fn time_scaling_spends_more_while_the_root_move_moves_and_saves_once_it_settles() {
+        // A root move that just changed is worth more than its nominal share.
+        assert_eq!(time_scale_percent(0, 0), 110);
+        // Every iteration that agrees with the last one banks a little of the budget.
+        assert_eq!(time_scale_percent(1, 0), 105);
+        assert_eq!(time_scale_percent(6, 0), 80);
+        // Past the cap there is nothing further to save.
+        assert_eq!(time_scale_percent(50, 0), 80);
+        // A falling score buys time; a rising one buys nothing, since finding out the
+        // position is better than believed does not change which move to play.
+        assert_eq!(time_scale_percent(6, -100), 80 + 40);
+        assert_eq!(time_scale_percent(6, 100), 80);
+        assert!(time_scale_percent(0, -100_000) <= TIME_SCALE_MAX_PERCENT);
+    }
+
+    #[test]
+    fn the_scaled_soft_limit_can_never_exceed_the_hard_limit() {
+        let position = Position::startpos();
+        let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits {
+                soft_time: Some(Duration::from_millis(100)),
+                hard_time: Some(Duration::from_millis(150)),
+                ..SearchLimits::default()
+            },
+            None,
+            &stop,
+            &position,
+            &history,
+            &shared_history,
+            SearchOptions::default(),
+            0,
+            0,
+            &counters,
+            None,
+        );
+
+        context.set_time_scale(100);
+        assert_eq!(context.scaled_soft_time(), Some(Duration::from_millis(100)));
+        context.set_time_scale(80);
+        assert_eq!(context.scaled_soft_time(), Some(Duration::from_millis(80)));
+        // 180% of 100ms is 180ms, but the hard limit is the promise not to forfeit.
+        context.set_time_scale(TIME_SCALE_MAX_PERCENT);
+        assert_eq!(context.scaled_soft_time(), Some(Duration::from_millis(150)));
     }
 
     #[test]
