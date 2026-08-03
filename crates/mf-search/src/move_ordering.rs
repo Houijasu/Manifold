@@ -19,7 +19,7 @@ use crate::history::{CONTINUATION_PLIES, ContinuationKey, SharedHistory, capture
 /// butterfly cost 1.6% of bench nodes.
 const PAWN_HISTORY_WEIGHT: i32 = 2;
 
-/// `statScore` weights in 1024ths (Stockfish: `2252*main + 1126*cont1 + 1093*cont2`).
+/// `statScore` weights in 1024ths (reference: `2252*main + 1126*cont1 + 1093*cont2`).
 ///
 /// The butterfly weight is pinned to **2048**, not the reference 2252, so that
 /// `2048 * butterfly / 1024` is *exactly* the `2 * butterfly` this engine used before
@@ -268,14 +268,29 @@ impl Iterator for MovePicker {
 
 pub(crate) fn quiescence_moves(
     position: &Position,
+    tt_move: Option<Move>,
     see_threshold: i32,
     ordering: OrderingContext<'_>,
 ) -> Vec<Move> {
-    let mut moves: Vec<_> = generate_pseudo_legal_moves(position)
+    let pseudo_legal = generate_pseudo_legal_moves(position);
+    // The TT move is the one move qsearch has actual evidence about, so it is searched
+    // first and is exempt from the SEE gate: the entry that named it was produced by a
+    // search, which is strictly better evidence than a static exchange estimate.
+    let tt_move = tt_move.filter(|mv| {
+        pseudo_legal.contains(mv) && (mv.flag().is_capture() || mv.flag().promotion().is_some())
+    });
+    let mut moves: Vec<_> = pseudo_legal
         .iter()
         .copied()
+        .filter(|mv| Some(*mv) != tt_move)
         .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
-        .filter(|&mv| static_exchange_evaluation(position, mv) >= see_threshold)
+        // Promotions are exempt from the SEE gate. A promotion changes the material on
+        // the board by more than the exchange it initiates, and dropping one because the
+        // pawn is recaptured loses the tactic the qsearch exists to find.
+        .filter(|&mv| {
+            mv.flag().promotion().is_some()
+                || static_exchange_evaluation(position, mv) >= see_threshold
+        })
         .collect();
     // `sort_by_cached_key` for the same reason as the main loop above, and this site is
     // the more expensive of the two: `capture_score` opens with a full
@@ -284,7 +299,28 @@ pub(crate) fn quiescence_moves(
     // the SEE and the table read run O(n log n) times per qsearch node instead of O(n),
     // and qsearch is the majority of nodes (mission AGENTS.md 4.54 trap 1).
     moves.sort_by_cached_key(|&mv| core::cmp::Reverse(capture_score(position, mv, ordering)));
+    if let Some(tt_move) = tt_move {
+        moves.insert(0, tt_move);
+    }
     moves
+}
+
+/// Material a capture stands to win, used by the qsearch delta-pruning margin.
+///
+/// Promotions add the piece they create minus the pawn they consume, so a promotion is
+/// never pruned on the strength of the (frequently empty) square it lands on.
+pub(crate) fn captured_material(position: &Position, mv: Move) -> i32 {
+    let victim = if mv.flag().is_en_passant() {
+        material_value(PieceKind::Pawn)
+    } else {
+        position
+            .piece_at(mv.to())
+            .map_or(0, |piece| material_value(piece.kind()))
+    };
+    let promotion = mv.flag().promotion().map_or(0, |kind| {
+        material_value(kind) - material_value(PieceKind::Pawn)
+    });
+    victim + promotion
 }
 
 fn capture_score(position: &Position, mv: Move, ordering: OrderingContext<'_>) -> i32 {

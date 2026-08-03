@@ -16,7 +16,7 @@ use crate::history::{
     CORRECTION_MINOR, CORRECTION_PAWN, CORRECTION_SCALE, CORRECTION_SOURCES, CORRECTION_WEIGHTS,
     ContinuationKey, KillerTable, SharedHistory, captured_kind,
 };
-use crate::move_ordering::{MovePicker, OrderingContext, quiescence_moves};
+use crate::move_ordering::{MovePicker, OrderingContext, captured_material, quiescence_moves};
 use crate::repetition::RepetitionHistory;
 use crate::{Bound, EntryData, TranspositionTable};
 
@@ -43,7 +43,33 @@ const IIR_MIN_DEPTH: i32 = 6;
 const PROBCUT_MIN_DEPTH: i32 = 3;
 const PROBCUT_BASE_MARGIN: i32 = 241;
 const PROBCUT_IMPROVING_MARGIN: i32 = 64;
-const QSEARCH_SEE_THRESHOLD: i32 = -74;
+/// Minimum static exchange value a capture must promise before qsearch spends a node
+/// on it.
+///
+/// Zero, not a positive number. Demanding a strictly WINNING exchange (+1) is the
+/// tighter filter a capture-count argument predicts, and it was measured at 1.5x MORE
+/// nodes to depth 12 in the endgame position: an equal trade is exactly how a recapture
+/// resolves, so rejecting it leaves the standing pat sitting on an unresolved exchange
+/// and pushes that work back into the main search, which pays for it at full width.
+const QSEARCH_SEE_THRESHOLD: i32 = 0;
+/// Material a capture must be able to add to the standing pat before qsearch will spend
+/// a node on it.
+const QSEARCH_DELTA_MARGIN: i32 = 196;
+/// TT depth domain for a qsearch node that searched only captures.
+const QSEARCH_CAPTURES_TT_DEPTH: i32 = -2;
+/// TT depth domain for a qsearch node that searched every move because it was in check.
+///
+/// Strictly more informative than the captures domain, so a checks entry satisfies a
+/// captures probe but not the reverse.
+const QSEARCH_CHECKS_TT_DEPTH: i32 = -1;
+const _: () = assert!(
+    QSEARCH_CAPTURES_TT_DEPTH < QSEARCH_CHECKS_TT_DEPTH && QSEARCH_CHECKS_TT_DEPTH < 0,
+    "a captures-only qsearch entry must never satisfy an in-check or interior probe"
+);
+/// Bias applied to every stored TT depth so the negative qsearch domains survive the
+/// `u8` field. Interior depths are stored biased and compared after decoding, so the
+/// ordering between all three domains is preserved exactly.
+const TT_DEPTH_OFFSET: i32 = -QSEARCH_CAPTURES_TT_DEPTH;
 const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
 const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
 
@@ -148,6 +174,8 @@ pub struct SearchOptions {
     pub use_lmp: bool,
     pub use_futility: bool,
     pub use_see_pruning: bool,
+    pub use_qsearch_tt: bool,
+    pub use_qsearch_delta_pruning: bool,
     pub use_singular_ext: bool,
     pub use_check_ext: bool,
     pub use_multicut: bool,
@@ -165,7 +193,8 @@ pub struct SearchOptions {
     /// Each variant gets its own gate because the validation contract requires every
     /// technique to be A/B testable externally, and because the six variants were
     /// invented in five different engines and two of them were later REMOVED from
-    /// Stockfish. A single master toggle would measure the family, not the members.
+    /// the reference engine. A single master toggle would measure the family, not the
+    /// members.
     pub use_correction_sources: [bool; CORRECTION_SOURCES + 1],
 }
 
@@ -179,6 +208,8 @@ impl Default for SearchOptions {
             use_lmp: true,
             use_futility: true,
             use_see_pruning: true,
+            use_qsearch_tt: true,
+            use_qsearch_delta_pruning: true,
             use_singular_ext: true,
             use_check_ext: true,
             use_multicut: true,
@@ -190,8 +221,8 @@ impl Default for SearchOptions {
             // Measured in isolation at bench depth 7 it COSTS nodes at every weight
             // tried (1, 2, 4, 8, 16 -> -2.57%, -1.34%, -0.68%, -2.60%, -1.89%), and
             // standalone with butterfly disabled it is 9.18% WORSE than no history at
-            // all. In Stockfish pawn history is never a standalone ordering signal: it
-            // is one small term in a sum dominated by continuation history, which this
+            // all. In the reference engine pawn history is never a standalone ordering
+            // signal: it is one small term in a sum dominated by continuation history, which this
             // engine does not have yet. Shipping it on would ship a measured
             // regression. Revisit when continuation history lands.
             use_pawn_history: false,
@@ -209,14 +240,14 @@ impl Default for SearchOptions {
             // contained the best move.
             //
             // The likely cause is that this engine has only butterfly history, so the
-            // pruning decision rests on a single noisy statistic. Stockfish thresholds
-            // the SUM of butterfly and several continuation-history plies, which is a
+            // pruning decision rests on a single noisy statistic. The reference
+            // thresholds the SUM of butterfly and several continuation-history plies, which is a
             // far more reliable signal. Revisit when continuation history lands.
             use_history_pruning: false,
             use_correction_history: true,
             // Pawn, minor, non-pawn(x2), continuation(2,4) ship ON. MAJOR-piece and
             // MATERIAL corrhist ship OFF, and this is the research's explicit
-            // instruction, not a measurement of ours: Stockfish ADDED both (PR #5556
+            // instruction, not a measurement of ours: the reference ADDED both (PR #5556
             // material, Sirius PR #178 major) and later REMOVED both ("Remove material
             // corrHist", "Remove major corrhist") because the non-pawn variants
             // subsume them. `research/search-and-eval-sota.md:1482` says verbatim
@@ -849,7 +880,7 @@ fn root_search(
             // Static evaluation is not probed by the M2 search. Avoid recomputing the full HCE
             // solely to populate a field that becomes useful with M3 pruning.
             static_eval: UNEVALUATED_STATIC_EVAL,
-            depth: depth.min(u32::from(u8::MAX)) as u8,
+            depth: tt_stored_depth(depth as i32),
             bound,
             age: context.generation,
             pv: true,
@@ -893,7 +924,7 @@ fn pvs(
         return Some(context.static_eval(position));
     }
     if depth <= 0 {
-        return quiescence(position, alpha, beta, ply, false, context, pv);
+        return quiescence(position, alpha, beta, ply, pv_node, false, context, pv);
     }
 
     let key = tt_key(position, depth);
@@ -903,7 +934,7 @@ fn pvs(
     let tt_entry = tt_entry_for_node(context.transposition_table, key, verification_node);
     if let Some(entry) = tt_entry {
         tt_move = entry.best_move;
-        if !pv_node && !verification_node && i32::from(entry.depth) >= depth {
+        if !pv_node && !verification_node && tt_entry_depth(entry.depth) >= depth {
             let score = value_from_tt(i32::from(entry.score), ply, position.halfmove_clock());
             let bound_allows_cutoff = match entry.bound {
                 Bound::Exact => true,
@@ -958,7 +989,7 @@ fn pvs(
             && eval_pruning_rule50_safe(position, depth)
             && static_eval < alpha - razoring_margin(depth)
         {
-            return quiescence(position, alpha, beta, ply, false, context, pv);
+            return quiescence(position, alpha, beta, ply, pv_node, false, context, pv);
         }
 
         if context.options.use_rfp
@@ -1086,6 +1117,7 @@ fn pvs(
                     -probcut_beta,
                     -probcut_beta + 1,
                     ply + 1,
+                    false,
                     true,
                     context,
                     &mut probcut_pv,
@@ -1120,7 +1152,7 @@ fn pvs(
                                 best_move: Some(mv),
                                 score: value_to_tt(value, ply) as i16,
                                 static_eval: raw_static_eval as i16,
-                                depth: (probcut_depth + 1).clamp(0, i32::from(u8::MAX)) as u8,
+                                depth: tt_stored_depth(probcut_depth + 1),
                                 bound: Bound::Lower,
                                 age: context.generation,
                                 pv: false,
@@ -1272,7 +1304,7 @@ fn pvs(
             )
             && tt_entry.is_some_and(|entry| {
                 matches!(entry.bound, Bound::Lower | Bound::Exact)
-                    && i32::from(entry.depth) >= depth - 3
+                    && tt_entry_depth(entry.depth) >= depth - 3
                     && !is_mate_score(value_from_tt(
                         i32::from(entry.score),
                         ply,
@@ -1504,7 +1536,7 @@ fn pvs(
                 best_move,
                 score: value_to_tt(best_score, ply) as i16,
                 static_eval: raw_static_eval as i16,
-                depth: depth.min(i32::from(u8::MAX)) as u8,
+                depth: tt_stored_depth(depth),
                 bound,
                 age: context.generation,
                 pv: pv_node,
@@ -1514,11 +1546,13 @@ fn pvs(
     Some(best_score)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn quiescence(
     position: &mut Position,
     mut alpha: i32,
     beta: i32,
     ply: usize,
+    pv_node: bool,
     count_node: bool,
     context: &mut SearchContext<'_>,
     pv: &mut Vec<Move>,
@@ -1545,42 +1579,122 @@ fn quiescence(
     }
 
     let in_check = is_in_check(position, position.side_to_move());
+    // Qsearch nodes carry their own TT depth domain. An in-check node searches EVERY
+    // move, so its score is a full-width bound and must never be read by a node that
+    // only searched captures; the two domains are stored under different depths and a
+    // cutoff requires the stored depth to be at least as informative as this node's.
+    let qsearch_depth = if in_check {
+        QSEARCH_CHECKS_TT_DEPTH
+    } else {
+        QSEARCH_CAPTURES_TT_DEPTH
+    };
+    let key = tt_key(position, 0);
+    let original_alpha = alpha;
+    // The toggle gates only what qsearch READS. Stores stay unconditional so that
+    // turning it off changes which information the search consumes, never which
+    // information it produces (AGENTS.md 4.4).
+    let tt_entry = context
+        .options
+        .use_qsearch_tt
+        .then(|| context.transposition_table.probe(key))
+        .flatten();
+    let mut tt_move = None;
+    if let Some(entry) = tt_entry {
+        tt_move = entry.best_move;
+        if tt_entry_depth(entry.depth) >= qsearch_depth {
+            let score = value_from_tt(i32::from(entry.score), ply, position.halfmove_clock());
+            let bound_allows_cutoff = match entry.bound {
+                Bound::Exact => true,
+                Bound::Lower => score >= beta,
+                Bound::Upper => score <= alpha,
+            };
+            // PV nodes are exempt, exactly as in the interior search. A PV qsearch node
+            // has to RETURN a principal variation, and a bound cutoff returns a score
+            // with no move attached; taking it truncates the PV, which then has to be
+            // rebuilt by re-searching. Allowing the cutoff here measured 2.2x the nodes
+            // to depth 12 in the endgame position.
+            if !pv_node && bound_allows_cutoff && position.halfmove_clock() < 96 {
+                return Some(score);
+            }
+        }
+    }
+
     // The standing pat is corrected too. Qsearch is the majority of nodes, so leaving
     // it on the raw eval would confine corrhist to the small minority of nodes where it
     // matters least, and would also make the standing pat disagree with the parent's
     // corrected eval about the same position class.
+    //
+    // The RAW value is what the TT keeps, for the same reason as in `pvs`: a stored
+    // correction would be applied a second time on top of itself on the next probe.
+    let raw_static_eval = if in_check {
+        i32::from(UNEVALUATED_STATIC_EVAL)
+    } else {
+        tt_entry
+            .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
+            .map_or_else(
+                || context.static_eval(position),
+                |entry| i32::from(entry.static_eval),
+            )
+    };
     let mut best_score = if in_check {
         -INFINITY
     } else {
-        to_corrected_static_eval(
-            context.static_eval(position),
-            correction_value(position, context, ply),
-        )
+        to_corrected_static_eval(raw_static_eval, correction_value(position, context, ply))
     };
     if !in_check {
         if best_score >= beta {
-            return Some(if has_legal_move(position) {
+            let score = if has_legal_move(position) {
                 best_score
             } else {
                 0
-            });
+            };
+            context.transposition_table.store(
+                key,
+                EntryData {
+                    best_move: None,
+                    score: value_to_tt(score, ply) as i16,
+                    static_eval: raw_static_eval as i16,
+                    depth: tt_stored_depth(qsearch_depth),
+                    bound: Bound::Lower,
+                    age: context.generation,
+                    pv: pv_node,
+                },
+            );
+            return Some(score);
         }
         alpha = alpha.max(best_score);
     }
 
     let ordering = context.ordering(position, ply);
     let moves: Vec<_> = if in_check {
-        MovePicker::new(position, None, [None, None], ordering).collect()
+        MovePicker::new(position, tt_move, [None, None], ordering).collect()
     } else {
         quiescence_moves(
             position,
+            tt_move,
             qsearch_see_threshold(context.options.use_see_pruning),
             ordering,
         )
     };
     let mut searched = 0usize;
+    let mut best_move = None;
     let mut child_pv = Vec::new();
     for mv in moves {
+        // Delta pruning: a capture that cannot lift the standing pat to alpha even after
+        // winning its victim outright is not worth a node. Checking moves and promotions
+        // are exempt -- their value is not bounded by the material they capture -- and
+        // the whole test is skipped when in check, where there is no standing pat and
+        // every evasion must be searched.
+        if context.options.use_qsearch_delta_pruning
+            && !in_check
+            && Some(mv) != tt_move
+            && mv.flag().promotion().is_none()
+            && !is_mate_score(alpha)
+            && raw_static_eval + QSEARCH_DELTA_MARGIN + captured_material(position, mv) <= alpha
+            && !move_gives_check(position, mv)
+        {
+            continue;
+        }
         let mover = position.side_to_move();
         let continuation = continuation_key(position, mv);
         let undo = position.make_move(mv);
@@ -1596,6 +1710,7 @@ fn quiescence(
             -beta,
             -alpha,
             ply + 1,
+            pv_node && searched == 0,
             true,
             context,
             &mut child_pv,
@@ -1608,6 +1723,7 @@ fn quiescence(
 
         if score > best_score {
             best_score = score;
+            best_move = Some(mv);
             pv.clear();
             pv.push(mv);
             pv.extend_from_slice(&child_pv);
@@ -1618,16 +1734,38 @@ fn quiescence(
         }
     }
 
-    if searched != 0 {
-        return Some(best_score);
-    }
-    if in_check {
-        Some(-MATE_SCORE + ply as i32)
+    let best_score = if searched != 0 {
+        best_score
+    } else if in_check {
+        // A checkmate is exact at any depth, so it is stored under the checks domain and
+        // is legitimately readable by capture-domain probes as well.
+        -MATE_SCORE + ply as i32
     } else if has_legal_move(position) {
-        Some(best_score)
+        best_score
     } else {
-        Some(0)
-    }
+        0
+    };
+
+    let bound = if best_score >= beta {
+        Bound::Lower
+    } else if best_score > original_alpha {
+        Bound::Exact
+    } else {
+        Bound::Upper
+    };
+    context.transposition_table.store(
+        key,
+        EntryData {
+            best_move,
+            score: value_to_tt(best_score, ply) as i16,
+            static_eval: raw_static_eval as i16,
+            depth: tt_stored_depth(qsearch_depth),
+            bound,
+            age: context.generation,
+            pv: pv_node,
+        },
+    );
+    Some(best_score)
 }
 
 fn value_to_tt(score: i32, ply: usize) -> i32 {
@@ -1643,6 +1781,18 @@ fn value_to_tt(score: i32, ply: usize) -> i32 {
 #[inline]
 fn draw_value(nodes: u64) -> i32 {
     -1 + (nodes & 0x2) as i32
+}
+
+/// Encodes a search depth into the biased `u8` the TT entry carries.
+#[inline]
+fn tt_stored_depth(depth: i32) -> u8 {
+    (depth + TT_DEPTH_OFFSET).clamp(0, i32::from(u8::MAX)) as u8
+}
+
+/// Decodes a stored TT depth back into the search's own depth scale.
+#[inline]
+fn tt_entry_depth(stored: u8) -> i32 {
+    i32::from(stored) - TT_DEPTH_OFFSET
 }
 
 #[inline]
@@ -1797,7 +1947,14 @@ fn capture_see_threshold(depth: i32) -> i32 {
 
 #[inline]
 const fn qsearch_see_threshold(enabled: bool) -> i32 {
-    if enabled { QSEARCH_SEE_THRESHOLD } else { 0 }
+    if enabled {
+        QSEARCH_SEE_THRESHOLD
+    } else {
+        // With the toggle off qsearch must search EVERY capture, so the gate has to
+        // admit arbitrarily losing exchanges. Returning 0 here would leave the shipped
+        // threshold in place and make the toggle inert.
+        i32::MIN
+    }
 }
 
 #[inline]
@@ -1985,8 +2142,8 @@ fn quiet_history_bonus(depth: i32) -> i32 {
     (32 * depth * depth).clamp(32, 2_048)
 }
 
-/// The malus is deliberately steeper in depth than the bonus (Stockfish uses 968 vs
-/// 133 per ply): punishing a move that failed to cut carries more information than
+/// The malus is deliberately steeper in depth than the bonus (the reference uses 968
+/// vs 133 per ply): punishing a move that failed to cut carries more information than
 /// rewarding one that did.
 #[inline]
 fn quiet_history_malus(depth: i32) -> i32 {
@@ -2096,7 +2253,7 @@ fn correction_key(position: &Position, source: usize) -> u64 {
 /// Callers divide by [`CORRECTION_SCALE`] to get eval units; the raw magnitude is also
 /// the engine's complexity proxy, so it is returned unscaled.
 ///
-/// Absent continuation planes contribute nothing. Stockfish substitutes a nonzero
+/// Absent continuation planes contribute nothing. The reference substitutes a nonzero
 /// `64049` when there is no previous move, but that constant is denominated in its
 /// NNUE eval scale; against this engine's hand-crafted eval it would be an unmotivated
 /// bias at exactly the nodes with the least information (mission AGENTS.md 4.55).
@@ -2146,7 +2303,7 @@ fn to_corrected_static_eval(static_eval: i32, correction: i32) -> i32 {
 
 /// Records the residual between the search result and the static evaluation.
 ///
-/// The guard is Stockfish's verbatim, and each clause earns its place:
+/// The guard is the reference's verbatim, and each clause earns its place:
 ///
 /// * `!in_check` — there is no meaningful static eval in check, so there is no residual.
 /// * `!(best_move is a capture)` — a capture's value comes from material the static eval
@@ -3302,8 +3459,12 @@ mod tests {
         assert_eq!(quiet_see_threshold(0), 0);
         assert_eq!(quiet_see_threshold(3), -207);
         assert_eq!(capture_see_threshold(3), -531);
-        assert_eq!(qsearch_see_threshold(true), -74);
-        assert_eq!(qsearch_see_threshold(false), 0);
+        // Qsearch admits equal trades and rejects losing ones. The old -74 admitted
+        // captures that lose most of a pawn; demanding a strictly winning +1 instead
+        // measured 1.5x MORE nodes, because an equal trade is how a recapture resolves.
+        assert_eq!(qsearch_see_threshold(true), 0);
+        // Off must admit every capture, not merely re-impose the shipped threshold.
+        assert_eq!(qsearch_see_threshold(false), i32::MIN);
     }
 
     #[test]
@@ -3338,6 +3499,45 @@ mod tests {
             internal_iterative_reduction(6, false, true, false, None, None),
             1
         );
+    }
+
+    #[test]
+    fn tt_depth_encoding_round_trips_and_orders_the_two_qsearch_domains_below_interior_depths() {
+        // The domain ordering itself is asserted at compile time next to the constants.
+        // What needs a test is that the u8 encoding PRESERVES that ordering.
+        for depth in [QSEARCH_CAPTURES_TT_DEPTH, QSEARCH_CHECKS_TT_DEPTH, 0, 1, 64] {
+            assert_eq!(tt_entry_depth(tt_stored_depth(depth)), depth);
+        }
+        assert!(
+            tt_stored_depth(QSEARCH_CAPTURES_TT_DEPTH) < tt_stored_depth(QSEARCH_CHECKS_TT_DEPTH)
+        );
+        assert!(tt_stored_depth(QSEARCH_CHECKS_TT_DEPTH) < tt_stored_depth(0));
+        // The bias must not push a legal search depth past the u8 the entry carries.
+        assert_eq!(tt_entry_depth(tt_stored_depth(253)), 253);
+    }
+
+    #[test]
+    fn qsearch_delta_pruning_margin_admits_only_captures_that_can_reach_alpha() {
+        let position = Position::startpos();
+        let mv = generate_legal_moves(&position)[0];
+        // A quiet move wins no material, so the margin alone decides.
+        assert_eq!(captured_material(&position, mv), 0);
+
+        let capture = Position::from_fen(
+            "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+            false,
+        )
+        .expect("test FEN should parse");
+        let exd5 = generate_legal_moves(&capture)
+            .iter()
+            .copied()
+            .find(|mv| mv.flag().is_capture())
+            .expect("the position offers a pawn capture");
+        assert_eq!(
+            captured_material(&capture, exd5),
+            mf_core::material_value(PieceKind::Pawn)
+        );
+        assert_eq!(QSEARCH_DELTA_MARGIN, 196);
     }
 
     #[test]

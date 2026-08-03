@@ -77,6 +77,8 @@ fn selectivity_options_default_to_enabled() {
             use_lmp: true,
             use_futility: true,
             use_see_pruning: true,
+            use_qsearch_tt: true,
+            use_qsearch_delta_pruning: true,
             use_singular_ext: true,
             use_check_ext: true,
             use_multicut: true,
@@ -94,7 +96,7 @@ fn selectivity_options_default_to_enabled() {
             use_history_pruning: false,
             use_correction_history: true,
             // Major-piece and material correction history ship DISABLED. Both were
-            // added to Stockfish and later removed, and both saturate here: they key
+            // added to the reference engine and later removed, and both saturate here: they key
             // on a piece set that barely varies within one search, so residuals from
             // unrelated positions pile into a handful of buckets. Enabling them is
             // 3.3x MORE nodes at depth 14 while looking cheaper on bench. See the
@@ -176,6 +178,12 @@ fn mate_in_n_found() {
                 use_lmp: false,
                 use_futility: false,
                 use_see_pruning: false,
+                // The qsearch TT is a transposition cutoff, not a pruning heuristic, so
+                // it stays on here exactly as the interior TT does.
+                use_qsearch_tt: true,
+                // Delta pruning DROPS captures, so it is off for the same reason every
+                // other pruning toggle is: a mate search must be exact.
+                use_qsearch_delta_pruning: false,
                 use_singular_ext: false,
                 use_check_ext: true,
                 use_multicut: false,

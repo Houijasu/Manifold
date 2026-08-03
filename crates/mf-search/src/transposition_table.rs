@@ -240,12 +240,48 @@ impl TranspositionTable {
         let packed = PackedEntry::pack(key, data);
         let cluster = self.cluster(key);
 
-        if let Some(entry) = cluster
-            .entries
-            .iter()
-            .find(|entry| entry.load().is_some_and(|stored| stored.key == key))
-        {
-            entry.store(packed);
+        if let Some((entry, stored)) = cluster.entries.iter().find_map(|entry| {
+            entry
+                .load()
+                .filter(|stored| stored.key == key)
+                .map(|stored| (entry, stored))
+        }) {
+            // A same-key hit is refreshed rather than blindly overwritten. Qsearch
+            // stores its nodes under negative depth domains, so without this guard a
+            // horizon node would evict the deep interior entry for the very same
+            // position every time the search re-reached it through a capture -- the
+            // deep result would be recomputed from scratch on each visit, which is a
+            // node-count catastrophe rather than a correctness bug.
+            //
+            // Depth is the arbiter, with a small slack so a re-search one or two plies
+            // shallower can still refresh the age and the move. An exact bound is NOT
+            // an unconditional override: a qsearch node returns an exact score for the
+            // position *below the horizon*, which says nothing about the deep result
+            // already stored for it, and letting it replace on bound alone measured 6x
+            // the nodes to depth 12 in the endgame position. An exact bound only wins
+            // ties, where it is genuinely the stronger of two equally deep results.
+            let stored_is_current = stored.age() == data.age;
+            let new_depth = i16::from(data.depth);
+            let stored_depth = i16::from(stored.depth());
+            let replace = new_depth + 4 > stored_depth
+                || (data.bound == Bound::Exact && new_depth >= stored_depth)
+                || !stored_is_current;
+            if replace {
+                // A store that names no move (a qsearch stand-pat fail-high, say) must
+                // not erase a move an earlier search proved good for this position.
+                let preserved = if data.best_move.is_none() {
+                    stored.best_move()
+                } else {
+                    data.best_move
+                };
+                entry.store(PackedEntry::pack(
+                    key,
+                    EntryData {
+                        best_move: preserved,
+                        ..data
+                    },
+                ));
+            }
             return;
         }
 
@@ -343,6 +379,16 @@ impl PackedEntry {
     #[inline]
     const fn depth(self) -> u8 {
         (self.data >> Self::DEPTH_SHIFT) as u8
+    }
+
+    #[inline]
+    fn best_move(self) -> Option<Move> {
+        let move_raw = self.data as u16;
+        if move_raw == 0 {
+            None
+        } else {
+            Move::from_raw(move_raw)
+        }
     }
 
     #[inline]
