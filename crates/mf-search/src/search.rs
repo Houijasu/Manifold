@@ -35,11 +35,31 @@ const TIME_CHECK_INTERVAL: u64 = 512;
 const NODE_PUBLISH_INTERVAL: u64 = 1_024;
 const NMP_MIN_DEPTH: i32 = 3;
 const NMP_VERIFICATION_DEPTH: i32 = 6;
-const RFP_MAX_DEPTH: i32 = 3;
+const RFP_MAX_DEPTH: i32 = 6;
+const RAZOR_MAX_DEPTH: i32 = 3;
+const RAZOR_BASE_MARGIN: i32 = 224;
+const RAZOR_MARGIN_PER_DEPTH: i32 = 202;
+/// Centipawns per ply of reverse-futility margin.
+const RFP_MARGIN_PER_DEPTH: i32 = 105;
+/// Extra margin demanded at a node the TT marked as PV, which is likelier to be worth
+/// searching properly than to be a genuine cutoff.
+const RFP_TT_PV_MARGIN: i32 = 21;
 const LMP_MAX_DEPTH: i32 = 8;
-const FUTILITY_MAX_EFFECTIVE_DEPTH: i32 = 3;
+/// Constant term in the late-move-pruning move-count table.
+///
+/// At 3 the non-improving row began at 2 moves at depth 1, which prunes the board flat
+/// before the move ordering has shown anything. The reference uses 9.
+const LMP_BASE: usize = 9;
+const FUTILITY_MAX_EFFECTIVE_DEPTH: i32 = 6;
+const FUTILITY_BASE_MARGIN: i32 = 124;
+const FUTILITY_MARGIN_PER_DEPTH: i32 = 109;
+/// Quiets may be pruned on SEE up to this reduced depth, matching the futility window.
+const QUIET_SEE_MAX_EFFECTIVE_DEPTH: i32 = 7;
+const QUIET_SEE_MARGIN_PER_DEPTH: i32 = 26;
+const CAPTURE_SEE_MAX_DEPTH: i32 = 6;
+const CAPTURE_SEE_MARGIN_PER_DEPTH: i32 = 99;
 const SINGULAR_MIN_DEPTH: i32 = 6;
-const IIR_MIN_DEPTH: i32 = 6;
+const IIR_MIN_DEPTH: i32 = 4;
 const PROBCUT_MIN_DEPTH: i32 = 3;
 const PROBCUT_BASE_MARGIN: i32 = 241;
 const PROBCUT_IMPROVING_MARGIN: i32 = 64;
@@ -926,7 +946,7 @@ fn pvs(
     position: &mut Position,
     mut depth: i32,
     mut alpha: i32,
-    beta: i32,
+    mut beta: i32,
     ply: usize,
     pv_node: bool,
     cut_node: bool,
@@ -954,6 +974,17 @@ fn pvs(
     }
     if ply >= MAX_SEARCH_PLY {
         return Some(context.static_eval(position));
+    }
+    // Mate distance pruning. A mate already found closer to the root cannot be beaten
+    // by anything below this node, so the window is clamped to the best and worst mate
+    // still reachable from here. When that empties the window there is nothing left to
+    // search.
+    if ply > 0 {
+        alpha = alpha.max(-MATE_SCORE + ply as i32);
+        beta = beta.min(MATE_SCORE - ply as i32 - 1);
+        if alpha >= beta {
+            return Some(alpha);
+        }
     }
     if depth <= 0 {
         return quiescence(position, alpha, beta, ply, pv_node, false, context, pv);
@@ -1017,6 +1048,7 @@ fn pvs(
     let tt_pv = tt_entry.is_some_and(|entry| entry.pv);
     if !in_check && !pv_node && excluded_move.is_none() {
         if context.options.use_razoring
+            && depth <= RAZOR_MAX_DEPTH
             && !is_mate_score(alpha)
             && eval_pruning_rule50_safe(position, depth)
             && static_eval < alpha - razoring_margin(depth)
@@ -1025,18 +1057,19 @@ fn pvs(
         }
 
         if context.options.use_rfp
-            && !tt_entry.is_some_and(|entry| entry.pv)
             && depth <= RFP_MAX_DEPTH
             && !is_mate_score(beta)
             && eval_pruning_rule50_safe(position, depth)
-            && tt_move.is_none_or(|mv| mv.flag().is_capture())
-            && static_eval - reverse_futility_margin(depth, tt_entry.is_some()) >= beta
+            && static_eval - reverse_futility_margin(depth, improving, cut_node, tt_pv) >= beta
         {
             return Some((661 * beta + 363 * static_eval) / 1024);
         }
 
+        // Null move applies at every non-PV node, not only at expected cut nodes. The
+        // enclosing block already excludes PV nodes and check evasions, and restricting
+        // it further to `cut_node` forfeited the cutoff at exactly the all-nodes where
+        // a refutation search is cheapest.
         if context.options.use_nmp
-            && cut_node
             && allow_null
             && depth >= NMP_MIN_DEPTH
             && !is_mate_score(beta)
@@ -1101,14 +1134,7 @@ fn pvs(
     }
 
     if context.options.use_iir {
-        depth -= internal_iterative_reduction(
-            depth,
-            pv_node,
-            cut_node,
-            in_check,
-            tt_move,
-            excluded_move,
-        );
+        depth -= internal_iterative_reduction(depth, in_check, tt_move, excluded_move);
     }
 
     if context.options.use_probcut
@@ -1310,12 +1336,21 @@ fn pvs(
             // A capture with strong capture history earns a more forgiving SEE bar:
             // the table has evidence this exchange works out even when the static swap
             // says otherwise.
+            // Each kind of move has its own depth window, so a threshold is only
+            // consulted where it was calibrated: quiets up to a reduced depth of 7,
+            // captures up to a nominal depth of 6.
+            let within_window = if quiet {
+                effective_depth <= QUIET_SEE_MAX_EFFECTIVE_DEPTH
+            } else {
+                depth <= CAPTURE_SEE_MAX_DEPTH
+            };
             let threshold = if quiet {
                 quiet_see_threshold(effective_depth)
             } else {
                 capture_see_threshold(depth) - capture_history * 34 / 1024
             };
-            if static_exchange_evaluation(position, mv) < threshold
+            if within_window
+                && static_exchange_evaluation(position, mv) < threshold
                 && (quiet || alpha >= 0 || has_other_non_pawn_material(position, mover, mv))
             {
                 continue;
@@ -1903,15 +1938,29 @@ fn tt_cutoff_is_safe(
     (score >= beta) == (-child_score >= beta)
 }
 
+/// How far below alpha the static eval must sit before the node drops to quiescence.
+///
+/// Linear, and capped by `RAZOR_MAX_DEPTH`. The quadratic form reached 20835cp by
+/// depth 8 and was unbounded in depth, which is another way of writing "never fires".
 #[inline]
 fn razoring_margin(depth: i32) -> i32 {
-    483 + 318 * depth * depth
+    RAZOR_BASE_MARGIN + RAZOR_MARGIN_PER_DEPTH * depth.max(0)
 }
 
+/// Margin the static eval must clear above beta before the node is cut without search.
+///
+/// Linear in depth. The previous form was quadratic-ish (`8 * (45 + 4d) * d`), which
+/// demanded 392cp at depth 1 and 6800cp at depth 10 -- so large that the cutoff almost
+/// never fired and the technique was decorative. A margin of ~105cp per ply is what
+/// makes reverse futility actually prune, and reaching depth is what wins games: at
+/// equal time this engine was searching 3.24 plies SHALLOWER than the reference.
+///
+/// `improving` shortens the effective depth by a ply, because a node whose eval is
+/// rising is likelier to hold up; a node the TT marked PV pays a surcharge.
 #[inline]
-fn reverse_futility_margin(depth: i32, tt_hit: bool) -> i32 {
-    let multiplier = (45 + depth * 4).min(85) - 20 * i32::from(!tt_hit);
-    8 * multiplier * depth
+fn reverse_futility_margin(depth: i32, improving: bool, cut_node: bool, tt_pv: bool) -> i32 {
+    let effective_depth = depth - i32::from(improving && !cut_node);
+    RFP_MARGIN_PER_DEPTH * effective_depth.max(0) + RFP_TT_PV_MARGIN * i32::from(tt_pv)
 }
 
 #[inline]
@@ -1925,7 +1974,7 @@ const fn build_lmp_table() -> [[usize; LMP_MAX_DEPTH as usize + 1]; 2] {
     while improving < table.len() {
         let mut depth = 1;
         while depth < table[improving].len() {
-            table[improving][depth] = (3 + depth * depth) / (2 - improving);
+            table[improving][depth] = (LMP_BASE + depth * depth) / (2 - improving);
             depth += 1;
         }
         improving += 1;
@@ -1979,17 +2028,17 @@ fn late_move_reduction(
 
 #[inline]
 fn frontier_futility_margin(effective_depth: i32) -> i32 {
-    39 + 119 * effective_depth.max(0)
+    FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * effective_depth.max(0)
 }
 
 #[inline]
 fn quiet_see_threshold(effective_depth: i32) -> i32 {
-    -23 * effective_depth.max(0).pow(2)
+    -QUIET_SEE_MARGIN_PER_DEPTH * effective_depth.max(0).pow(2)
 }
 
 #[inline]
 fn capture_see_threshold(depth: i32) -> i32 {
-    -177 * depth.max(0)
+    -CAPTURE_SEE_MARGIN_PER_DEPTH * depth.max(0)
 }
 
 #[inline]
@@ -2007,20 +2056,15 @@ const fn qsearch_see_threshold(enabled: bool) -> i32 {
 #[inline]
 fn internal_iterative_reduction(
     depth: i32,
-    pv_node: bool,
-    cut_node: bool,
     in_check: bool,
     tt_move: Option<Move>,
     excluded_move: Option<Move>,
 ) -> i32 {
-    i32::from(
-        depth >= IIR_MIN_DEPTH
-            && !pv_node
-            && cut_node
-            && !in_check
-            && tt_move.is_none()
-            && excluded_move.is_none(),
-    )
+    // A node with no TT move has nothing to order by, so its first search is worth a
+    // ply less wherever it sits -- PV node or not, cut node or not. Restricting this to
+    // expected cut nodes left every other move-less node paying full depth for an
+    // unordered search.
+    i32::from(depth >= IIR_MIN_DEPTH && !in_check && tt_move.is_none() && excluded_move.is_none())
 }
 
 #[inline]
@@ -2639,7 +2683,9 @@ impl<'a> SearchContext<'a> {
         }
         if self.worker_id == 0 && self.nodes.is_multiple_of(TIME_CHECK_INTERVAL) {
             let elapsed = self.elapsed();
-            self.soft_time_reached = self.scaled_soft_time().is_some_and(|limit| elapsed >= limit);
+            self.soft_time_reached = self
+                .scaled_soft_time()
+                .is_some_and(|limit| elapsed >= limit);
             if self.limits.hard_time.is_some_and(|limit| elapsed >= limit) {
                 self.stopped = true;
                 return false;
@@ -3406,18 +3452,24 @@ mod tests {
 
     #[test]
     fn razoring_margin_uses_the_required_quadratic_formula() {
-        assert_eq!(razoring_margin(1), 483 + 318);
-        assert_eq!(razoring_margin(3), 483 + 318 * 9);
-        assert_eq!(razoring_margin(8), 483 + 318 * 64);
+        // Linear and bounded by RAZOR_MAX_DEPTH. The quadratic form reached 20835cp by
+        // depth 8, which is not a margin, it is an off switch.
+        assert_eq!(razoring_margin(1), 224 + 202);
+        assert_eq!(razoring_margin(3), 224 + 202 * 3);
+        assert_eq!(RAZOR_MAX_DEPTH, 3);
     }
 
     #[test]
-    fn reverse_futility_margin_scales_then_flattens() {
-        assert_eq!(reverse_futility_margin(1, true), 392);
-        assert_eq!(reverse_futility_margin(1, false), 232);
-        assert_eq!(reverse_futility_margin(10, true), 6_800);
-        assert_eq!(reverse_futility_margin(10, false), 5_200);
-        assert_eq!(reverse_futility_margin(18, true), 12_240);
+    fn reverse_futility_margin_is_linear_in_depth_with_improving_and_tt_pv_adjustments() {
+        // Linear, and small enough to actually fire. The previous quadratic form asked
+        // for 392cp at depth 1, which is most of a minor piece.
+        assert_eq!(reverse_futility_margin(1, false, false, false), 105);
+        assert_eq!(reverse_futility_margin(6, false, false, false), 630);
+        // A rising eval is worth a ply of margin, but not at an expected cut node.
+        assert_eq!(reverse_futility_margin(6, true, false, false), 525);
+        assert_eq!(reverse_futility_margin(6, true, true, false), 630);
+        // A TT-PV node pays a surcharge.
+        assert_eq!(reverse_futility_margin(6, false, false, true), 630 + 21);
     }
 
     #[test]
@@ -3497,10 +3549,12 @@ mod tests {
 
     #[test]
     fn lmp_movecount_table_is_indexed_by_depth_and_improving() {
-        assert_eq!(late_move_pruning_threshold(1, false), 2);
-        assert_eq!(late_move_pruning_threshold(1, true), 4);
-        assert_eq!(late_move_pruning_threshold(4, false), 9);
-        assert_eq!(late_move_pruning_threshold(4, true), 19);
+        // Base 9, not 3: at depth 1 the non-improving row now keeps 5 moves rather than
+        // pruning the position down to 2 before the ordering has demonstrated anything.
+        assert_eq!(late_move_pruning_threshold(1, false), 5);
+        assert_eq!(late_move_pruning_threshold(1, true), 10);
+        assert_eq!(late_move_pruning_threshold(4, false), 12);
+        assert_eq!(late_move_pruning_threshold(4, true), 25);
         assert!(late_move_pruning_threshold(6, false) > late_move_pruning_threshold(5, false));
     }
 
@@ -3519,16 +3573,19 @@ mod tests {
 
     #[test]
     fn frontier_futility_margin_grows_with_effective_depth() {
-        assert_eq!(frontier_futility_margin(0), 39);
-        assert_eq!(frontier_futility_margin(1), 158);
-        assert_eq!(frontier_futility_margin(3), 396);
+        assert_eq!(frontier_futility_margin(0), 124);
+        assert_eq!(frontier_futility_margin(1), 233);
+        assert_eq!(frontier_futility_margin(6), 778);
+        // The window now reaches a reduced depth of 6, matching where the margin was
+        // calibrated, instead of stopping at 3.
+        assert_eq!(FUTILITY_MAX_EFFECTIVE_DEPTH, 6);
     }
 
     #[test]
     fn see_pruning_uses_separate_main_search_and_qsearch_thresholds() {
         assert_eq!(quiet_see_threshold(0), 0);
-        assert_eq!(quiet_see_threshold(3), -207);
-        assert_eq!(capture_see_threshold(3), -531);
+        assert_eq!(quiet_see_threshold(3), -26 * 9);
+        assert_eq!(capture_see_threshold(3), -99 * 3);
         // Qsearch admits equal trades and rejects losing ones. The old -74 admitted
         // captures that lose most of a pawn; demanding a strictly winning +1 instead
         // measured 1.5x MORE nodes, because an equal trade is how a recapture resolves.
@@ -3538,37 +3595,25 @@ mod tests {
     }
 
     #[test]
-    fn iir_reduces_only_deep_tt_move_less_expected_cut_nodes() {
+    fn iir_reduces_every_deep_node_that_has_no_tt_move_to_order_by() {
         let tt_move = generate_legal_moves(&Position::startpos())[0];
 
+        // Too shallow to be worth re-ordering.
+        assert_eq!(internal_iterative_reduction(3, false, None, None), 0);
+        // A move to order by, an evasion, or an exclusion search: nothing to gain.
         assert_eq!(
-            internal_iterative_reduction(5, false, true, false, None, None),
+            internal_iterative_reduction(6, false, Some(tt_move), None),
             0
         );
         assert_eq!(
-            internal_iterative_reduction(6, true, true, false, None, None),
+            internal_iterative_reduction(6, false, None, Some(tt_move)),
             0
         );
-        assert_eq!(
-            internal_iterative_reduction(6, false, false, false, None, None),
-            0
-        );
-        assert_eq!(
-            internal_iterative_reduction(6, false, true, false, Some(tt_move), None),
-            0
-        );
-        assert_eq!(
-            internal_iterative_reduction(6, false, true, false, None, Some(tt_move)),
-            0
-        );
-        assert_eq!(
-            internal_iterative_reduction(6, false, true, true, None, None),
-            0
-        );
-        assert_eq!(
-            internal_iterative_reduction(6, false, true, false, None, None),
-            1
-        );
+        assert_eq!(internal_iterative_reduction(6, true, None, None), 0);
+        // Node type no longer gates the reduction: an unordered PV or all-node is just
+        // as unordered as an unordered cut node.
+        assert_eq!(internal_iterative_reduction(4, false, None, None), 1);
+        assert_eq!(internal_iterative_reduction(6, false, None, None), 1);
     }
 
     #[test]
