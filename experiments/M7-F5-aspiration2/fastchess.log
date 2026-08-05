@@ -1,0 +1,6 @@
+[INFO  ] [01:16:03.996213] <   > fastchess --- fastchess alpha 1.8.1 compiled for windows-latest 20260405-1525c4b (CI) 
+[INFO  ] [01:16:03.996300] <   > fastchess --- Setting seed to: 20260808
+[INFO  ] [01:16:04.043253] <   > fastchess --- Indexing opening suite...
+
+[INFO  ] [01:16:04.059462] <   > fastchess --- Starting tournament...
+[WARN  ] [03:04:27.004783] <  8> fastchess --- Engine phase3 loses on time

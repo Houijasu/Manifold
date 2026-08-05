@@ -1,0 +1,18 @@
+Commit:      cf331d1200d7fc1a5545b5a5bd2268735e560de0
+Binary A:    aspiration2 -> C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+SHA-256 A:   F5A7DCC600F90D95AB57505DA02A361C9F4570E56102E8EAE5E0E525F79C0DEB
+Binary B:    phase3 -> C:\Users\Samaritan\Projects\Manifold\baselines\phase3\manifold.exe
+SHA-256 B:   54F5A8C727E83262B59BDB12BEE10C13B4170FB42B537265ACA3FEF6A5F6999F
+TC:          tc=8+0.08
+Seed:        20260808
+Book:        C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd  -format epd -order random -repeat -games 2
+Affinity:    enabled   Concurrency: 8   Threads: A=1 B=1   Hash: 64
+SPRT:        elo0=0 elo1=5 alpha=0.05 beta=0.05
+Rounds:      1000 (x2 games, paired openings)
+Guardrail:   both engines run Threads=1; AGENTS.md 4.451 makes -use-affinity mandatory
+Pre-run CPU: 29% (max of 5 samples, AGENTS.md 4.8)
+Purpose:     Phase 4 revised: aspiration with score-scaled initial delta (8 + prev^2/16053 capped 512), +1/3 widening (doubling measured inconclusive in M7-F4), beta-to-midpoint on fail low, fail-high depth reduction up to 3 plies. Measured +0.77 plies vs phase3 at 1s over 30 positions. SPRT vs phase3.
+Date:        2026-08-03T22:16:03Z
+Driver:      harness/run_match.ps1
+Command:
+C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe -engine cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe name=aspiration2 option.Hash=64 option.Threads=1 -engine cmd=C:\Users\Samaritan\Projects\Manifold\baselines\phase3\manifold.exe name=phase3 option.Hash=64 option.Threads=1 -each proto=uci tc=8+0.08 -openings file=C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd format=epd order=random -repeat -games 2 -rounds 1000 -concurrency 8 -srand 20260808 -report penta=true -ratinginterval 50 -pgnout file=C:\Users\Samaritan\Projects\Manifold\experiments\M7-F5-aspiration2\games.pgn append=false -log file=C:\Users\Samaritan\Projects\Manifold\experiments\M7-F5-aspiration2\fastchess.log level=warn append=false -use-affinity -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05
