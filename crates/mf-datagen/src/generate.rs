@@ -1,13 +1,14 @@
 //! Deterministic self-play generation of training records.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mf_core::{Position, generate_legal_moves, has_legal_move, is_in_check};
+use mf_nnue::Network;
 use mf_search::{
     MATE_SCORE, SearchLimits, SearchOptions, SharedHistory, TranspositionTable,
-    search_with_history_options,
+    search_with_callback,
 };
 
 use crate::filter::{Filter, Rejection};
@@ -127,7 +128,11 @@ struct GameOutput {
 /// buffered, and a game is only released once every lower-numbered game has been
 /// released. The output is therefore identical for any thread count, which also means
 /// `--threads` is a pure throughput knob and never a correctness variable.
-pub fn generate<S>(config: GenerateConfig, mut sink: S) -> Result<GenerateStats, String>
+pub fn generate<S>(
+    config: GenerateConfig,
+    network: &Network,
+    mut sink: S,
+) -> Result<GenerateStats, String>
 where
     S: FnMut(&[Record]) -> Result<(), String>,
 {
@@ -149,7 +154,7 @@ where
                     if index >= config.games {
                         return Ok(());
                     }
-                    let output = play_game(index, &config, &transposition_table, &history);
+                    let output = play_game(index, &config, &transposition_table, &history, network);
                     pending
                         .lock()
                         .map_err(|_| "datagen output queue poisoned".to_string())?
@@ -244,6 +249,7 @@ fn play_game(
     config: &GenerateConfig,
     transposition_table: &TranspositionTable,
     shared_history: &SharedHistory,
+    network: &Network,
 ) -> GameOutput {
     let mut rng = Rng::for_index(config.seed, index);
     let mut stats = GenerateStats {
@@ -272,6 +278,8 @@ fn play_game(
         ..SearchLimits::default()
     };
     let options = SearchOptions::default();
+    // Datagen searches are bounded by their node budget alone; nothing stops them early.
+    let stop = AtomicBool::new(false);
 
     let mut white_relative_outcome = None;
     let mut adjudication_run = 0usize;
@@ -287,12 +295,15 @@ fn play_game(
             break;
         }
 
-        let result = search_with_history_options(
+        let result = search_with_callback(
             &state.position,
             &state.history,
             transposition_table,
             limits,
             options,
+            network,
+            &stop,
+            |_| {},
         );
 
         stats.considered += 1;
@@ -451,13 +462,42 @@ const _MATE_THRESHOLD_IS_SANE: () = assert!(crate::filter::MATE_SCORE_THRESHOLD 
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+
+    use mf_nnue::Network;
+
     use super::{GenerateConfig, generate};
     use crate::filter::Rejection;
     use crate::record::Record;
 
+    /// Self-play evaluates with NNUE, so datagen tests need a network.
+    ///
+    /// Loaded once for the target because the file is ~106 MiB. Returns `None` when the
+    /// (gitignored) network is absent so a fresh clone skips rather than fails.
+    fn network() -> Option<&'static Network> {
+        static NETWORK: OnceLock<Option<Network>> = OnceLock::new();
+        NETWORK
+            .get_or_init(|| {
+                let path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+                    || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+                    PathBuf::from,
+                );
+                if !path.is_file() {
+                    eprintln!("SKIPPED: datagen tests need {}", path.display());
+                    return None;
+                }
+                Some(Network::load(&path).unwrap_or_else(|error| {
+                    panic!("failed to load NNUE network {}: {error}", path.display())
+                }))
+            })
+            .as_ref()
+    }
+
     fn collect(config: GenerateConfig) -> (Vec<Record>, super::GenerateStats) {
+        let network = network().expect("caller must check `network()` before collecting");
         let mut records = Vec::new();
-        let stats = generate(config, |batch| {
+        let stats = generate(config, network, |batch| {
             records.extend_from_slice(batch);
             Ok(())
         })
@@ -477,6 +517,9 @@ mod tests {
 
     #[test]
     fn a_fixed_seed_reproduces_byte_identical_output() {
+        if network().is_none() {
+            return;
+        }
         let (first, first_stats) = collect(small(4_242, 1));
         let (second, second_stats) = collect(small(4_242, 1));
         assert_eq!(first, second);
@@ -486,6 +529,9 @@ mod tests {
 
     #[test]
     fn a_different_seed_produces_different_output() {
+        if network().is_none() {
+            return;
+        }
         let (first, _) = collect(small(4_242, 1));
         let (second, _) = collect(small(4_243, 1));
         assert_ne!(first, second, "the seed must actually be consumed");
@@ -493,6 +539,9 @@ mod tests {
 
     #[test]
     fn output_is_independent_of_the_thread_count() {
+        if network().is_none() {
+            return;
+        }
         let (single, single_stats) = collect(small(777, 1));
         let (multi, multi_stats) = collect(small(777, 4));
         assert_eq!(
@@ -504,6 +553,9 @@ mod tests {
 
     #[test]
     fn every_emitted_record_survives_the_filter_and_is_structurally_valid() {
+        if network().is_none() {
+            return;
+        }
         let (records, stats) = collect(small(31, 2));
         assert_eq!(stats.positions as usize, records.len());
         for record in &records {
@@ -515,6 +567,9 @@ mod tests {
 
     #[test]
     fn the_filter_actually_rejects_positions_during_a_real_run() {
+        if network().is_none() {
+            return;
+        }
         let (_, stats) = collect(small(9, 2));
         assert_eq!(
             stats.considered,
@@ -541,6 +596,9 @@ mod tests {
 
     #[test]
     fn no_game_emits_the_same_board_twice() {
+        if network().is_none() {
+            return;
+        }
         let (records, stats) = collect(GenerateConfig {
             games: 24,
             nodes: 1_200,
@@ -577,6 +635,9 @@ mod tests {
 
     #[test]
     fn results_are_labelled_and_counted_consistently() {
+        if network().is_none() {
+            return;
+        }
         let (records, stats) = collect(small(2_026, 2));
         let mut counted = [0u64; 3];
         for record in &records {

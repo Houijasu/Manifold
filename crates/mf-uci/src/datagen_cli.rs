@@ -326,8 +326,15 @@ fn run_generate<W: Write>(options: GenerateOptions, mut writer: W) -> Result<(),
         .map_err(|error| format!("unable to create '{}': {error}", options.out.display()))?;
     let mut output = BufWriter::with_capacity(1 << 20, file);
 
+    // Self-play evaluates with NNUE, so datagen resolves a network the same way the
+    // engine does: explicit EvalFile is not in play here, so this is the automatic
+    // lookup ending in the embedded network.
+    let (network, _) = mf_nnue::resolve_network(None)
+        .map_err(|error| format!("unable to resolve the datagen NNUE network: {error}"))?
+        .into_parts();
+
     let started = Instant::now();
-    let stats = generate(options.config, |batch| {
+    let stats = generate(options.config, &network, |batch| {
         for record in batch {
             output
                 .write_all(&record.to_bytes())

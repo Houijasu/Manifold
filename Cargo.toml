@@ -23,3 +23,11 @@ panic = "abort"
 
 [profile.dev.build-override]
 opt-level = 3
+
+# Loading the ~106 MiB network means quantising and permuting millions of weights. At
+# `opt-level = 0` that takes ~1.2 s per process start, which is slower than several of
+# the UCI protocol tests' whole time budgets -- they spawn the debug engine and measure
+# wall-clock behaviour. Optimising just this crate brings debug startup back under
+# 100 ms. Release builds are unaffected, as is the bench node signature.
+[profile.dev.package.mf-nnue]
+opt-level = 3

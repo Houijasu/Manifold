@@ -146,6 +146,20 @@ impl FromRecordBytes for ChessBoard {
 
 #[test]
 fn a_generated_file_loads_through_bulletformats_data_loader_with_a_matching_count() {
+    // Self-play evaluates with NNUE, so this round trip needs the (gitignored) network.
+    let network_path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+        || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+        std::path::PathBuf::from,
+    );
+    if !network_path.is_file() {
+        eprintln!(
+            "SKIPPED: bulletformat round trip needs {}",
+            network_path.display()
+        );
+        return;
+    }
+    let network = mf_nnue::Network::load(&network_path).expect("network loads");
+
     let config = GenerateConfig {
         games: 12,
         nodes: 1_500,
@@ -158,7 +172,7 @@ fn a_generated_file_loads_through_bulletformats_data_loader_with_a_matching_coun
     path.push(format!("mf-datagen-loader-{}.bullet", std::process::id()));
 
     let mut file = std::io::BufWriter::new(std::fs::File::create(&path).expect("temp file"));
-    let stats = generate(config, |batch| {
+    let stats = generate(config, &network, |batch| {
         for record in batch {
             file.write_all(&record.to_bytes())
                 .map_err(|error| error.to_string())?;

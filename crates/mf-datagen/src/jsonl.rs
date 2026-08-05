@@ -3,7 +3,7 @@
 //! The bootstrap corpus is **downloaded, not self-played**. `M5-F1` measured self-play
 //! datagen at ~836 positions/second, which puts a 100M-position corpus at ~33 hours and
 //! the ~1B-position target at roughly two weeks. `https://database.lichess.org/lichess_db_eval.jsonl.zst`
-//! is **CC0**, ~394.7M positions already evaluated by Stockfish, and fetches in about
+//! is **CC0**, ~394.7M positions already evaluated by a top engine, and fetches in about
 //! 45 minutes at the measured ~8 MB/s link ceiling. The pre-converted HuggingFace
 //! binpacks are faster still but are Leela-derived and therefore ODbL share-alike, so
 //! they are ruled out by the mission's licensing posture.
@@ -20,7 +20,7 @@
 //!   labels arrive later from self-play, which is what `M5-F1`'s generator is for.
 //! * **Scores are WHITE-relative**, where bulletformat is side-to-move relative.
 //!   Determined empirically rather than assumed, by comparing 30 decisive
-//!   black-to-move positions against Stockfish (whose UCI `score cp` is
+//!   black-to-move positions against a reference engine (whose UCI `score cp` is
 //!   side-to-move relative by definition): white-relative agreed on the sign 29/30,
 //!   side-to-move relative 0/30. Only black-to-move positions discriminate.
 //! * **One position carries several evals at different depths.** [`pick_eval`] takes
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn white_relative_scores_are_negated_for_black_to_move() {
-        // Determined empirically against Stockfish: 29/30 sign agreement under the
+        // Determined empirically against a reference engine: 29/30 sign agreement under the
         // white-relative hypothesis, 0/30 under side-to-move relative.
         assert_eq!(
             to_side_to_move_centipawns(RawScore::Cp(200), Color::White, 10_000),

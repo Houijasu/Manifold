@@ -76,6 +76,11 @@ pub enum ResolveError {
         source: NetworkSource,
         error: LoadError,
     },
+    /// No source yielded a network.
+    ///
+    /// Only reachable in a build without the `embedded-net` feature. The engine is pure
+    /// NNUE, so this is fatal rather than a cue to fall back to something weaker.
+    NoNetwork { searched: Vec<PathBuf> },
 }
 
 impl fmt::Display for ResolveError {
@@ -95,6 +100,18 @@ impl fmt::Display for ResolveError {
             Self::Load { source, error } => {
                 write!(formatter, "unable to load NNUE from {source}: {error}")
             }
+            Self::NoNetwork { searched } => {
+                write!(
+                    formatter,
+                    "no NNUE network found (searched: {}); build with the `embedded-net` \
+                     feature or set the EvalFile option",
+                    searched
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
         }
     }
 }
@@ -104,19 +121,21 @@ impl std::error::Error for ResolveError {
         match self {
             Self::CurrentExecutable(error) | Self::CurrentDirectory(error) => Some(error),
             Self::Load { error, .. } => Some(error),
-            Self::ExecutableHasNoParent(_) => None,
+            Self::ExecutableHasNoParent(_) | Self::NoNetwork { .. } => None,
         }
     }
 }
 
 /// Resolves an NNUE network using the engine's strict source precedence.
 ///
-/// An explicit path is always authoritative. Automatic lookup checks
-/// `nets/main.nnue` beside the executable, then beneath the current working
-/// directory, and finally the optional embedded network.
-pub fn resolve_network(
-    explicit_path: Option<&Path>,
-) -> Result<Option<ResolvedNetwork>, ResolveError> {
+/// An explicit path is always authoritative. Automatic lookup checks `nets/main.nnue`
+/// beside the executable and beneath the current working directory -- each along with
+/// its ancestors -- and finally the embedded network.
+///
+/// Resolution either yields a network or fails. The engine has no hand-crafted
+/// evaluation to fall back on, so "no network" is not a degraded mode it can run in,
+/// and a default build embeds one precisely so this cannot fail in practice.
+pub fn resolve_network(explicit_path: Option<&Path>) -> Result<ResolvedNetwork, ResolveError> {
     let executable = std::env::current_exe().map_err(ResolveError::CurrentExecutable)?;
     let executable_directory = executable
         .parent()
@@ -129,21 +148,22 @@ pub(crate) fn resolve_network_from(
     explicit_path: Option<&Path>,
     executable_directory: &Path,
     working_directory: &Path,
-) -> Result<Option<ResolvedNetwork>, ResolveError> {
+) -> Result<ResolvedNetwork, ResolveError> {
     if let Some(path) = explicit_path {
-        return load(path, NetworkSource::Explicit(path.to_path_buf())).map(Some);
+        return load(path, NetworkSource::Explicit(path.to_path_buf()));
     }
 
-    for path in default_candidate_paths(executable_directory, working_directory) {
-        match std::fs::metadata(&path) {
+    let candidates = default_candidate_paths(executable_directory, working_directory);
+    for path in &candidates {
+        match std::fs::metadata(path) {
             Ok(_) => {
                 let source = NetworkSource::Discovered(path.clone());
-                return load(&path, source).map(Some);
+                return load(path, source);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => {
                 return Err(ResolveError::Load {
-                    source: NetworkSource::Discovered(path),
+                    source: NetworkSource::Discovered(path.clone()),
                     error: LoadError::Io(error),
                 });
             }
@@ -151,22 +171,22 @@ pub(crate) fn resolve_network_from(
     }
 
     #[cfg(feature = "embedded-net")]
-    {
-        return Network::from_embedded()
-            .map(|network| {
-                Some(ResolvedNetwork {
-                    network,
-                    source: NetworkSource::Embedded,
-                })
-            })
-            .map_err(|error| ResolveError::Load {
-                source: NetworkSource::Embedded,
-                error,
-            });
-    }
+    let outcome = Network::from_embedded()
+        .map(|network| ResolvedNetwork {
+            network,
+            source: NetworkSource::Embedded,
+        })
+        .map_err(|error| ResolveError::Load {
+            source: NetworkSource::Embedded,
+            error,
+        });
 
     #[cfg(not(feature = "embedded-net"))]
-    Ok(None)
+    let outcome = Err(ResolveError::NoNetwork {
+        searched: candidates,
+    });
+
+    outcome
 }
 
 fn load(path: &Path, source: NetworkSource) -> Result<ResolvedNetwork, ResolveError> {
@@ -178,6 +198,19 @@ fn load(path: &Path, source: NetworkSource) -> Result<ResolvedNetwork, ResolveEr
         .map_err(|error| ResolveError::Load { source, error })
 }
 
+/// Every `nets/main.nnue` location automatic lookup will try, in precedence order.
+///
+/// Both the executable directory and the working directory are searched *along with
+/// their ancestors*. Ancestors matter because the engine is normally run from a build
+/// tree: the binary sits in `target/release/`, two levels below the `nets/` it ships
+/// beside. A GUI launches the executable with its own working directory -- ChessBase
+/// products use the GUI's install directory, not the engine's -- so a lookup anchored
+/// only at those two exact directories finds nothing, and the engine silently falls
+/// back to HCE. That fallback costs far more strength than any search bug, and it is
+/// invisible unless you read the `info string evaluation` line.
+///
+/// Walking upward is safe because the filename is specific: a directory only matches if
+/// it actually contains `nets/main.nnue`.
 pub(crate) fn default_candidate_paths(
     executable_directory: &Path,
     working_directory: &Path,
@@ -185,6 +218,7 @@ pub(crate) fn default_candidate_paths(
     let mut seen = HashSet::new();
     [executable_directory, working_directory]
         .into_iter()
+        .flat_map(|directory| directory.ancestors())
         .map(|directory| directory.join("nets/main.nnue"))
         .filter(|candidate| seen.insert(candidate_identity(candidate)))
         .collect()
@@ -302,8 +336,7 @@ mod tests {
             .expect("invalid fallback should be written");
 
         let resolved = resolve_network_from(None, &executable_directory, &working_directory)
-            .expect("the first candidate should load")
-            .expect("the first candidate should resolve");
+            .expect("the first candidate should load");
 
         assert_eq!(
             resolved.source(),
@@ -343,8 +376,7 @@ mod tests {
         tree.link_main_network(&working_candidate);
 
         let resolved = resolve_network_from(None, &executable_directory, &working_directory)
-            .expect("working-directory candidate should load")
-            .expect("working-directory candidate should resolve");
+            .expect("working-directory candidate should load");
 
         assert_eq!(
             resolved.source(),
@@ -357,20 +389,64 @@ mod tests {
         let tree = TempTree::new("duplicate");
         let directory = tree.directory("same");
 
-        assert_eq!(default_candidate_paths(&directory, &directory).len(), 1);
+        let candidates = default_candidate_paths(&directory, &directory);
+        let mut unique = candidates.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(candidates.len(), unique.len(), "candidates must not repeat");
+        assert!(candidates.contains(&directory.join("nets/main.nnue")));
     }
 
     #[test]
-    fn no_candidates_and_no_embed_returns_none() {
+    fn a_network_above_the_executable_is_found_from_a_foreign_working_directory() {
+        // The shipping layout: binary in `<root>/target/release`, network in
+        // `<root>/nets`, and a GUI supplying its own unrelated working directory.
+        let tree = TempTree::new("ancestor");
+        let root = tree.directory("root");
+        let executable_directory = tree.directory("root/target/release");
+        let working_directory = tree.directory("elsewhere");
+        let network = tree.candidate(&root);
+        tree.link_main_network(&network);
+
+        let resolved = resolve_network_from(None, &executable_directory, &working_directory)
+            .expect("ancestor lookup should succeed");
+
+        assert_eq!(resolved.source(), &NetworkSource::Discovered(network));
+    }
+
+    #[test]
+    fn the_executable_directory_still_wins_over_an_ancestor() {
+        let tree = TempTree::new("precedence");
+        let root = tree.directory("root");
+        let executable_directory = tree.directory("root/target/release");
+        let working_directory = tree.directory("elsewhere");
+        let ancestor = tree.candidate(&root);
+        tree.link_main_network(&ancestor);
+        let beside = tree.candidate(&executable_directory);
+        tree.link_main_network(&beside);
+
+        let resolved = resolve_network_from(None, &executable_directory, &working_directory)
+            .expect("lookup should succeed");
+
+        assert_eq!(resolved.source(), &NetworkSource::Discovered(beside));
+    }
+
+    #[test]
+    fn absent_candidates_fall_back_to_the_embedded_network_or_fail_loudly() {
         let tree = TempTree::new("none");
         let executable_directory = tree.directory("exe");
         let working_directory = tree.directory("cwd");
 
-        let resolved = resolve_network_from(None, &executable_directory, &working_directory)
-            .expect("absent default candidates should not be errors");
+        let resolved = resolve_network_from(None, &executable_directory, &working_directory);
 
+        // Without an embedded network there is nothing left to evaluate with, and the
+        // engine has no hand-crafted fallback, so this must be an error rather than a
+        // `None` some caller could quietly ignore.
         #[cfg(not(feature = "embedded-net"))]
-        assert!(resolved.is_none());
+        assert!(matches!(
+            resolved.expect_err("a build with no network must fail"),
+            ResolveError::NoNetwork { .. }
+        ));
         #[cfg(feature = "embedded-net")]
         assert_eq!(
             resolved
@@ -388,8 +464,7 @@ mod tests {
         let working_directory = tree.directory("cwd");
 
         let resolved = resolve_network_from(None, &executable_directory, &working_directory)
-            .expect("embedded network should parse")
-            .expect("embedded network should resolve");
+            .expect("embedded network should parse");
 
         assert_eq!(resolved.source(), &NetworkSource::Embedded);
         assert!(!resolved.network().description().is_empty());

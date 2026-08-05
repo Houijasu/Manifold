@@ -6,8 +6,13 @@ license.workspace = true
 authors.workspace = true
 
 [features]
-default = []
+# The engine is pure NNUE: there is no hand-crafted evaluation to fall back on, so a
+# build that cannot find a network cannot play at all. Embedding it by default makes
+# that state unreachable no matter which directory a GUI launches the engine from.
+default = ["embedded-net"]
 embedded-net = ["mf-nnue/embedded-net"]
+# Reserved for the not-yet-implemented `manifold train` subcommand.
+train = []
 
 [[bin]]
 name = "manifold"
