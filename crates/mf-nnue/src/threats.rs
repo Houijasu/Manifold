@@ -637,14 +637,11 @@ pub(crate) fn discover_changed_threats<const CAPACITY: usize>(
     sliders_scanned
 }
 
-fn discover_changed_threats_impl<const CAPACITY: usize, const PROFILE: bool>(
-    parent: &Position,
-    child: &Position,
-    mv: Move,
-    undo: &Undo,
-    changed: &mut ChangedThreatBuffer<CAPACITY>,
-    sliders_scanned: &mut usize,
-) {
+/// Returns the squares whose threat edges a move can change, without duplicates.
+///
+/// These are the moved, captured and replaced squares. Every edge that differs between parent
+/// and child either starts or ends on one of them, or is a slider ray crossing one of them.
+fn affected_squares(mv: Move, undo: &Undo) -> ([Square; 4], usize) {
     let mut affected = [A1; 4];
     let mut count = 0;
     let mut append_square = |candidate: Square| {
@@ -668,6 +665,18 @@ fn discover_changed_threats_impl<const CAPACITY: usize, const PROFILE: bool>(
             append_square(captured_square);
         }
     }
+    (affected, count)
+}
+
+fn discover_changed_threats_impl<const CAPACITY: usize, const PROFILE: bool>(
+    parent: &Position,
+    child: &Position,
+    mv: Move,
+    undo: &Undo,
+    changed: &mut ChangedThreatBuffer<CAPACITY>,
+    sliders_scanned: &mut usize,
+) {
+    let (affected, count) = affected_squares(mv, undo);
 
     for &affected_square in &affected[..count] {
         gather_changed_square::<CAPACITY, PROFILE>(
@@ -696,19 +705,33 @@ fn gather_changed_square<const CAPACITY: usize, const PROFILE: bool>(
     sliders_scanned: &mut usize,
 ) {
     for (position, source_is_parent) in [(parent, true), (child, false)] {
-        if position
-            .piece_at(affected)
-            .is_some_and(|piece| piece.kind() != PieceKind::King)
-        {
-            let mut targets = outgoing_targets(position, affected);
-            while let Some(target) = targets.pop_first() {
-                record_source_edge(position, source_is_parent, affected, target, changed);
-            }
-        }
+        // Whether the affected square holds a piece in *this* position decides which half of
+        // the scan can produce an edge at all, and the two halves are complementary.
+        //
+        // Occupied: the square terminates edges, so outgoing targets, incoming attackers and
+        // the `attacker -> affected` slider contacts are all live. But a slider's attacks stop
+        // *at* an occupied square, so `ray_beyond(attacker, affected) & slider_attacks(attacker)`
+        // is provably empty and the discovered-contact probe is dead work.
+        //
+        // Empty: no physical edge can terminate here, so every incoming attacker would be
+        // discarded by `known_physical_edge` and the outgoing scan has no piece to run from.
+        // The only live edges are the discovered contacts that sliders now reach *through* the
+        // vacated square, which is exactly the probe the occupied case cannot produce.
+        let occupant = position.piece_at(affected);
+        let occupied = occupant.is_some();
 
-        let mut incoming = non_slider_attackers_to(position, affected);
-        while let Some(attacker) = incoming.pop_first() {
-            record_source_edge(position, source_is_parent, attacker, affected, changed);
+        if occupied {
+            if occupant.is_some_and(|piece| piece.kind() != PieceKind::King) {
+                let mut targets = outgoing_targets(position, affected);
+                while let Some(target) = targets.pop_first() {
+                    record_source_edge(position, source_is_parent, affected, target, changed);
+                }
+            }
+
+            let mut incoming = non_slider_attackers_to(position, affected);
+            while let Some(attacker) = incoming.pop_first() {
+                record_source_edge(position, source_is_parent, attacker, affected, changed);
+            }
         }
 
         let occupancy = position.occupancy();
@@ -726,17 +749,35 @@ fn gather_changed_square<const CAPACITY: usize, const PROFILE: bool>(
             *sliders_scanned += sliders.count() as usize;
         }
         while let Some(attacker) = sliders.pop_first() {
-            if position.piece_at(affected).is_some() {
+            if occupied {
                 record_source_edge(position, source_is_parent, attacker, affected, changed);
-            }
-
-            let mut beyond =
-                ray_beyond(attacker, affected) & slider_attacks(position, attacker) & occupancy;
-            if let Some(target) = beyond.pop_first() {
+            } else if let Some(target) = first_blocker_beyond(attacker, affected, occupancy) {
                 record_source_edge(position, source_is_parent, attacker, target, changed);
             }
         }
     }
+}
+
+/// Returns the first occupied square a slider on `attacker` reaches *past* the empty `through`.
+///
+/// The caller guarantees `attacker` attacks `through` and that `through` is empty, so the ray is
+/// clear all the way to the first blocker beyond it. That blocker is the occupied square on
+/// `ray_beyond` nearest `through`, which is the lowest set bit when the ray runs toward higher
+/// square indices and the highest set bit when it runs toward lower ones. Selecting it by
+/// direction avoids regenerating the attacker's whole magic attack set, which is the single most
+/// expensive operation the old formulation performed per slider candidate.
+#[inline]
+fn first_blocker_beyond(attacker: Square, through: Square, occupancy: Bitboard) -> Option<Square> {
+    let blockers = (ray_beyond(attacker, through) & occupancy).bits();
+    if blockers == 0 {
+        return None;
+    }
+    let nearest = if through.index() > attacker.index() {
+        blockers.trailing_zeros()
+    } else {
+        63 - blockers.leading_zeros()
+    };
+    Square::new(nearest as u8)
 }
 
 fn record_source_edge<const CAPACITY: usize>(
@@ -792,21 +833,6 @@ fn outgoing_targets(position: &Position, from: Square) -> Bitboard {
         PieceKind::Rook => rook_attacks(from, occupied) & occupied,
         PieceKind::Queen => queen_attacks(from, occupied) & occupied,
         PieceKind::King => Bitboard::EMPTY,
-    }
-}
-
-fn slider_attacks(position: &Position, from: Square) -> Bitboard {
-    match position
-        .piece_at(from)
-        .expect("slider candidate must be occupied")
-        .kind()
-    {
-        PieceKind::Bishop => bishop_attacks(from, position.occupancy()),
-        PieceKind::Rook => rook_attacks(from, position.occupancy()),
-        PieceKind::Queen => queen_attacks(from, position.occupancy()),
-        PieceKind::Pawn | PieceKind::Knight | PieceKind::King => {
-            unreachable!("candidate must be a slider")
-        }
     }
 }
 
@@ -1257,5 +1283,130 @@ mod tests {
                 "ply {ply}, move {mv:?}, parent {parent:?}"
             );
         }
+    }
+
+    /// The precondition the empty-square skip in [`gather_changed_square`] relies on.
+    ///
+    /// A physical threat edge always terminates on an occupied square, so when an affected
+    /// square is empty in one of the two positions, every non-slider attacker of it is
+    /// discarded by `known_physical_edge`. Enumerating those attackers is therefore pure waste,
+    /// and the scan skips it. This test pins the premise rather than the consequence: if a
+    /// future feature ever lets an empty square carry an edge, this fails loudly instead of the
+    /// skip silently dropping real edges.
+    #[test]
+    fn empty_squares_never_terminate_a_physical_threat_edge() {
+        let mut position = Position::startpos();
+        let mut random = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut empty_squares_checked = 0_usize;
+        let mut attackers_confirmed_dead = 0_usize;
+
+        for _ in 0..600 {
+            let moves = generate_legal_moves(&position);
+            if moves.is_empty() {
+                position = Position::startpos();
+                continue;
+            }
+            random ^= random << 13;
+            random ^= random >> 7;
+            random ^= random << 17;
+            position.make_move(moves[random as usize % moves.len()]);
+
+            for index in 0..64_u8 {
+                let target = square(index);
+                if position.piece_at(target).is_some() {
+                    continue;
+                }
+                empty_squares_checked += 1;
+
+                let mut incoming = super::non_slider_attackers_to(&position, target);
+                while let Some(attacker) = incoming.pop_first() {
+                    assert!(
+                        super::known_physical_edge(&position, attacker, target).is_none(),
+                        "empty {target:?} must not carry an edge from {attacker:?} in {position:?}"
+                    );
+                    attackers_confirmed_dead += 1;
+                }
+
+                // The whole-position oracle must agree: no edge anywhere targets this square.
+                assert!(
+                    physical_edges(&position)
+                        .iter()
+                        .all(|edge| edge.to() != target),
+                    "oracle produced an edge into empty {target:?} in {position:?}"
+                );
+            }
+        }
+
+        // Guards against the walk degenerating into a test that checks nothing.
+        assert!(empty_squares_checked > 10_000, "{empty_squares_checked}");
+        assert!(attackers_confirmed_dead > 500, "{attackers_confirmed_dead}");
+    }
+
+    /// Broadens the random walk past the startpos-only version above.
+    ///
+    /// The empty-square skip fires on 39.6% of all square scans, so the parity net has to cover
+    /// positions where affected squares are empty far more often than the opening does: open
+    /// middlegames, sparse endgames, and Chess960 castling relocations (which contribute four
+    /// affected squares, several of them empty on one side of the move).
+    #[test]
+    fn move_local_discovery_matches_full_physical_diff_across_open_and_chess960_walks() {
+        let roots = [
+            // Sparse endgames: most affected squares are empty in at least one position.
+            ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", false),
+            ("8/8/4k3/8/2q5/8/4K3/6R1 w - - 0 1", false),
+            ("8/3k4/8/8/3B4/2N5/4K3/8 w - - 0 1", false),
+            // Open middlegames with long slider rays crossing vacated squares.
+            (
+                "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+                false,
+            ),
+            (
+                "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+                false,
+            ),
+            // Chess960 castling: four affected squares per castle, king-takes-rook notation.
+            ("1rk1r3/pppppppp/8/8/8/8/PPPPPPPP/1RK1R3 w EBeb - 0 1", true),
+            ("rk2r3/pppppppp/8/8/8/8/PPPPPPPP/RK2R3 w EAea - 0 1", true),
+        ];
+
+        let mut verifications = 0_usize;
+        for (root_index, (fen, chess960)) in roots.into_iter().enumerate() {
+            let root = Position::from_fen(fen, chess960).expect("walk FEN should parse");
+            let mut position = root.clone();
+            let mut random = 0x2545_F491_4F6C_DD1D_u64 ^ (root_index as u64).wrapping_mul(0x9E37);
+
+            for ply in 0..900 {
+                let moves = generate_legal_moves(&position);
+                if moves.is_empty() {
+                    position = root.clone();
+                    continue;
+                }
+                random ^= random << 13;
+                random ^= random >> 7;
+                random ^= random << 17;
+                let mv = moves[random as usize % moves.len()];
+                let parent = position.clone();
+                let undo = position.make_move(mv);
+
+                let mut changed = ChangedThreatBuffer::<128>::new();
+                discover_changed_threats(&parent, &position, mv, &undo, &mut changed);
+                assert!(!changed.overflowed(), "{fen} ply {ply}");
+
+                let expected = normalized_signed(
+                    physical_edges(&parent)
+                        .into_iter()
+                        .map(|edge| edge.with_sign(-1))
+                        .chain(physical_edges(&position)),
+                );
+                assert_eq!(
+                    normalized_signed(changed.iter()),
+                    expected,
+                    "{fen} ply {ply}, move {mv:?}, parent {parent:?}"
+                );
+                verifications += 1;
+            }
+        }
+
+        assert!(verifications > 6_000, "{verifications}");
     }
 }

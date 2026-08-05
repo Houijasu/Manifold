@@ -1,0 +1,10 @@
+run: M2-F3b threat-discovery scan split
+date: 2026-08-05 22:59
+machine: i9-13980HX (8P+16E, 32 logical), 31.6 GB RAM, Windows 11
+toolchain: rustc 1.97.1 (8bab26f4f 2026-07-14)
+profile: release (fat LTO, 1 CGU, panic=abort), target-cpu=native
+net: nets/main.nnue, 111261604 bytes
+baseline binary: experiments/MSN-NNUE-threats/manifold-lazy-baseline.exe (commit 71f0fac, built from this tree before the change)
+optimized binary: target-f3b/release/manifold.exe
+note: built into target-f3b/ because a foreign manifold.exe (PID 34796, not started by this
+      worker) held a lock on target/release/manifold.exe during part of the session.

@@ -1,0 +1,5 @@
+M2-F3b bench signature control (two consecutive runs, optimized build)
+run 1 nodes: 45036
+run 2 nodes: 45036
+baseline (commit 71f0fac) nodes: 45036
+deterministic and unchanged: True

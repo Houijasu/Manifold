@@ -1,0 +1,60 @@
+> uci
+id name Manifold
+id author Houijasu
+option name Threads type spin default 1 min 1 max 256
+option name UCI_Chess960 type check default false
+option name UseNMP type check default true
+option name UseRFP type check default true
+option name UseRazoring type check default true
+option name UseLMR type check default true
+option name UseLMP type check default true
+option name UseFutility type check default true
+option name UseSEEPruning type check default true
+option name UseQSearchTT type check default true
+option name UseQSearchDeltaPruning type check default true
+option name UseSingularExt type check default true
+option name UseCheckExt type check default true
+option name UseMultiCut type check default true
+option name UseIIR type check default true
+option name UseProbCut type check default true
+option name UseButterflyHistory type check default true
+option name UseCaptureHistory type check default true
+option name UsePawnHistory type check default false
+option name UseContHistory type check default true
+option name UseHistoryPruning type check default false
+option name UseCorrHistory type check default true
+option name UseCorrHistPawn type check default true
+option name UseCorrHistMinor type check default true
+option name UseCorrHistMajor type check default false
+option name UseCorrHistMaterial type check default false
+option name UseCorrHistCont type check default true
+option name EvalFile type string default <empty>
+option name Hash type spin default 16 min 1 max 8192
+uciok
+> isready
+readyok
+> position startpos
+> go depth 18
+info string evaluation NNUE from discovered path C:\Users\Samaritan\Projects\Manifold\nets/main.nnue; network "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."; backend Avx2Vnni; sparse FC0 true
+bestmove d2d4
+  (deepest) info depth 18 seldepth 28 multipv 1 score cp 22 nodes 1089688 nps 529231 hashfull 603 time 2059 pv d2d4 d7d5 c2c4 e7e6 g1f3 g8f6 g2g3 f8b4 c1d2 a7a5 d2b4 a5b4 b1d2 e8g8 f1g2 b7b6 e1g1 c7c5 d4c5 b6c5
+> position fen 8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1
+> go movetime 3000
+info string evaluation NNUE from discovered path C:\Users\Samaritan\Projects\Manifold\nets/main.nnue; network "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."; backend Avx2Vnni; sparse FC0 true
+info nodes 3043840 nps 1014613 time 3000
+bestmove b4f4
+  (deepest) info depth 24 currmove b4e4 currmovenumber 6
+> position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1
+> go movetime 2000
+info string evaluation NNUE from discovered path C:\Users\Samaritan\Projects\Manifold\nets/main.nnue; network "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."; backend Avx2Vnni; sparse FC0 true
+bestmove e2a6
+  (deepest) info depth 16 seldepth 41 multipv 1 score cp -141 nodes 836569 nps 422936 hashfull 994 time 1978 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 h8h5 e1e5 h5e5 f4e5 c7c6 g2g3 b6a4
+> setoption name UCI_Chess960 value true
+> position fen 1rk1r3/8/8/8/8/8/8/1RK1R3 w EBeb - 0 1
+> go movetime 2000
+info string evaluation NNUE from discovered path C:\Users\Samaritan\Projects\Manifold\nets/main.nnue; network "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."; backend Avx2Vnni; sparse FC0 true
+bestmove e1e8
+  (deepest) info depth 17 seldepth 24 multipv 1 score mate 9 nodes 224445 nps 967435 hashfull 995 time 232 pv e1e8 c8c7 e8b8 c7d6 b1b6 d6e5 c1d2 e5e4 b6b5 e4f3 b8f8 f3g4 f8g8 g4f4 d2d3 f4f3 b5f5
+working set (MiB): 135.7
+> quit
+exit code: 0
