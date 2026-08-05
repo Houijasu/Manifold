@@ -247,7 +247,6 @@ pub(crate) fn add_i16_row(backend: SimdBackend, accumulator: &mut [i16; L1], row
 }
 
 #[inline]
-#[cfg(test)]
 pub(crate) fn subtract_i16_row(backend: SimdBackend, accumulator: &mut [i16; L1], row: &[i16; L1]) {
     match backend {
         SimdBackend::Scalar => subtract_i16_row_scalar(accumulator, row),
@@ -274,7 +273,6 @@ pub(crate) fn add_i8_row(backend: SimdBackend, accumulator: &mut [i16; L1], row:
 }
 
 #[inline]
-#[cfg(test)]
 pub(crate) fn subtract_i8_row(backend: SimdBackend, accumulator: &mut [i16; L1], row: &[i8; L1]) {
     match backend {
         SimdBackend::Scalar => subtract_i8_row_scalar(accumulator, row),
@@ -305,7 +303,6 @@ pub(crate) fn add_psqt_row(
 }
 
 #[inline]
-#[cfg(test)]
 pub(crate) fn subtract_psqt_row(
     backend: SimdBackend,
     accumulator: &mut [i32; PSQT_BUCKETS],
@@ -1187,7 +1184,6 @@ unsafe fn add_i16_row_avx2(_: &mut [i16; L1], _: &[i16; L1]) {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[cfg(test)]
 #[target_feature(enable = "avx2")]
 /// # Safety
 ///
@@ -1208,7 +1204,6 @@ unsafe fn subtract_i16_row_avx2(accumulator: &mut [i16; L1], row: &[i16; L1]) {
 }
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-#[cfg(test)]
 unsafe fn subtract_i16_row_avx2(_: &mut [i16; L1], _: &[i16; L1]) {
     unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
 }
@@ -1240,7 +1235,6 @@ unsafe fn add_i8_row_avx2(_: &mut [i16; L1], _: &[i8; L1]) {
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[cfg(test)]
 #[target_feature(enable = "avx2")]
 /// # Safety
 ///
@@ -1262,7 +1256,6 @@ unsafe fn subtract_i8_row_avx2(accumulator: &mut [i16; L1], row: &[i8; L1]) {
 }
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-#[cfg(test)]
 unsafe fn subtract_i8_row_avx2(_: &mut [i16; L1], _: &[i8; L1]) {
     unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
 }
@@ -1291,7 +1284,6 @@ unsafe fn add_psqt_row_avx2(_: &mut [i32; PSQT_BUCKETS], _: &[i32; PSQT_BUCKETS]
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-#[cfg(test)]
 #[target_feature(enable = "avx2")]
 /// # Safety
 ///
@@ -1310,7 +1302,6 @@ unsafe fn subtract_psqt_row_avx2(accumulator: &mut [i32; PSQT_BUCKETS], row: &[i
 }
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-#[cfg(test)]
 unsafe fn subtract_psqt_row_avx2(_: &mut [i32; PSQT_BUCKETS], _: &[i32; PSQT_BUCKETS]) {
     unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
 }

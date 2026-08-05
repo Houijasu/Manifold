@@ -248,6 +248,11 @@ impl Totals {
         self.counters.threat_discovery_cycles += counters.threat_discovery_cycles;
         self.counters.accumulator_update_cycles += counters.accumulator_update_cycles;
         self.counters.rebuild_cycles += counters.rebuild_cycles;
+        self.counters.finny_king_updates += counters.finny_king_updates;
+        self.counters.finny_threat_rebuilds += counters.finny_threat_rebuilds;
+        self.counters.finny_cycles += counters.finny_cycles;
+        self.counters.finny_refreshes += counters.finny_refreshes;
+        self.counters.finny_delta_rows += counters.finny_delta_rows;
         self.counters.forward_cycles += counters.forward_cycles;
     }
 
@@ -275,6 +280,15 @@ impl Totals {
             counters.overflow_rebuilds as f64 * 1000.0 / self.nodes as f64,
         );
         println!(
+            "finny: king_moves={} ({:.3}/1000 nodes) of which mirror-flips={} ({:.1}%) \
+             rows/refresh={:.2}",
+            counters.finny_king_updates,
+            counters.finny_king_updates as f64 * 1000.0 / self.nodes as f64,
+            counters.finny_threat_rebuilds,
+            counters.finny_threat_rebuilds as f64 * 100.0 / counters.finny_king_updates as f64,
+            counters.finny_delta_rows as f64 / counters.finny_refreshes as f64,
+        );
+        println!(
             "per real push: changed_edges={:.2} sliders_scanned={:.2}",
             counters.changed_threat_edges as f64 / counters.real_pushes as f64,
             counters.sliders_scanned as f64 / counters.real_pushes as f64,
@@ -291,9 +305,15 @@ impl Totals {
                 / ghz,
         );
         let rebuilds = counters.king_rebuilds + counters.overflow_rebuilds;
+        if rebuilds > 0 {
+            println!(
+                "per rebuild (ns): {:.1}",
+                counters.rebuild_cycles as f64 / rebuilds as f64 / ghz,
+            );
+        }
         println!(
-            "per rebuild (ns): {:.1}",
-            counters.rebuild_cycles as f64 / rebuilds as f64 / ghz,
+            "per finny-served king move (ns): {:.1}",
+            counters.finny_cycles as f64 / counters.finny_king_updates as f64 / ghz,
         );
         println!(
             "per forward (ns): {:.1}",

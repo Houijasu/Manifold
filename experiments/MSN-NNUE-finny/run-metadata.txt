@@ -1,0 +1,52 @@
+experiment: MSN-NNUE-finny
+feature:    M2-F3-finny-tables (milestone M2, NNUE inference speed)
+date:       2026-08-05
+branch:     feature/nnue-optimizations
+decision:   KEEP (1.03x 1T NPS vs baselines/mission-start; king rebuilds 91.43 -> 0.00 per 1000 nodes)
+
+No fastchess match was run for this feature, so this file is written by hand rather than by
+harness/run_match.ps1. The feature description scoped the measurement to NPS + bench signature;
+the confirming ~300-game match against mission-start belongs to M2-F4-nnue-confirm-match.
+
+machine:    i9-13980HX (8P+16E, 32 logical), 31.6 GB RAM, Windows 11
+toolchain:  cargo --release (fat LTO, 1 CGU, panic=abort), target-cpu=native
+net:        nets/main.nnue (111,261,604 bytes)
+fwd mode:   Avx2Vnni, sparse FC0
+pinning:    every timing run in a shell pinned to the 8 P-cores (ProcessorAffinity = 0xFFFF)
+baseline:   baselines/mission-start/manifold.exe (bench 45,036)
+
+commands:
+  py -3.14 harness/nps_compare.py \
+      --engine finny=.\target\release\manifold.exe \
+      --engine mission-start=.\baselines\mission-start\manifold.exe \
+      --depth 12 --hash 64 --warmup 1 --repeat 5 \
+      --json experiments\MSN-NNUE-finny\nps-depth12.json
+    -> geometric mean NPS ratio 1.03x, nodes-to-depth ratio 1.00x at every position
+
+  cargo run --release -p mf-search --features instrumentation \
+      --example nnue_update_profile -- 7            > update-profile.txt
+    -> king rebuilds 0 (0.000/1000 nodes), overflow rebuilds 0,
+       finny king_moves 58,826 (30.6% mirror-flips), 6.07 rows per refresh,
+       797.8 ns per finny-served king move (was 1461.0 ns per rebuild)
+    NOTE: instrumentation costs ~10% NPS; used for proportions/counts only, never NPS claims.
+
+  .\target\release\manifold.exe bench (x2)          > bench-control.txt
+    -> 45,036 nodes both runs (unchanged anchor; bench_cli needed no re-pinning)
+
+  .\experiments\MSN-NNUE-finny\uci_session.ps1
+    -> uciok/readyok; endgame d25 bestmove b4f4; Chess960 bestmove e1e8 (mate 8);
+       working set 133.6 MiB; clean exit
+
+gates:
+  cargo test --workspace                                        PASS (incl. bench_cli 13/13)
+  cargo clippy --workspace --all-targets -- -D warnings          PASS
+  cargo clippy -p mf-nnue -p mf-search --all-targets \
+      --features instrumentation -- -D warnings                 PASS
+  cargo fmt --all -- --check                                    PASS
+
+artifacts:
+  results.md              full write-up, design decision with numbers, keep/revert rationale
+  nps-depth12.json        raw nps_compare output
+  update-profile.txt      instrumented profile after the change
+  bench-control.txt       two consecutive bench runs
+  uci_session.ps1         manual UCI verification driver

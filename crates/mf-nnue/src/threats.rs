@@ -418,6 +418,17 @@ fn make_index_oriented(
         + usize::from(luts.index_lut2[(attacker * BOARD_SQUARES + from) * BOARD_SQUARES + to])
 }
 
+/// Returns whether two king squares produce identical FullThreats indices for every edge.
+///
+/// [`make_index`] consults the king square only through `ORIENT_TABLE`, which depends solely on
+/// the king's file. Two king squares that share an orientation therefore agree on every threat
+/// feature index, so a king move between them leaves the whole FullThreats contribution intact.
+#[inline]
+#[must_use]
+pub fn mirrors_alike(left: Square, right: Square) -> bool {
+    ORIENT_TABLE[usize::from(left.index())] == ORIENT_TABLE[usize::from(right.index())]
+}
+
 /// Returns the FullThreats feature index for one physical threat.
 ///
 /// Excluded threats return an index greater than or equal to [`DIMENSIONS`].

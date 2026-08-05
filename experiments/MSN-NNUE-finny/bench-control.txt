@@ -1,0 +1,8 @@
+Positions: 6
+Nodes searched: 45036
+Time (ms): 78
+NPS: 571575
+Positions: 6
+Nodes searched: 45036
+Time (ms): 78
+NPS: 574669

@@ -35,6 +35,17 @@ pub struct UpdateCounters {
     pub accumulator_update_cycles: u64,
     /// Reference cycles spent inside full rebuilds, a subset of `accumulator_update_cycles`.
     pub rebuild_cycles: u64,
+    /// King moves served from the Finny table instead of a full perspective rebuild.
+    pub finny_king_updates: u64,
+    /// Finny-served king moves that also had to recompute the FullThreats half after a mirror
+    /// flip, which changes every threat feature index.
+    pub finny_threat_rebuilds: u64,
+    /// Reference cycles spent on the Finny-table path, the analogue of `rebuild_cycles`.
+    pub finny_cycles: u64,
+    /// Finny-table refreshes performed in place of a HalfKA rebuild.
+    pub finny_refreshes: u64,
+    /// HalfKA rows applied by Finny-table refreshes, the work a rebuild would have redone whole.
+    pub finny_delta_rows: u64,
     /// Reference cycles spent in the forward pass.
     pub forward_cycles: u64,
 }
@@ -51,6 +62,11 @@ impl UpdateCounters {
         threat_discovery_cycles: 0,
         accumulator_update_cycles: 0,
         rebuild_cycles: 0,
+        finny_king_updates: 0,
+        finny_threat_rebuilds: 0,
+        finny_cycles: 0,
+        finny_refreshes: 0,
+        finny_delta_rows: 0,
         forward_cycles: 0,
     };
 }

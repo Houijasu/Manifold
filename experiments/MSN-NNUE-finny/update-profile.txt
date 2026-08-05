@@ -1,0 +1,24 @@
+    Finished `release` profile [optimized] target(s) in 4.92s
+     Running `target\release\examples\nnue_update_profile.exe 7`
+net=C:\Users\Samaritan\Projects\Manifold\crates\mf-search\../../nets/main.nnue hash=16MiB threads=1
+position     d      nodes     pushes      nulls      thr%      upd%     rbld%      fwd%     nnue%  kingR/kn   ovfR/kn  edges/pu         nps
+bench1       7       8884       8786         15     22.4%     56.9%      0.0%     20.7%     43.9%      0.00      0.00      6.25      674179
+bench2       7      15926      15202        653     20.6%     63.5%      0.0%     15.9%     41.8%      0.00      0.00     10.39      442846
+bench3       7       3121       3011         94     17.3%     62.9%      0.0%     19.8%     38.2%      0.00      0.00      2.30      757947
+bench4       7       6101       5890        178     20.5%     62.6%      0.0%     16.9%     44.9%      0.00      0.00      9.00      508557
+bench5       7       2971       2913         45     21.5%     64.1%      0.0%     14.3%     41.3%      0.00      0.00      6.63      550348
+bench6       7       8033       7503        498     22.0%     60.4%      0.0%     17.5%     41.3%      0.00      0.00      9.57      532216
+BENCH        7      45036      43305       1483     21.0%     61.8%      0.0%     17.2%     42.3%      0.00      0.00      8.40      525222
+deep-d14    14     225979     218293       5055     20.8%     58.1%      0.0%     21.1%     44.7%      0.00      0.00      7.98      579589
+deep-d13    13     303157     278242      17376     20.2%     63.1%      0.0%     16.8%     42.5%      0.00      0.00      9.54      483007
+deep-d13    13      69240      66751       1395     22.8%     58.5%      0.0%     18.7%     44.7%      0.00      0.00      9.61      566753
+TOTAL        0     643412     606591      25309     20.7%     60.9%      0.0%     18.4%     43.4%      0.00      0.00      8.91      525038
+
+totals: nodes=643412 real_pushes=606591 null_pushes=25309 forwards=443664
+rebuilds: king=0 (0.000/1000 nodes) overflow=0 (0.000/1000 nodes)
+finny: king_moves=58826 (91.428/1000 nodes) of which mirror-flips=18009 (30.6%) rows/refresh=6.07
+per real push: changed_edges=8.91 sliders_scanned=4.38
+per real push (ns, TSC 2.419 GHz): threat_discovery=181.7 accumulator_update=534.2 (of which rebuild=0.0, incremental=534.2)
+per finny-served king move (ns): 797.8
+per forward (ns): 220.7
+unread pushes: 188236 of 631900 (29.8%) -- ceiling on what lazy updates can skip

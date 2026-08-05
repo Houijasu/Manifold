@@ -2,6 +2,7 @@
 
 mod accumulator;
 mod eval;
+mod finny;
 mod format;
 pub mod halfka;
 #[cfg(feature = "instrumentation")]
@@ -9,6 +10,8 @@ mod instrumentation;
 mod network;
 mod provision;
 mod simd;
+#[cfg(test)]
+mod test_support;
 pub mod threats;
 
 #[cfg(feature = "instrumentation")]

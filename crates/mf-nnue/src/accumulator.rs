@@ -6,14 +6,16 @@ use core::fmt;
 
 use mf_core::{CastlingSide, Color, Move, Piece, PieceKind, Position, Square, Undo};
 
+use crate::finny::{FinnyTable, HalfKaEntry};
 use crate::halfka;
 #[cfg(feature = "instrumentation")]
 use crate::instrumentation;
 use crate::network::{L1, Network, PSQT_BUCKETS};
 use crate::simd::{
     ForwardMode, SimdBackend, UnsupportedBackend, add_i8_row, add_i16_row, add_psqt_row,
-    fused_accumulator_update, production_forward_mode,
+    fused_accumulator_update, production_forward_mode, subtract_i8_row, subtract_psqt_row,
 };
+use crate::threats;
 use crate::threats::{
     ChangedThreatBuffer, MAX_ACTIVE, MAX_CHANGED, append_active_threats,
     append_changed_threat_indices, discover_changed_threats,
@@ -184,20 +186,72 @@ impl AccumulatorState {
             child_metadata.king_squares[index] = child_king;
 
             if previous_king != child_king {
+                // A king move invalidates every HalfKA index for this perspective, but the
+                // FullThreats indices survive as long as the king stays on the same side of the
+                // mirror line: `threats::make_index` consults the king square only through
+                // `ORIENT_TABLE`, which is a pure function of its file. When the mirror holds,
+                // the parent's threat contribution is still exactly right, so the Finny table
+                // can swap the HalfKA half out from under it instead of rebuilding both halves.
                 #[cfg(feature = "instrumentation")]
                 let started = instrumentation::cycles();
-                self.accumulators[index] = Accumulator::build(
+                let mirror_held = threats::mirrors_alike(previous_king, child_king);
+                let child_entry = context.finny.refresh(
                     context.network,
-                    context.child,
-                    perspective,
                     context.backend,
+                    perspective,
+                    context.child,
                 );
+
+                if mirror_held {
+                    // The parent's threat rows are still valid, so keep them and net in only the
+                    // move-local threat deltas while the piece half is swapped underneath.
+                    let previous_entry = context.finny.refresh(
+                        context.network,
+                        context.backend,
+                        perspective,
+                        context.parent,
+                    );
+                    let (addition_count, removal_count) = append_changed_threat_indices(
+                        perspective,
+                        context.child,
+                        changed_threats,
+                        threat_additions,
+                        threat_removals,
+                    );
+                    rebase_halfka(
+                        context.backend,
+                        context.network,
+                        &parent.accumulators[index],
+                        &mut self.accumulators[index],
+                        context.finny.entry(previous_entry),
+                        context.finny.entry(child_entry),
+                        &threat_removals[..removal_count],
+                        &threat_additions[..addition_count],
+                    );
+                } else {
+                    // Every threat index changed with the orientation, so the threat half has to
+                    // be recomputed from the position. The piece half still comes from the cache,
+                    // which is the larger of the two: the M2-F1 profile measured a rebuild as
+                    // 49.4% HalfKA rows against 46.9% threat scan plus threat rows.
+                    rebuild_threats_onto(
+                        context.backend,
+                        context.network,
+                        context.child,
+                        perspective,
+                        context.finny.entry(child_entry),
+                        &mut self.accumulators[index],
+                    );
+                }
+
                 #[cfg(feature = "instrumentation")]
                 {
                     let elapsed = instrumentation::cycles().wrapping_sub(started);
                     instrumentation::record(|counters| {
-                        counters.king_rebuilds += 1;
-                        counters.rebuild_cycles += elapsed;
+                        counters.finny_king_updates += 1;
+                        counters.finny_cycles += elapsed;
+                        if !mirror_held {
+                            counters.finny_threat_rebuilds += 1;
+                        }
                     });
                 }
                 continue;
@@ -318,6 +372,7 @@ pub struct AccumulatorStack<'network> {
     network: &'network Network,
     frames: Box<[AccumulatorFrame]>,
     scratch: UpdateScratch,
+    finny: FinnyTable,
     depth: usize,
     mode: ForwardMode,
 }
@@ -386,6 +441,7 @@ impl<'network> AccumulatorStack<'network> {
             network,
             frames: vec![root; STACK_STATES].into_boxed_slice(),
             scratch: UpdateScratch::new(),
+            finny: FinnyTable::new(network),
             depth: 0,
             mode,
         }
@@ -448,8 +504,10 @@ impl<'network> AccumulatorStack<'network> {
             &parents[self.depth].state,
             UpdateContext {
                 network: self.network,
+                parent: &parents[self.depth].position,
                 child,
                 backend: self.mode.backend(),
+                finny: &mut self.finny,
             },
             &parents[self.depth].metadata,
             &mut children[0].metadata,
@@ -508,8 +566,10 @@ impl<'network> AccumulatorStack<'network> {
             &parents[self.depth].state,
             UpdateContext {
                 network: self.network,
+                parent: &parents[self.depth].position,
                 child,
                 backend: self.mode.backend(),
+                finny: &mut self.finny,
             },
             &parents[self.depth].metadata,
             &mut children[0].metadata,
@@ -597,11 +657,114 @@ struct PieceDelta {
     piece: Piece,
 }
 
-#[derive(Clone, Copy)]
 struct UpdateContext<'position> {
     network: &'position Network,
+    parent: &'position Position,
     child: &'position Position,
     backend: SimdBackend,
+    finny: &'position mut FinnyTable,
+}
+
+/// Rebuilds one perspective from a cached HalfKA accumulator plus a fresh threat enumeration.
+///
+/// Used when a king move flips the mirror, which changes every FullThreats index and so leaves
+/// no threat contribution worth salvaging. The piece half is still exact in the cache, so this
+/// pays for the threat scan and rows only.
+fn rebuild_threats_onto(
+    backend: SimdBackend,
+    network: &Network,
+    position: &Position,
+    perspective: Color,
+    entry: &HalfKaEntry,
+    accumulator: &mut Accumulator,
+) {
+    accumulator.values = entry.values;
+    accumulator.psqt = entry.psqt;
+
+    let mut active_threats = [0; MAX_ACTIVE];
+    let threat_count = append_active_threats(perspective, position, &mut active_threats);
+    for &feature in &active_threats[..threat_count] {
+        add_i8_row(
+            backend,
+            &mut accumulator.values,
+            network
+                .threat_weights()
+                .row(feature)
+                .expect("FullThreats feature must be in range"),
+        );
+        add_psqt_row(
+            backend,
+            &mut accumulator.psqt,
+            network
+                .threat_psqt_row(feature)
+                .expect("FullThreats PSQT feature must be in range"),
+        );
+    }
+}
+
+/// Swaps one perspective's HalfKA contribution for another, keeping its threat contribution.
+///
+/// `parent` already holds the correct threat rows for the parent's king orientation; the caller
+/// guarantees the child's orientation matches, so the threat contribution needs no rebuild.
+/// Subtracting the cached HalfKA accumulator for the parent's king square and adding the one for
+/// the child's replaces the piece half exactly, and the caller's move-local threat deltas are
+/// folded in during the same pass.
+#[allow(clippy::too_many_arguments)]
+fn rebase_halfka(
+    backend: SimdBackend,
+    network: &Network,
+    parent: &Accumulator,
+    child: &mut Accumulator,
+    previous_entry: &HalfKaEntry,
+    child_entry: &HalfKaEntry,
+    threat_removals: &[u32],
+    threat_additions: &[u32],
+) {
+    for (index, value) in child.values.iter_mut().enumerate() {
+        *value = parent.values[index]
+            .wrapping_sub(previous_entry.values[index])
+            .wrapping_add(child_entry.values[index]);
+    }
+    for (index, value) in child.psqt.iter_mut().enumerate() {
+        *value = parent.psqt[index] - previous_entry.psqt[index] + child_entry.psqt[index];
+    }
+
+    for &feature in threat_removals {
+        let feature = feature as usize;
+        subtract_i8_row(
+            backend,
+            &mut child.values,
+            network
+                .threat_weights()
+                .row(feature)
+                .expect("rebased FullThreats removal must be in range"),
+        );
+        subtract_psqt_row(
+            backend,
+            &mut child.psqt,
+            network
+                .threat_psqt_row(feature)
+                .expect("rebased FullThreats PSQT removal must be in range"),
+        );
+    }
+    for &feature in threat_additions {
+        let feature = feature as usize;
+        add_i8_row(
+            backend,
+            &mut child.values,
+            network
+                .threat_weights()
+                .row(feature)
+                .expect("rebased FullThreats addition must be in range"),
+        );
+        add_psqt_row(
+            backend,
+            &mut child.psqt,
+            network
+                .threat_psqt_row(feature)
+                .expect("rebased FullThreats PSQT addition must be in range"),
+        );
+    }
 }
 
 fn move_deltas(
@@ -766,7 +929,6 @@ fn build_i32_oracle(
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
     use std::path::PathBuf;
 
     use mf_core::{Color, Position};
@@ -777,33 +939,9 @@ mod tests {
         move_deltas,
     };
     use crate::simd::{reset_sparse_fc0_calls, sparse_fc0_calls};
+    use crate::test_support::{local_network, resolve_network_path};
     use crate::threats::{ChangedThreatBuffer, MAX_CHANGED, discover_changed_threats};
     use crate::{ForwardMode, L1, Network, SimdBackend};
-
-    fn resolve_network_path(explicit_path: Option<OsString>) -> (PathBuf, bool) {
-        let is_explicit = explicit_path.is_some();
-        let path = explicit_path.map_or_else(
-            || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
-            PathBuf::from,
-        );
-        (path, is_explicit)
-    }
-
-    fn local_network(test_name: &str) -> Option<Network> {
-        let (path, is_explicit) = resolve_network_path(std::env::var_os("MF_NNUE_TEST_NET"));
-        if !path.is_file() {
-            assert!(
-                !is_explicit,
-                "MF_NNUE_TEST_NET requires an existing network file: {}",
-                path.display()
-            );
-            eprintln!("SKIPPED: {test_name} is missing {}", path.display());
-            return None;
-        }
-        Some(Network::load(&path).unwrap_or_else(|error| {
-            panic!("failed to load NNUE network {}: {error}", path.display())
-        }))
-    }
 
     #[test]
     fn stack_frames_keep_compact_metadata_and_cache_line_alignment() {
@@ -877,7 +1015,7 @@ mod tests {
 
         crate::reset_update_counters();
         let mut current = root;
-        for notation in ["e1g1", "e7d6"] {
+        for notation in ["e1c1", "e7d6"] {
             let mv = mf_core::parse_uci_move(&current, notation, false)
                 .expect("counter-test move should be legal");
             let mut child = current.clone();
@@ -892,17 +1030,160 @@ mod tests {
         assert_eq!(counters.real_pushes, 2);
         assert_eq!(counters.null_pushes, 1);
         assert_eq!(counters.forward_evaluations, 2);
-        // The castle moves the white king, so exactly one perspective rebuilds.
-        assert_eq!(counters.king_rebuilds, 1);
+        // The castle moves the white king, so exactly one perspective leaves the plain
+        // incremental path. Since Finny tables landed, that perspective is served from the cache
+        // rather than rebuilt, so `king_rebuilds` stays zero and `finny_king_updates` carries it.
+        assert_eq!(counters.king_rebuilds, 0);
+        assert_eq!(counters.finny_king_updates, 1);
         assert_eq!(counters.overflow_rebuilds, 0);
         assert!(counters.changed_threat_edges > 0);
         assert!(counters.sliders_scanned > 0);
         assert!(counters.threat_discovery_cycles > 0);
         assert!(counters.accumulator_update_cycles > 0);
         assert!(counters.forward_cycles > 0);
-        // The rebuild timer is a strict subset of the update timer it sits inside.
-        assert!(counters.rebuild_cycles > 0);
-        assert!(counters.rebuild_cycles < counters.accumulator_update_cycles);
+        // The Finny timer is a strict subset of the update timer it sits inside.
+        assert!(counters.finny_cycles > 0);
+        assert!(counters.finny_cycles < counters.accumulator_update_cycles);
+    }
+
+    /// Replays a UCI move list, asserting incremental state equals a full rebuild at every ply.
+    fn assert_parity_along(network: &Network, fen: &str, chess960: bool, notations: &[&str]) {
+        let root = Position::from_fen(fen, chess960).expect("parity FEN should parse");
+        let mut stack = AccumulatorStack::new_production(network, &root);
+        let mut position = root;
+
+        for notation in notations {
+            let mv = mf_core::parse_uci_move(&position, notation, chess960)
+                .unwrap_or_else(|| panic!("{fen}: {notation} should be a legal move"));
+            let mut child = position.clone();
+            let undo = child.make_move(mv);
+            stack.push_real(&child, mv, &undo).expect("push should fit");
+
+            let expected = AccumulatorState::from_position_production(network, &child);
+            assert_eq!(stack.current(), &expected, "{fen} after {notation}");
+            position = child;
+        }
+    }
+
+    #[test]
+    fn king_walks_keep_incremental_state_equal_to_a_full_rebuild() {
+        let Some(network) = local_network("king-walk parity test") else {
+            return;
+        };
+        // Kings walking every direction, crossing the d/e mirror line repeatedly in both
+        // directions and in both colours, so cached and rebuilt paths alternate many times.
+        assert_parity_along(
+            &network,
+            "4k3/8/8/3p4/3P4/8/8/4K3 w - - 0 1",
+            false,
+            &[
+                "e1d1", "e8d8", "d1c1", "d8c8", "c1b1", "c8b8", "b1c1", "b8c8", "c1d1", "c8d8",
+                "d1e1", "d8e8", "e1f1", "e8f8", "f1g1", "f8g8", "g1h1", "g8h8", "h1g1", "h8g8",
+                "g1f1", "g8f8", "f1e2", "f8e8", "e2e3", "e8d8", "e3d3", "d8e8", "d3e3", "e8d8",
+            ],
+        );
+    }
+
+    #[test]
+    fn castling_keeps_incremental_state_equal_to_a_full_rebuild() {
+        let Some(network) = local_network("castling parity test") else {
+            return;
+        };
+        // Kingside and queenside for both colours, each moving the king across two files.
+        assert_parity_along(
+            &network,
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            false,
+            &["e1g1", "e8c8", "g1h1", "c8b8"],
+        );
+        assert_parity_along(
+            &network,
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            false,
+            &["e1c1", "e8g8"],
+        );
+    }
+
+    #[test]
+    fn chess960_castling_keeps_incremental_state_equal_to_a_full_rebuild() {
+        let Some(network) = local_network("Chess960 castling parity test") else {
+            return;
+        };
+        // King-takes-rook notation, including a castle whose king does not change square.
+        assert_parity_along(
+            &network,
+            "4k3/8/8/8/8/8/8/R1K2R2 w FA - 0 1",
+            true,
+            &["c1f1"],
+        );
+        assert_parity_along(
+            &network,
+            "4k3/8/8/8/8/8/8/R1K2R2 w FA - 0 1",
+            true,
+            &["c1a1"],
+        );
+        // Queenside castle to b1/b8: the king crosses the mirror line via a castling move.
+        assert_parity_along(
+            &network,
+            "1rk1r3/8/8/8/8/8/8/1RK1R3 w EBeb - 0 1",
+            true,
+            &["c1b1", "c8b8"],
+        );
+    }
+
+    #[cfg(feature = "instrumentation")]
+    #[test]
+    fn a_king_move_that_keeps_the_mirror_uses_the_cache_instead_of_rebuilding() {
+        let Some(network) = local_network("Finny fast-path counter test") else {
+            return;
+        };
+        let root = Position::from_fen("4k3/8/8/3p4/3P4/8/8/4K3 w - - 0 1", false)
+            .expect("fast-path FEN should parse");
+        let mut stack = AccumulatorStack::new(&network, &root);
+        // e1->f1 keeps the king on the e-h half, so FullThreats indices are unchanged.
+        let mv = mf_core::parse_uci_move(&root, "e1f1", false).expect("move should be legal");
+        let mut child = root.clone();
+        let undo = child.make_move(mv);
+
+        crate::reset_update_counters();
+        stack.push_real(&child, mv, &undo).expect("push should fit");
+
+        let counters = crate::update_counters();
+        assert_eq!(
+            counters.king_rebuilds, 0,
+            "the rebuild path must be avoided"
+        );
+        assert_eq!(counters.finny_king_updates, 1);
+        // Two entries are refreshed: the vacated king square and the occupied one.
+        assert_eq!(counters.finny_refreshes, 2);
+    }
+
+    #[cfg(feature = "instrumentation")]
+    #[test]
+    fn a_king_move_that_flips_the_mirror_reuses_the_cached_piece_rows() {
+        let Some(network) = local_network("Finny mirror-flip counter test") else {
+            return;
+        };
+        let root = Position::from_fen("4k3/8/8/3p4/3P4/8/8/4K3 w - - 0 1", false)
+            .expect("mirror-flip FEN should parse");
+        let mut stack = AccumulatorStack::new(&network, &root);
+        // e1->d1 crosses the d/e mirror line, so every FullThreats index changes and the threat
+        // half genuinely has to be recomputed -- but the piece half still comes from the cache.
+        let mv = mf_core::parse_uci_move(&root, "e1d1", false).expect("move should be legal");
+        let mut child = root.clone();
+        let undo = child.make_move(mv);
+
+        crate::reset_update_counters();
+        stack.push_real(&child, mv, &undo).expect("push should fit");
+
+        let counters = crate::update_counters();
+        assert_eq!(
+            counters.king_rebuilds, 0,
+            "no king move should rebuild the piece rows from scratch"
+        );
+        assert_eq!(counters.finny_threat_rebuilds, 1);
+        // Only the child's entry is consulted: the parent's HalfKA rows are replaced, not netted.
+        assert_eq!(counters.finny_refreshes, 1);
     }
 
     #[cfg(feature = "instrumentation")]
@@ -1018,12 +1299,15 @@ mod tests {
             let mut fused_metadata = parent_metadata;
             let mut threat_additions = [0; MAX_CHANGED];
             let mut threat_removals = [0; MAX_CHANGED];
+            let mut finny = crate::finny::FinnyTable::new(&network);
             fused.update_from(
                 &parent_state,
                 UpdateContext {
                     network: &network,
+                    parent: &parent,
                     child: &child,
                     backend,
+                    finny: &mut finny,
                 },
                 &parent_metadata,
                 &mut fused_metadata,
