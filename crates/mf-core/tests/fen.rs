@@ -1,17 +1,33 @@
 use mf_core::Position;
 
 #[test]
-fn en_passant_target_must_match_the_board_and_side_to_move() {
+fn an_en_passant_target_no_pawn_could_capture_is_dropped_rather_than_rejected() {
+    // EPD suites and several GUIs emit the square after any double push, and some
+    // emit a stale one outright. Rejecting the FEN fails the whole `position`
+    // command, so a UCI engine keeps its previous board and answers with a move that
+    // is illegal in the GUI's position. The target only ever enables a capture, so
+    // dropping an uncapturable one removes no legal move.
     for fen in [
         "4k3/3pP3/4n3/8/8/8/8/4K3 b - e6 0 1",
         "4k3/8/8/4p3/8/8/8/4K3 b - e3 0 1",
         "4k3/8/8/8/8/8/8/4K3 w - e6 0 1",
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq e6 0 1",
     ] {
-        assert!(
-            Position::from_fen(fen, false).is_err(),
-            "invalid en-passant state was accepted: {fen}"
+        let position = Position::from_fen(fen, false)
+            .unwrap_or_else(|error| panic!("a stale en-passant target must parse: {fen}: {error}"));
+        assert_eq!(
+            position.en_passant(),
+            None,
+            "an uncapturable en-passant target must be normalized away: {fen}"
         );
     }
+
+    // A malformed square is still a parse error, and a real double push still keeps
+    // its target so the capture remains generatable.
+    assert!(Position::from_fen("4k3/8/8/8/8/8/8/4K3 w - e4 0 1", false).is_err());
+    let real = Position::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", false)
+        .expect("a genuine double push must parse");
+    assert!(real.en_passant().is_some());
 }
 
 #[test]

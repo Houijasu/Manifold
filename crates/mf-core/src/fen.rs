@@ -51,12 +51,16 @@ impl Position {
                 .parse()
                 .map_err(|_| FenError::new(format!("invalid halfmove clock '{}'", fields[4])))?,
         );
-        let fullmove_number = fields[5]
+        let fullmove_number: u16 = fields[5]
             .parse()
             .map_err(|_| FenError::new(format!("invalid fullmove number '{}'", fields[5])))?;
-        if fullmove_number == 0 {
-            return Err(FenError::new("fullmove number must be at least 1"));
-        }
+        // Study and exercise FENs routinely carry `0 0` counters, and GUI position
+        // dialogs leave them at zero when nothing was played. A zero fullmove number
+        // says "unknown", not "corrupt": the number only feeds time management and
+        // move-count heuristics, so normalizing it to the game start rejects nothing
+        // about the position itself. Rejecting it would leave a UCI engine on its
+        // previous board, analyzing a position the GUI is not showing.
+        let fullmove_number = fullmove_number.max(1);
         position.set_fullmove_number(fullmove_number);
         Ok(position)
     }
@@ -226,8 +230,15 @@ fn parse_castling(position: &mut Position, castling: &str, chess960: bool) -> Re
                 Color::Black,
                 castling_rook_file(position, Color::Black, CastlingSide::QueenSide, chess960)?,
             ),
-            'A'..='H' if chess960 => (Color::White, symbol as u8 - b'A'),
-            'a'..='h' if chess960 => (Color::Black, symbol as u8 - b'a'),
+            // Shredder-FEN file letters are accepted in *both* modes. They name the rook
+            // unambiguously, so there is nothing for standard mode to misread, and a GUI's
+            // choice of dialect does not reliably follow the `UCI_Chess960` option -- the
+            // castling field is part of the pasted text, the option is engine state set
+            // separately. Gating this on the flag made a `HAha` FEN fail to parse, and a
+            // failed parse leaves a UCI engine on its *previous* board, so it answers with
+            // a move that is illegal in the position the GUI is showing.
+            'A'..='H' => (Color::White, symbol as u8 - b'A'),
+            'a'..='h' => (Color::Black, symbol as u8 - b'a'),
             _ => {
                 return Err(FenError::new(format!("invalid castling right '{symbol}'")));
             }
@@ -294,6 +305,20 @@ fn castling_rook_file(
     file.ok_or_else(|| FenError::new(format!("no {color:?} {side:?} castling rook")))
 }
 
+/// Parses the en-passant field, discarding a target no pawn could actually capture.
+///
+/// Only a malformed *square* is an error. A well-formed square that does not describe a
+/// capturable double-push is dropped to `None` rather than rejected, because rejecting it
+/// fails the whole FEN and leaves the caller on whatever position it held before — a UCI
+/// engine then silently searches a stale board and answers with a move that is illegal in
+/// the GUI's position.
+///
+/// Treating the field as advisory is also what the rest of the ecosystem does: EPD suites
+/// and several GUIs emit the square after any double push, whether or not a capture
+/// exists, and Stockfish, python-chess, and cozy-chess all normalize it away instead of
+/// failing. Dropping it is safe because the target only ever *enables* a capture; clearing
+/// an uncapturable one removes no legal move, and keeping the position's own en-passant
+/// state canonical means equal positions keep equal Zobrist keys.
 fn parse_en_passant(position: &Position, field: &str) -> Result<Option<Square>, FenError> {
     if field == "-" {
         return Ok(None);
@@ -310,15 +335,8 @@ fn parse_en_passant(position: &Position, field: &str) -> Result<Option<Square>, 
         Color::White => 5,
         Color::Black => 2,
     };
-    if target.rank() != expected_rank {
-        return Err(FenError::new(format!(
-            "en-passant square '{field}' is inconsistent with the side to move"
-        )));
-    }
-    if position.piece_at(target).is_some() {
-        return Err(FenError::new(format!(
-            "en-passant square '{field}' is occupied"
-        )));
+    if target.rank() != expected_rank || position.piece_at(target).is_some() {
+        return Ok(None);
     }
 
     let captured_index = match side_to_move {
@@ -327,9 +345,18 @@ fn parse_en_passant(position: &Position, field: &str) -> Result<Option<Square>, 
     };
     let captured = Square::new(captured_index).expect("validated en-passant rank is on board");
     if position.piece_at(captured) != Some(Piece::new(!side_to_move, PieceKind::Pawn)) {
-        return Err(FenError::new(format!(
-            "en-passant square '{field}' has no capturable pawn"
-        )));
+        return Ok(None);
+    }
+
+    // The square behind the pawn must be empty too, or no double push could have
+    // produced this target.
+    let origin_index = match side_to_move {
+        Color::White => target.index() + 8,
+        Color::Black => target.index() - 8,
+    };
+    let origin = Square::new(origin_index).expect("double-push origin is on board");
+    if position.piece_at(origin).is_some() {
+        return Ok(None);
     }
 
     Ok(Some(target))
