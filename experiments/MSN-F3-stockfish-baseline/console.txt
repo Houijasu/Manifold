@@ -1,0 +1,634 @@
+Indexing opening suite...
+Started game 1 of 300 (manifold-mission-start vs stockfish)
+Started game 2 of 300 (stockfish vs manifold-mission-start)
+Started game 3 of 300 (manifold-mission-start vs stockfish)
+Started game 6 of 300 (stockfish vs manifold-mission-start)
+Started game 4 of 300 (stockfish vs manifold-mission-start)
+Started game 7 of 300 (manifold-mission-start vs stockfish)
+Started game 8 of 300 (stockfish vs manifold-mission-start)
+Started game 5 of 300 (manifold-mission-start vs stockfish)
+Finished game 1 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 9 of 300 (manifold-mission-start vs stockfish)
+Finished game 8 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 10 of 300 (stockfish vs manifold-mission-start)
+Finished game 6 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 11 of 300 (manifold-mission-start vs stockfish)
+Finished game 4 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 12 of 300 (stockfish vs manifold-mission-start)
+Finished game 3 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 13 of 300 (manifold-mission-start vs stockfish)
+Finished game 2 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 14 of 300 (stockfish vs manifold-mission-start)
+Finished game 5 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 15 of 300 (manifold-mission-start vs stockfish)
+Finished game 7 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 16 of 300 (stockfish vs manifold-mission-start)
+Finished game 12 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 17 of 300 (manifold-mission-start vs stockfish)
+Finished game 15 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 18 of 300 (stockfish vs manifold-mission-start)
+Finished game 10 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 19 of 300 (manifold-mission-start vs stockfish)
+Finished game 9 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 20 of 300 (stockfish vs manifold-mission-start)
+Finished game 14 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 21 of 300 (manifold-mission-start vs stockfish)
+Finished game 16 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 22 of 300 (stockfish vs manifold-mission-start)
+Finished game 13 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 23 of 300 (manifold-mission-start vs stockfish)
+Finished game 11 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 24 of 300 (stockfish vs manifold-mission-start)
+Finished game 17 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 25 of 300 (manifold-mission-start vs stockfish)
+Finished game 20 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 26 of 300 (stockfish vs manifold-mission-start)
+Finished game 18 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 27 of 300 (manifold-mission-start vs stockfish)
+Finished game 22 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 28 of 300 (stockfish vs manifold-mission-start)
+Finished game 21 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 29 of 300 (manifold-mission-start vs stockfish)
+Finished game 24 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 30 of 300 (stockfish vs manifold-mission-start)
+Finished game 25 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 31 of 300 (manifold-mission-start vs stockfish)
+Finished game 19 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 32 of 300 (stockfish vs manifold-mission-start)
+Finished game 23 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 33 of 300 (manifold-mission-start vs stockfish)
+Finished game 29 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 34 of 300 (stockfish vs manifold-mission-start)
+Finished game 26 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 35 of 300 (manifold-mission-start vs stockfish)
+Finished game 27 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 36 of 300 (stockfish vs manifold-mission-start)
+Finished game 28 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 37 of 300 (manifold-mission-start vs stockfish)
+Finished game 30 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 38 of 300 (stockfish vs manifold-mission-start)
+Finished game 33 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 39 of 300 (manifold-mission-start vs stockfish)
+Finished game 32 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 40 of 300 (stockfish vs manifold-mission-start)
+Finished game 31 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 41 of 300 (manifold-mission-start vs stockfish)
+Finished game 35 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by stalemate}
+Started game 42 of 300 (stockfish vs manifold-mission-start)
+Finished game 34 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 43 of 300 (manifold-mission-start vs stockfish)
+Finished game 37 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 44 of 300 (stockfish vs manifold-mission-start)
+Finished game 36 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 45 of 300 (manifold-mission-start vs stockfish)
+Finished game 38 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 46 of 300 (stockfish vs manifold-mission-start)
+Finished game 39 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 47 of 300 (manifold-mission-start vs stockfish)
+Finished game 40 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 48 of 300 (stockfish vs manifold-mission-start)
+Finished game 43 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 49 of 300 (manifold-mission-start vs stockfish)
+Finished game 42 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 50 of 300 (stockfish vs manifold-mission-start)
+Finished game 41 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 51 of 300 (manifold-mission-start vs stockfish)
+Finished game 49 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 52 of 300 (stockfish vs manifold-mission-start)
+Finished game 46 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 53 of 300 (manifold-mission-start vs stockfish)
+Finished game 44 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 54 of 300 (stockfish vs manifold-mission-start)
+Finished game 45 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 55 of 300 (manifold-mission-start vs stockfish)
+Finished game 51 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 56 of 300 (stockfish vs manifold-mission-start)
+Finished game 48 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 57 of 300 (manifold-mission-start vs stockfish)
+Finished game 47 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 58 of 300 (stockfish vs manifold-mission-start)
+Finished game 50 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 59 of 300 (manifold-mission-start vs stockfish)
+Finished game 53 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 60 of 300 (stockfish vs manifold-mission-start)
+Finished game 54 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 61 of 300 (manifold-mission-start vs stockfish)
+Finished game 52 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 62 of 300 (stockfish vs manifold-mission-start)
+Finished game 59 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 63 of 300 (manifold-mission-start vs stockfish)
+Finished game 56 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 64 of 300 (stockfish vs manifold-mission-start)
+Finished game 58 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 65 of 300 (manifold-mission-start vs stockfish)
+Finished game 57 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 66 of 300 (stockfish vs manifold-mission-start)
+Finished game 55 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 67 of 300 (manifold-mission-start vs stockfish)
+Finished game 63 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 68 of 300 (stockfish vs manifold-mission-start)
+Finished game 60 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 69 of 300 (manifold-mission-start vs stockfish)
+Finished game 62 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 70 of 300 (stockfish vs manifold-mission-start)
+Finished game 69 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 71 of 300 (manifold-mission-start vs stockfish)
+Finished game 61 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 72 of 300 (stockfish vs manifold-mission-start)
+Finished game 65 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 73 of 300 (manifold-mission-start vs stockfish)
+Finished game 66 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 74 of 300 (stockfish vs manifold-mission-start)
+Finished game 64 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 75 of 300 (manifold-mission-start vs stockfish)
+Finished game 67 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 76 of 300 (stockfish vs manifold-mission-start)
+Finished game 68 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 77 of 300 (manifold-mission-start vs stockfish)
+Finished game 73 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 78 of 300 (stockfish vs manifold-mission-start)
+Finished game 71 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 79 of 300 (manifold-mission-start vs stockfish)
+Finished game 72 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 80 of 300 (stockfish vs manifold-mission-start)
+Finished game 75 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 81 of 300 (manifold-mission-start vs stockfish)
+Finished game 70 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 82 of 300 (stockfish vs manifold-mission-start)
+Finished game 74 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 83 of 300 (manifold-mission-start vs stockfish)
+Finished game 76 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 84 of 300 (stockfish vs manifold-mission-start)
+Finished game 79 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 85 of 300 (manifold-mission-start vs stockfish)
+Finished game 77 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 86 of 300 (stockfish vs manifold-mission-start)
+Finished game 80 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 87 of 300 (manifold-mission-start vs stockfish)
+Finished game 81 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 88 of 300 (stockfish vs manifold-mission-start)
+Finished game 78 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 89 of 300 (manifold-mission-start vs stockfish)
+Finished game 82 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 90 of 300 (stockfish vs manifold-mission-start)
+Finished game 84 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 91 of 300 (manifold-mission-start vs stockfish)
+Finished game 83 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 92 of 300 (stockfish vs manifold-mission-start)
+Finished game 86 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 93 of 300 (manifold-mission-start vs stockfish)
+Finished game 87 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 94 of 300 (stockfish vs manifold-mission-start)
+Finished game 85 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 95 of 300 (manifold-mission-start vs stockfish)
+Finished game 89 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 96 of 300 (stockfish vs manifold-mission-start)
+Finished game 88 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 97 of 300 (manifold-mission-start vs stockfish)
+Finished game 90 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 98 of 300 (stockfish vs manifold-mission-start)
+Finished game 91 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 99 of 300 (manifold-mission-start vs stockfish)
+Finished game 92 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 100 of 300 (stockfish vs manifold-mission-start)
+Finished game 94 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 101 of 300 (manifold-mission-start vs stockfish)
+Finished game 95 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 102 of 300 (stockfish vs manifold-mission-start)
+Finished game 93 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 103 of 300 (manifold-mission-start vs stockfish)
+Finished game 96 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 104 of 300 (stockfish vs manifold-mission-start)
+Finished game 98 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 105 of 300 (manifold-mission-start vs stockfish)
+Finished game 97 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 106 of 300 (stockfish vs manifold-mission-start)
+Finished game 100 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 107 of 300 (manifold-mission-start vs stockfish)
+Finished game 102 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 108 of 300 (stockfish vs manifold-mission-start)
+Finished game 99 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+--------------------------------------------------
+Results of manifold-mission-start vs stockfish (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -315.35 +/- 50.52, nElo: -712.69 +/- 68.10
+LOS: 0.00 %, DrawRatio: 0.00 %, PairsRatio: 0.00
+Games: 100, Wins: 0, Losses: 72, Draws: 28, Points: 14.0 (14.00 %)
+Ptnml(0-2): [22, 28, 0, 0, 0], WL/DD Ratio: -nan
+--------------------------------------------------
+Started game 109 of 300 (manifold-mission-start vs stockfish)
+Finished game 101 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 110 of 300 (stockfish vs manifold-mission-start)
+Finished game 104 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 111 of 300 (manifold-mission-start vs stockfish)
+Finished game 105 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 112 of 300 (stockfish vs manifold-mission-start)
+Finished game 103 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 113 of 300 (manifold-mission-start vs stockfish)
+Finished game 106 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 114 of 300 (stockfish vs manifold-mission-start)
+Finished game 108 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 115 of 300 (manifold-mission-start vs stockfish)
+Finished game 110 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 116 of 300 (stockfish vs manifold-mission-start)
+Finished game 109 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 117 of 300 (manifold-mission-start vs stockfish)
+Finished game 107 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 118 of 300 (stockfish vs manifold-mission-start)
+Finished game 111 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 119 of 300 (manifold-mission-start vs stockfish)
+Finished game 112 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 120 of 300 (stockfish vs manifold-mission-start)
+Finished game 113 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 121 of 300 (manifold-mission-start vs stockfish)
+Finished game 114 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 122 of 300 (stockfish vs manifold-mission-start)
+Finished game 118 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 123 of 300 (manifold-mission-start vs stockfish)
+Finished game 116 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 124 of 300 (stockfish vs manifold-mission-start)
+Finished game 121 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 125 of 300 (manifold-mission-start vs stockfish)
+Finished game 120 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 126 of 300 (stockfish vs manifold-mission-start)
+Finished game 117 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 127 of 300 (manifold-mission-start vs stockfish)
+Finished game 115 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 128 of 300 (stockfish vs manifold-mission-start)
+Finished game 119 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 129 of 300 (manifold-mission-start vs stockfish)
+Finished game 122 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 130 of 300 (stockfish vs manifold-mission-start)
+Finished game 123 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 131 of 300 (manifold-mission-start vs stockfish)
+Finished game 127 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 132 of 300 (stockfish vs manifold-mission-start)
+Finished game 129 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 133 of 300 (manifold-mission-start vs stockfish)
+Finished game 126 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 134 of 300 (stockfish vs manifold-mission-start)
+Finished game 125 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 135 of 300 (manifold-mission-start vs stockfish)
+Finished game 124 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 136 of 300 (stockfish vs manifold-mission-start)
+Finished game 130 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 137 of 300 (manifold-mission-start vs stockfish)
+Finished game 128 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 138 of 300 (stockfish vs manifold-mission-start)
+Finished game 131 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 139 of 300 (manifold-mission-start vs stockfish)
+Finished game 134 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 140 of 300 (stockfish vs manifold-mission-start)
+Finished game 132 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 141 of 300 (manifold-mission-start vs stockfish)
+Finished game 135 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 142 of 300 (stockfish vs manifold-mission-start)
+Finished game 133 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 143 of 300 (manifold-mission-start vs stockfish)
+Finished game 136 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 144 of 300 (stockfish vs manifold-mission-start)
+Finished game 137 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 145 of 300 (manifold-mission-start vs stockfish)
+Finished game 138 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 146 of 300 (stockfish vs manifold-mission-start)
+Finished game 139 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 147 of 300 (manifold-mission-start vs stockfish)
+Finished game 140 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 148 of 300 (stockfish vs manifold-mission-start)
+Finished game 141 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 149 of 300 (manifold-mission-start vs stockfish)
+Finished game 142 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 150 of 300 (stockfish vs manifold-mission-start)
+Finished game 143 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 151 of 300 (manifold-mission-start vs stockfish)
+Finished game 147 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 152 of 300 (stockfish vs manifold-mission-start)
+Finished game 144 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 153 of 300 (manifold-mission-start vs stockfish)
+Finished game 145 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 154 of 300 (stockfish vs manifold-mission-start)
+Finished game 146 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 155 of 300 (manifold-mission-start vs stockfish)
+Finished game 148 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 156 of 300 (stockfish vs manifold-mission-start)
+Finished game 151 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 157 of 300 (manifold-mission-start vs stockfish)
+Finished game 149 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 158 of 300 (stockfish vs manifold-mission-start)
+Finished game 150 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 159 of 300 (manifold-mission-start vs stockfish)
+Finished game 152 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 160 of 300 (stockfish vs manifold-mission-start)
+Finished game 154 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 161 of 300 (manifold-mission-start vs stockfish)
+Finished game 153 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 162 of 300 (stockfish vs manifold-mission-start)
+Finished game 155 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 163 of 300 (manifold-mission-start vs stockfish)
+Finished game 157 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 164 of 300 (stockfish vs manifold-mission-start)
+Finished game 156 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 165 of 300 (manifold-mission-start vs stockfish)
+Finished game 158 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 166 of 300 (stockfish vs manifold-mission-start)
+Finished game 160 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 167 of 300 (manifold-mission-start vs stockfish)
+Finished game 162 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 168 of 300 (stockfish vs manifold-mission-start)
+Finished game 163 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 169 of 300 (manifold-mission-start vs stockfish)
+Finished game 161 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 170 of 300 (stockfish vs manifold-mission-start)
+Finished game 159 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 171 of 300 (manifold-mission-start vs stockfish)
+Finished game 164 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 172 of 300 (stockfish vs manifold-mission-start)
+Finished game 165 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 173 of 300 (manifold-mission-start vs stockfish)
+Finished game 166 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 174 of 300 (stockfish vs manifold-mission-start)
+Finished game 167 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 175 of 300 (manifold-mission-start vs stockfish)
+Finished game 168 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 176 of 300 (stockfish vs manifold-mission-start)
+Finished game 170 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 177 of 300 (manifold-mission-start vs stockfish)
+Finished game 171 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 178 of 300 (stockfish vs manifold-mission-start)
+Finished game 172 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 179 of 300 (manifold-mission-start vs stockfish)
+Finished game 169 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 180 of 300 (stockfish vs manifold-mission-start)
+Finished game 175 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 181 of 300 (manifold-mission-start vs stockfish)
+Finished game 174 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 182 of 300 (stockfish vs manifold-mission-start)
+Finished game 176 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 183 of 300 (manifold-mission-start vs stockfish)
+Finished game 173 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 184 of 300 (stockfish vs manifold-mission-start)
+Finished game 178 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 185 of 300 (manifold-mission-start vs stockfish)
+Finished game 177 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 186 of 300 (stockfish vs manifold-mission-start)
+Finished game 180 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 187 of 300 (manifold-mission-start vs stockfish)
+Finished game 179 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 188 of 300 (stockfish vs manifold-mission-start)
+Finished game 183 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 189 of 300 (manifold-mission-start vs stockfish)
+Finished game 182 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 190 of 300 (stockfish vs manifold-mission-start)
+Finished game 181 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 191 of 300 (manifold-mission-start vs stockfish)
+Finished game 184 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 192 of 300 (stockfish vs manifold-mission-start)
+Finished game 186 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 193 of 300 (manifold-mission-start vs stockfish)
+Finished game 185 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 194 of 300 (stockfish vs manifold-mission-start)
+Finished game 187 (manifold-mission-start vs stockfish): 1-0 {White mates}
+Started game 195 of 300 (manifold-mission-start vs stockfish)
+Finished game 189 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 196 of 300 (stockfish vs manifold-mission-start)
+Finished game 188 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 197 of 300 (manifold-mission-start vs stockfish)
+Finished game 190 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 198 of 300 (stockfish vs manifold-mission-start)
+Finished game 194 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 199 of 300 (manifold-mission-start vs stockfish)
+Finished game 191 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 200 of 300 (stockfish vs manifold-mission-start)
+Finished game 193 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 201 of 300 (manifold-mission-start vs stockfish)
+Finished game 192 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 202 of 300 (stockfish vs manifold-mission-start)
+Finished game 196 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 203 of 300 (manifold-mission-start vs stockfish)
+Finished game 195 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 204 of 300 (stockfish vs manifold-mission-start)
+Finished game 199 (manifold-mission-start vs stockfish): 1-0 {White mates}
+Started game 205 of 300 (manifold-mission-start vs stockfish)
+Finished game 198 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 206 of 300 (stockfish vs manifold-mission-start)
+Finished game 201 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 207 of 300 (manifold-mission-start vs stockfish)
+Finished game 197 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 208 of 300 (stockfish vs manifold-mission-start)
+Finished game 200 (stockfish vs manifold-mission-start): 1-0 {White mates}
+--------------------------------------------------
+Results of manifold-mission-start vs stockfish (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -301.33 +/- 35.63, nElo: -649.99 +/- 48.15
+LOS: 0.00 %, DrawRatio: 2.00 %, PairsRatio: 0.00
+Games: 200, Wins: 2, Losses: 142, Draws: 56, Points: 30.0 (15.00 %)
+Ptnml(0-2): [42, 56, 2, 0, 0], WL/DD Ratio: inf
+--------------------------------------------------
+Started game 209 of 300 (manifold-mission-start vs stockfish)
+Finished game 202 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 210 of 300 (stockfish vs manifold-mission-start)
+Finished game 203 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 211 of 300 (manifold-mission-start vs stockfish)
+Finished game 209 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 212 of 300 (stockfish vs manifold-mission-start)
+Finished game 204 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 213 of 300 (manifold-mission-start vs stockfish)
+Finished game 208 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 214 of 300 (stockfish vs manifold-mission-start)
+Finished game 207 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 215 of 300 (manifold-mission-start vs stockfish)
+Finished game 206 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 216 of 300 (stockfish vs manifold-mission-start)
+Finished game 205 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 217 of 300 (manifold-mission-start vs stockfish)
+Finished game 211 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 218 of 300 (stockfish vs manifold-mission-start)
+Finished game 210 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 219 of 300 (manifold-mission-start vs stockfish)
+Finished game 212 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 220 of 300 (stockfish vs manifold-mission-start)
+Finished game 213 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 221 of 300 (manifold-mission-start vs stockfish)
+Finished game 215 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 222 of 300 (stockfish vs manifold-mission-start)
+Finished game 216 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 223 of 300 (manifold-mission-start vs stockfish)
+Finished game 219 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 224 of 300 (stockfish vs manifold-mission-start)
+Finished game 217 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 225 of 300 (manifold-mission-start vs stockfish)
+Finished game 214 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 226 of 300 (stockfish vs manifold-mission-start)
+Finished game 218 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 227 of 300 (manifold-mission-start vs stockfish)
+Finished game 220 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 228 of 300 (stockfish vs manifold-mission-start)
+Finished game 225 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 229 of 300 (manifold-mission-start vs stockfish)
+Finished game 221 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 230 of 300 (stockfish vs manifold-mission-start)
+Finished game 222 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 231 of 300 (manifold-mission-start vs stockfish)
+Finished game 224 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 232 of 300 (stockfish vs manifold-mission-start)
+Finished game 223 (manifold-mission-start vs stockfish): 1-0 {White mates}
+Started game 233 of 300 (manifold-mission-start vs stockfish)
+Finished game 226 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 234 of 300 (stockfish vs manifold-mission-start)
+Finished game 227 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 235 of 300 (manifold-mission-start vs stockfish)
+Finished game 228 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 236 of 300 (stockfish vs manifold-mission-start)
+Finished game 230 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 237 of 300 (manifold-mission-start vs stockfish)
+Finished game 231 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 238 of 300 (stockfish vs manifold-mission-start)
+Finished game 229 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 239 of 300 (manifold-mission-start vs stockfish)
+Finished game 232 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 240 of 300 (stockfish vs manifold-mission-start)
+Finished game 233 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 241 of 300 (manifold-mission-start vs stockfish)
+Finished game 234 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 242 of 300 (stockfish vs manifold-mission-start)
+Finished game 235 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 243 of 300 (manifold-mission-start vs stockfish)
+Finished game 236 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 244 of 300 (stockfish vs manifold-mission-start)
+Finished game 239 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 245 of 300 (manifold-mission-start vs stockfish)
+Finished game 238 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 246 of 300 (stockfish vs manifold-mission-start)
+Finished game 237 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 247 of 300 (manifold-mission-start vs stockfish)
+Finished game 240 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 248 of 300 (stockfish vs manifold-mission-start)
+Finished game 242 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 249 of 300 (manifold-mission-start vs stockfish)
+Finished game 241 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 250 of 300 (stockfish vs manifold-mission-start)
+Finished game 243 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 251 of 300 (manifold-mission-start vs stockfish)
+Finished game 244 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 252 of 300 (stockfish vs manifold-mission-start)
+Finished game 246 (stockfish vs manifold-mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 253 of 300 (manifold-mission-start vs stockfish)
+Finished game 245 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 254 of 300 (stockfish vs manifold-mission-start)
+Finished game 248 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 255 of 300 (manifold-mission-start vs stockfish)
+Finished game 250 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 256 of 300 (stockfish vs manifold-mission-start)
+Finished game 247 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 257 of 300 (manifold-mission-start vs stockfish)
+Finished game 249 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 258 of 300 (stockfish vs manifold-mission-start)
+Finished game 253 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 259 of 300 (manifold-mission-start vs stockfish)
+Finished game 252 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 260 of 300 (stockfish vs manifold-mission-start)
+Finished game 251 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 261 of 300 (manifold-mission-start vs stockfish)
+Finished game 257 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 262 of 300 (stockfish vs manifold-mission-start)
+Finished game 254 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 263 of 300 (manifold-mission-start vs stockfish)
+Finished game 255 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 264 of 300 (stockfish vs manifold-mission-start)
+Finished game 258 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 265 of 300 (manifold-mission-start vs stockfish)
+Finished game 256 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 266 of 300 (stockfish vs manifold-mission-start)
+Finished game 259 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 267 of 300 (manifold-mission-start vs stockfish)
+Finished game 261 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 268 of 300 (stockfish vs manifold-mission-start)
+Finished game 263 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 269 of 300 (manifold-mission-start vs stockfish)
+Finished game 266 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 270 of 300 (stockfish vs manifold-mission-start)
+Finished game 262 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 271 of 300 (manifold-mission-start vs stockfish)
+Finished game 260 (stockfish vs manifold-mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 272 of 300 (stockfish vs manifold-mission-start)
+Finished game 265 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 273 of 300 (manifold-mission-start vs stockfish)
+Finished game 264 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 274 of 300 (stockfish vs manifold-mission-start)
+Finished game 271 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 275 of 300 (manifold-mission-start vs stockfish)
+Finished game 267 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 276 of 300 (stockfish vs manifold-mission-start)
+Finished game 268 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 277 of 300 (manifold-mission-start vs stockfish)
+Finished game 269 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 278 of 300 (stockfish vs manifold-mission-start)
+Finished game 275 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 279 of 300 (manifold-mission-start vs stockfish)
+Finished game 270 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 280 of 300 (stockfish vs manifold-mission-start)
+Finished game 272 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 281 of 300 (manifold-mission-start vs stockfish)
+Finished game 274 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 282 of 300 (stockfish vs manifold-mission-start)
+Finished game 273 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 283 of 300 (manifold-mission-start vs stockfish)
+Finished game 276 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 284 of 300 (stockfish vs manifold-mission-start)
+Finished game 277 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 285 of 300 (manifold-mission-start vs stockfish)
+Finished game 278 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 286 of 300 (stockfish vs manifold-mission-start)
+Finished game 279 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 287 of 300 (manifold-mission-start vs stockfish)
+Finished game 280 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 288 of 300 (stockfish vs manifold-mission-start)
+Finished game 282 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 289 of 300 (manifold-mission-start vs stockfish)
+Finished game 281 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Started game 290 of 300 (stockfish vs manifold-mission-start)
+Finished game 283 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 291 of 300 (manifold-mission-start vs stockfish)
+Finished game 285 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 292 of 300 (stockfish vs manifold-mission-start)
+Finished game 284 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 293 of 300 (manifold-mission-start vs stockfish)
+Finished game 287 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 294 of 300 (stockfish vs manifold-mission-start)
+Finished game 286 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 295 of 300 (manifold-mission-start vs stockfish)
+Finished game 288 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 296 of 300 (stockfish vs manifold-mission-start)
+Finished game 289 (manifold-mission-start vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 297 of 300 (manifold-mission-start vs stockfish)
+Finished game 290 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 298 of 300 (stockfish vs manifold-mission-start)
+Finished game 291 (manifold-mission-start vs stockfish): 1-0 {White mates}
+Started game 299 of 300 (manifold-mission-start vs stockfish)
+Finished game 292 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Started game 300 of 300 (stockfish vs manifold-mission-start)
+Finished game 293 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Finished game 294 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Finished game 295 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Finished game 296 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Finished game 297 (manifold-mission-start vs stockfish): 0-1 {Black mates}
+Finished game 298 (stockfish vs manifold-mission-start): 1-0 {White mates}
+Finished game 299 (manifold-mission-start vs stockfish): 1-0 {White mates}
+Finished game 300 (stockfish vs manifold-mission-start): 1-0 {White mates}
+--------------------------------------------------
+Results of manifold-mission-start vs stockfish (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -303.61 +/- 30.73, nElo: -622.74 +/- 39.32
+LOS: 0.00 %, DrawRatio: 3.33 %, PairsRatio: 0.00
+Games: 300, Wins: 5, Losses: 216, Draws: 79, Points: 44.5 (14.83 %)
+Ptnml(0-2): [66, 79, 5, 0, 0], WL/DD Ratio: inf
+--------------------------------------------------
+Finished match
+Total Time: 00:15:39 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  manifold-mission-start time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  stockfish    time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================
