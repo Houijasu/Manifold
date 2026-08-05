@@ -1,0 +1,6 @@
+commit-before-fix: 7f56c46271e53d718a6132d3bca0cab644663803
+branch: feature/nnue-optimizations
+machine: i9-13980HX (8P+16E, 32 logical), 31.6 GB RAM, Windows 10.0.26200
+binary: target\release\manifold.exe (target-cpu=native, AVX2+VNNI, sparse FC0)
+net: nets\main.nnue (auto-discovered)
+date: 2026-08-06T00:44:51.6937260+03:00

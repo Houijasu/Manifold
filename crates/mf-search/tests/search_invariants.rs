@@ -613,6 +613,70 @@ fn insufficient_material_is_scored_as_a_draw_without_masking_two_bishops() {
     assert!(search_default(&position, &table, limits(4), network).score >= 100);
 }
 
+/// Iterative deepening must stop at `MAX_SEARCH_PLY`, even when nothing else stops it.
+///
+/// A user ran `go infinite` on a forced mate and watched the engine iterate to depth
+/// 3546. Nothing above `MAX_SEARCH_PLY` can produce a new line -- `pvs` returns the
+/// static evaluation at that ply -- so those iterations were pure waste, and the info
+/// lines they emitted were what made the search look unstoppable.
+#[test]
+fn an_infinite_search_stops_iterating_at_the_ply_ceiling() {
+    let Some(network) = network() else {
+        return;
+    };
+    // The user's scenario: a forced mate under `infinite`, where the mate-score early
+    // exit is deliberately suppressed. Every iteration past the first is cheap, so an
+    // uncapped loop runs away in seconds -- the observed depth was 322013 in six.
+    let position = Position::from_fen("7k/6Q1/6K1/8/8/8/8/8 w - - 0 1", false)
+        .expect("mate-in-one FEN should parse");
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+    let stop = AtomicBool::new(false);
+    let result = search_with_callback(
+        &position,
+        &[position.repetition_key()],
+        &table,
+        SearchLimits {
+            depth: None,
+            nodes: None,
+            soft_time: None,
+            hard_time: None,
+            infinite: true,
+        },
+        SearchOptions::default(),
+        network,
+        &stop,
+        |_| {},
+    );
+
+    assert!(
+        result.depth <= MAX_SEARCH_PLY as u32,
+        "infinite search reported depth {}, above the {MAX_SEARCH_PLY}-ply ceiling",
+        result.depth
+    );
+    assert!(
+        result.best_move.is_some(),
+        "a capped infinite search must still name a move"
+    );
+}
+
+/// `go depth N` above the ceiling searches to the ceiling rather than to `N`.
+#[test]
+fn a_requested_depth_above_the_ceiling_is_clamped_to_it() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::from_fen("7k/6Q1/6K1/8/8/8/8/8 w - - 0 1", false)
+        .expect("mate-in-one FEN should parse");
+    let table = TranspositionTable::new(4).expect("test TT should allocate");
+    let result = search_default(&position, &table, limits(4_000), network);
+
+    assert!(
+        result.depth <= MAX_SEARCH_PLY as u32,
+        "go depth 4000 reported depth {}, above the {MAX_SEARCH_PLY}-ply ceiling",
+        result.depth
+    );
+}
+
 #[test]
 fn stalemate_resource_is_visible_through_quiescence() {
     let Some(network) = network() else {

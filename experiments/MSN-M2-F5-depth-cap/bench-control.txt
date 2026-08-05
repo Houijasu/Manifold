@@ -1,0 +1,11 @@
+Deterministic bench signature after the depth cap (must match the pinned anchor 45036).
+run 1:
+Positions: 6
+Nodes searched: 45036
+Time (ms): 85
+NPS: 524786
+run 2:
+Positions: 6
+Nodes searched: 45036
+Time (ms): 87
+NPS: 516411

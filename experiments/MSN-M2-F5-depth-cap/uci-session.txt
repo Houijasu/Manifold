@@ -1,0 +1,22 @@
+Post-fix UCI verification (release manifold.exe, target-cpu=native, i9-13980HX 8P+16E).
+
+=== forced mate 7k/6Q1/6K1/8/8/8/8/8 w - - 0 1, Threads=1, go infinite, 15s think ===
+max depth after 15000 ms of 'go infinite': 128 (stdout bytes: 114786)
+stop -> bestmove latency: 79 ms; line: bestmove g7e7
+max depth overall: 128
+stdout bytes after stop: 114800
+exited: True; transcript: C:\Users\Samaritan\AppData\Local\Temp\mf-probe-9901d37723e3434b97531ed81fc966ac.txt
+
+=== same position, Threads=8, go infinite, 10s think ===
+max depth after 10000 ms of 'go infinite': 128 (stdout bytes: 114995)
+stop -> bestmove latency: 69 ms; line: bestmove g7d7
+max depth overall: 128
+stdout bytes after stop: 115009
+exited: True; transcript: C:\Users\Samaritan\AppData\Local\Temp\mf-probe-da705ad2a88e428da0ac55e0faf8a5ab.txt
+
+=== kiwipete middlegame, Threads=1, go infinite, 10s think ===
+max depth after 10000 ms of 'go infinite': 20 (stdout bytes: 104002)
+stop -> bestmove latency: 57 ms; line: bestmove e2a6
+max depth overall: 20
+stdout bytes after stop: 104057
+exited: True; transcript: C:\Users\Samaritan\AppData\Local\Temp\mf-probe-53235c9ee2ec4b43b2c1cc3a1e68c11d.txt

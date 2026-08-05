@@ -39,6 +39,12 @@ const ASPIRATION_MAX_DELTA: i32 = 512;
 /// Most plies a repeated root fail high may shave off the re-search.
 const ASPIRATION_MAX_DEPTH_REDUCTION: u32 = 3;
 const DEFAULT_MAX_DEPTH: u32 = 64;
+/// Deepest iteration the deepening loop will ever start.
+///
+/// Bounded by the ply ceiling because that is where the search stops descending: `pvs`
+/// returns the static evaluation at `MAX_SEARCH_PLY` rather than recursing, so a nominal
+/// depth beyond it buys nothing.
+const MAX_ITERATIVE_DEEPENING_DEPTH: u32 = MAX_SEARCH_PLY as u32;
 const TIME_CHECK_INTERVAL: u64 = 512;
 const NODE_PUBLISH_INTERVAL: u64 = 1_024;
 const NMP_MIN_DEPTH: i32 = 3;
@@ -496,11 +502,7 @@ where
             ..limits
         }
     };
-    let maximum_depth = if limits.infinite {
-        u32::MAX
-    } else {
-        limits.depth.unwrap_or(DEFAULT_MAX_DEPTH).max(1)
-    };
+    let maximum_depth = iteration_ceiling(&limits);
     let mut context = SearchContext::new(
         transposition_table,
         worker_limits,
@@ -634,6 +636,28 @@ where
         elapsed: context.elapsed(),
         pv: completed.pv,
         iterations: context.iterations,
+    }
+}
+
+/// The deepest iteration the deepening loop may start under these limits.
+///
+/// Bounded by `MAX_SEARCH_PLY` in every mode, `infinite` included. `pvs` returns the
+/// static evaluation once `ply` reaches that ceiling rather than recursing, so an
+/// iteration nominally deeper than it re-searches the same tree for the same answer.
+/// Left unbounded, `go infinite` on a forced mate reached depth 322013 in six seconds:
+/// each of those iterations emitted an info line, and the resulting backlog is what made
+/// the engine look unstoppable.
+///
+/// Reaching the ceiling is not a reason to answer, though. UCI forbids a `bestmove`
+/// before `stop` in infinite mode, so the caller idles there instead.
+fn iteration_ceiling(limits: &SearchLimits) -> u32 {
+    if limits.infinite {
+        MAX_ITERATIVE_DEEPENING_DEPTH
+    } else {
+        limits
+            .depth
+            .unwrap_or(DEFAULT_MAX_DEPTH)
+            .clamp(1, MAX_ITERATIVE_DEEPENING_DEPTH)
     }
 }
 
@@ -3043,6 +3067,47 @@ mod tests {
     fn aggregate_nodes_sum_published_worker_counts() {
         let counters = [AtomicU64::new(10), AtomicU64::new(20)];
         assert_eq!(published_node_total(&counters), 30);
+    }
+
+    /// Every mode is bounded by the ply ceiling, `infinite` most of all: a user ran
+    /// `go infinite` on a forced mate and watched the loop iterate past depth 3000.
+    #[test]
+    fn iterative_deepening_is_bounded_by_the_ply_ceiling() {
+        assert_eq!(MAX_ITERATIVE_DEEPENING_DEPTH, MAX_SEARCH_PLY as u32);
+
+        let infinite = SearchLimits {
+            infinite: true,
+            ..SearchLimits::default()
+        };
+        assert_eq!(iteration_ceiling(&infinite), MAX_ITERATIVE_DEEPENING_DEPTH);
+
+        // An `infinite` request carrying a depth is still infinite: `search_limits`
+        // drops the depth, and the ceiling must not resurrect it.
+        assert_eq!(
+            iteration_ceiling(&SearchLimits {
+                depth: Some(4),
+                ..infinite
+            }),
+            MAX_ITERATIVE_DEEPENING_DEPTH
+        );
+
+        let at = |depth| {
+            iteration_ceiling(&SearchLimits {
+                depth: Some(depth),
+                ..SearchLimits::default()
+            })
+        };
+        assert_eq!(at(0), 1, "depth 0 still owes the GUI one iteration");
+        assert_eq!(at(12), 12, "a depth within the ceiling is honoured exactly");
+        assert_eq!(at(MAX_ITERATIVE_DEEPENING_DEPTH), MAX_SEARCH_PLY as u32);
+        assert_eq!(at(200), MAX_ITERATIVE_DEEPENING_DEPTH);
+        assert_eq!(at(u32::MAX), MAX_ITERATIVE_DEEPENING_DEPTH);
+
+        // No depth at all keeps the historical default.
+        assert_eq!(
+            iteration_ceiling(&SearchLimits::default()),
+            DEFAULT_MAX_DEPTH
+        );
     }
 
     #[test]
