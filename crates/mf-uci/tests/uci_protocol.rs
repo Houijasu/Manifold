@@ -773,14 +773,17 @@ fn every_search_reports_an_nnue_evaluator_and_its_source() {
     assert_eq!(bestmoves(&output).len(), 2);
 }
 
+/// An oversize request is not covered here on purpose: it now genuinely allocates the
+/// advertised maximum, which is gigabytes, and this suite runs its cases in parallel.
+/// The clamp is pinned by `an_oversize_hash_request_clamps_to_the_maximum` in the
+/// library tests, which exercises the same function at a size a test can afford.
 #[test]
-fn hash_option_resizes_case_insensitively_and_rejects_extremes_without_crashing() {
+fn hash_option_resizes_case_insensitively_and_rejects_invalid_values_without_crashing() {
     let output = run_uci(&[
         "SeToPtIoN NaMe hAsH VaLuE 3",
         "setoption name Hash value 0",
         "setoption name Hash value -5",
         "setoption name Hash value banana",
-        "setoption name Hash value 99999999999",
         "isready",
         "position startpos",
         "go depth 2",
@@ -795,14 +798,48 @@ fn hash_option_resizes_case_insensitively_and_rejects_extremes_without_crashing(
             .iter()
             .any(|line| line.starts_with("info string invalid Hash value"))
     );
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.starts_with("info string unable to allocate Hash"))
-    );
     assert!(lines.contains(&"readyok"));
     assert_eq!(bestmoves(&output).len(), 1);
     assert!(output.stderr.is_empty());
+}
+
+/// The advertised maximum has to be a size the engine will actually accept.
+///
+/// The engine used to advertise `max 1048576` and refuse everything past 4096, so a GUI
+/// that offered the advertised range produced a diagnostic and kept the old table. This
+/// reads the number out of the handshake and hands it straight back, which is the only
+/// check that catches the two drifting apart again.
+#[test]
+fn the_advertised_hash_maximum_is_accepted_rather_than_refused() {
+    let handshake = run_uci(&["uci", "quit"]);
+    let advertised = stdout_lines(&handshake)
+        .into_iter()
+        .find_map(|line| {
+            line.strip_prefix("option name Hash type spin")
+                .and_then(|rest| rest.split(" max ").nth(1))
+                .and_then(|maximum| maximum.trim().parse::<u64>().ok())
+        })
+        .expect("the handshake should advertise a Hash maximum");
+
+    let output = run_uci(&[
+        &format!("setoption name Hash value {advertised}"),
+        "isready",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let lines = stdout_lines(&output);
+    assert!(
+        lines.contains(&format!("info string hash resized to {advertised} MB").as_str()),
+        "the advertised maximum must resize, not fail: {lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.starts_with("info string unable to allocate Hash")),
+        "the engine must never refuse the size it advertises: {lines:?}"
+    );
+    assert!(lines.contains(&"readyok"));
 }
 
 #[allow(non_snake_case)]

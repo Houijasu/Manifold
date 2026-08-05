@@ -2,14 +2,105 @@ use core::fmt;
 use core::mem::{align_of, size_of};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::collections::TryReserveError;
+use std::sync::OnceLock;
 
 use mf_core::Move;
 
 pub const CACHE_LINE_BYTES: usize = 64;
 pub const ENTRIES_PER_CLUSTER: usize = 4;
 const AGE_MASK: u8 = 31;
-const MAX_EAGER_ALLOCATION_MIB: usize = 4096;
 const MEBIBYTE: usize = 1024 * 1024;
+/// Share of installed memory the largest offered table may claim, as a divisor.
+///
+/// The table is written eagerly, so every mebibyte offered is a mebibyte resident. Half
+/// the machine leaves room for the ~106 MiB network, the search stacks, the operating
+/// system, and whatever else the user is running while the engine analyses.
+const MEMORY_SHARE_DIVISOR: u64 = 2;
+/// The maximum offered when installed memory cannot be determined.
+///
+/// This is the size the engine allocated successfully for its whole history before the
+/// limit became machine-derived, so an unknown machine is offered exactly what every
+/// machine used to be offered.
+const FALLBACK_MAX_HASH_MIB: usize = 4096;
+/// Floor on the offered maximum, so the advertised range is never degenerate.
+const MIN_MAX_HASH_MIB: usize = 16;
+
+/// The largest Hash size, in MiB, this machine will actually allocate.
+///
+/// This is the number the UCI handshake advertises. Advertising a size the engine then
+/// refuses is worse than advertising a small one: a GUI that honours the advertised range
+/// gets a diagnostic buried in `info string` output and keeps searching with whatever
+/// table it had, which is usually the 16 MB default and saturates within the first
+/// second of every search.
+///
+/// The result is a power of two, both because it is the shape a GUI's spin control
+/// expects and because rounding down is the conservative direction.
+pub fn max_hash_mebibytes() -> usize {
+    static MAX: OnceLock<usize> = OnceLock::new();
+    *MAX.get_or_init(|| max_hash_for_installed_memory(installed_memory_bytes()))
+}
+
+/// The offered maximum for a machine with `installed_bytes` of memory.
+///
+/// Separated from [`max_hash_mebibytes`] so the policy can be tested at machine sizes
+/// this machine does not have, which is the only way to test it without asserting the
+/// answer against itself.
+pub fn max_hash_for_installed_memory(installed_bytes: Option<u64>) -> usize {
+    let Some(installed_bytes) = installed_bytes else {
+        return FALLBACK_MAX_HASH_MIB;
+    };
+    let offerable_mib = (installed_bytes / MEMORY_SHARE_DIVISOR / MEBIBYTE as u64) as usize;
+    previous_power_of_two(offerable_mib).max(MIN_MAX_HASH_MIB)
+}
+
+/// The largest power of two not exceeding `value`, or 0 for 0.
+fn previous_power_of_two(value: usize) -> usize {
+    if value == 0 {
+        return 0;
+    }
+    1 << (usize::BITS - 1 - value.leading_zeros())
+}
+
+#[cfg(windows)]
+fn installed_memory_bytes() -> Option<u64> {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        length: u32,
+        memory_load: u32,
+        total_physical: u64,
+        available_physical: u64,
+        total_page_file: u64,
+        available_page_file: u64,
+        total_virtual: u64,
+        available_virtual: u64,
+        available_extended_virtual: u64,
+    }
+
+    unsafe extern "system" {
+        fn GlobalMemoryStatusEx(buffer: *mut MemoryStatusEx) -> i32;
+    }
+
+    let mut status = MemoryStatusEx {
+        length: size_of::<MemoryStatusEx>() as u32,
+        memory_load: 0,
+        total_physical: 0,
+        available_physical: 0,
+        total_page_file: 0,
+        available_page_file: 0,
+        total_virtual: 0,
+        available_virtual: 0,
+        available_extended_virtual: 0,
+    };
+    // SAFETY: `status` is a live, correctly sized `MEMORYSTATUSEX` whose `length` field
+    // is set to its own size, which is the whole contract of this call.
+    let succeeded = unsafe { GlobalMemoryStatusEx(&mut status) } != 0;
+    (succeeded && status.total_physical > 0).then_some(status.total_physical)
+}
+
+#[cfg(not(windows))]
+fn installed_memory_bytes() -> Option<u64> {
+    None
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -63,7 +154,7 @@ impl fmt::Display for AllocationError {
                 limit_mib,
             } => write!(
                 formatter,
-                "{requested_mib} MB exceeds the safe eager-allocation limit of {limit_mib} MB"
+                "{requested_mib} MB exceeds the maximum of {limit_mib} MB"
             ),
             Self::Reserve(error) => write!(formatter, "allocator rejected the request: {error}"),
         }
@@ -162,10 +253,11 @@ impl TranspositionTable {
         if mebibytes == 0 {
             return Err(AllocationError::ZeroSize);
         }
-        if mebibytes > MAX_EAGER_ALLOCATION_MIB {
+        let limit_mib = max_hash_mebibytes();
+        if mebibytes > limit_mib {
             return Err(AllocationError::RequestTooLarge {
                 requested_mib: mebibytes,
-                limit_mib: MAX_EAGER_ALLOCATION_MIB,
+                limit_mib,
             });
         }
 

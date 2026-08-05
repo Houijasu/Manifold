@@ -3,8 +3,9 @@ use std::thread;
 
 use mf_core::{Move, MoveFlag, Square};
 use mf_search::{
-    Bound, CACHE_LINE_BYTES, CLUSTER_ALIGNMENT, CLUSTER_BYTES, ENTRIES_PER_CLUSTER, ENTRY_BYTES,
-    EntryData, TranspositionTable,
+    AllocationError, Bound, CACHE_LINE_BYTES, CLUSTER_ALIGNMENT, CLUSTER_BYTES,
+    ENTRIES_PER_CLUSTER, ENTRY_BYTES, EntryData, TranspositionTable, max_hash_for_installed_memory,
+    max_hash_mebibytes,
 };
 
 fn next_random(state: &mut u64) -> u64 {
@@ -76,6 +77,77 @@ fn requested_hash_size_allocates_approximately_that_many_mebibytes() {
             table.allocated_bytes() < requested + CACHE_LINE_BYTES,
             "allocation should round only to the next cache line"
         );
+    }
+}
+
+/// The advertised ceiling must describe this machine, not a constant chosen once.
+///
+/// The engine used to advertise `max 1048576` while refusing anything over 4096 MB, so a
+/// GUI that honoured the advertised range got a diagnostic and the previous table. The
+/// ceiling is now derived from installed memory, which is the only number that makes
+/// "advertised" and "allocatable" the same claim.
+#[test]
+fn the_offered_maximum_is_half_of_installed_memory_rounded_down_to_a_power_of_two() {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    for (installed_gib, expected_mib) in [(8u64, 4096), (16, 8192), (32, 16384), (64, 32768)] {
+        assert_eq!(
+            max_hash_for_installed_memory(Some(installed_gib * GIB)),
+            expected_mib,
+            "a {installed_gib} GB machine should be offered {expected_mib} MB"
+        );
+    }
+    // This machine reports 33,957,138,432 bytes -- 31.6 GiB, not a clean 32. Half of that
+    // is 15.8 GiB, which rounds DOWN to 8192 MB. Rounding up to 16384 would offer more
+    // than half the machine, so the answer must be the smaller one.
+    assert_eq!(max_hash_for_installed_memory(Some(33_957_138_432)), 8192);
+}
+
+/// A machine whose memory cannot be read is offered the size the engine allocated
+/// successfully for its whole history, rather than nothing or a guess.
+#[test]
+fn an_unknown_machine_falls_back_to_the_historically_safe_maximum() {
+    assert_eq!(max_hash_for_installed_memory(None), 4096);
+}
+
+/// The offered maximum is never degenerate, even on a very small machine.
+#[test]
+fn a_tiny_machine_is_still_offered_a_usable_table() {
+    let maximum = max_hash_for_installed_memory(Some(64 * 1024 * 1024));
+    assert_eq!(maximum, 32);
+    assert_eq!(max_hash_for_installed_memory(Some(1024 * 1024)), 16);
+}
+
+#[test]
+fn this_machine_is_offered_more_than_the_old_hard_coded_cap() {
+    let maximum = max_hash_mebibytes();
+    assert!(
+        maximum.is_power_of_two(),
+        "the advertised maximum should be a round number a GUI can offer: got {maximum}"
+    );
+    assert!(
+        maximum >= 8192,
+        "this 32 GB machine must offer a genuinely large table, past the old 4096 cap: got {maximum}"
+    );
+}
+
+#[test]
+fn a_request_past_the_machine_maximum_reports_the_real_limit() {
+    let maximum = max_hash_mebibytes();
+    let rejection = TranspositionTable::new(maximum + 1)
+        .err()
+        .expect("a request past the machine maximum should be rejected");
+    match rejection {
+        AllocationError::RequestTooLarge {
+            requested_mib,
+            limit_mib,
+        } => {
+            assert_eq!(requested_mib, maximum + 1);
+            assert_eq!(
+                limit_mib, maximum,
+                "the reported limit must be the advertised maximum, not a hard-coded constant"
+            );
+        }
+        other => panic!("expected RequestTooLarge, got {other:?}"),
     }
 }
 

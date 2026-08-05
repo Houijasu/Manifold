@@ -16,16 +16,18 @@ use mf_nnue::{Network, NetworkSource, production_forward_mode, resolve_network};
 use mf_search::{
     IterationInfo, PoolError, PoolSearchResult, RootMoveInfo, SearchLimits, SearchOptions,
     SearchPool, SearchResult, SharedHistory, TranspositionTable, clamp_centipawn_score,
-    score_to_uci_mate, search_with_shared_history,
+    max_hash_mebibytes, score_to_uci_mate, search_with_shared_history,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
 const MIN_HASH_MIB: i128 = 1;
-const MAX_HASH_MIB: i128 = 1_048_576;
+/// The handshake, apart from the `Hash` line.
+///
+/// `Hash` is not here because its advertised range is a property of the machine rather
+/// than of the build: see [`hash_option_line`].
 const UCI_RESPONSE: &[&str] = &[
     "id name Manifold",
     "id author Houijasu",
-    "option name Hash type spin default 16 min 1 max 1048576",
     "option name Threads type spin default 1 min 1 max 256",
     "option name UCI_Chess960 type check default false",
     "option name UseNMP type check default true",
@@ -54,8 +56,8 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseCorrHistMaterial type check default false",
     "option name UseCorrHistCont type check default true",
     "option name EvalFile type string default <empty>",
-    "uciok",
 ];
+
 const BENCH_CASES: [&str; 6] = [
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
@@ -89,6 +91,18 @@ const HARD_LIMIT_CLOCK_PERCENT: u64 = 40;
 /// more time than a quiet one, which makes the soft/hard split decorative.
 const HARD_LIMIT_SOFT_MULTIPLE: u64 = 4;
 const NULL_BESTMOVE: &str = "0000";
+
+/// The `Hash` option line, whose advertised maximum is what this machine can allocate.
+///
+/// A fixed maximum here is a promise the engine cannot keep on every machine it runs on,
+/// and the failure mode is silent: the GUI sets the size it was offered, allocation is
+/// refused, and the engine keeps searching with the table it already had.
+fn hash_option_line() -> String {
+    format!(
+        "option name Hash type spin default {DEFAULT_HASH_MIB} min {MIN_HASH_MIB} max {}",
+        max_hash_mebibytes()
+    )
+}
 
 struct EngineState {
     position: Position,
@@ -212,6 +226,8 @@ where
                 for response in UCI_RESPONSE {
                     writeln!(writer, "{response}")?;
                 }
+                writeln!(writer, "{}", hash_option_line())?;
+                writeln!(writer, "uciok")?;
                 writer.flush()?;
             }
         } else if keyword.eq_ignore_ascii_case("isready") && has_no_arguments {
@@ -865,19 +881,7 @@ fn handle_setoption<W: Write>(
             return Ok(());
         }
 
-        let clamped = requested.min(MAX_HASH_MIB) as usize;
-        match TranspositionTable::new(clamped) {
-            Ok(table) => {
-                state.transposition_table = Arc::new(table);
-                writeln!(writer, "info string hash resized to {clamped} MB")?;
-            }
-            Err(error) => {
-                writeln!(
-                    writer,
-                    "info string unable to allocate Hash {clamped} MB: {error}"
-                )?;
-            }
-        }
+        resize_hash(requested, max_hash_mebibytes(), state, writer)?;
     } else if name.eq_ignore_ascii_case("Threads") {
         let Ok(requested) = value.parse::<i128>() else {
             writeln!(writer, "info string invalid Threads value '{value}'")?;
@@ -895,6 +899,46 @@ fn handle_setoption<W: Write>(
                     "info string unable to create {thread_count}-thread search pool: {error}"
                 )?;
             }
+        }
+    }
+    Ok(())
+}
+
+/// Resizes the transposition table, clamping a request past `maximum` instead of
+/// refusing it.
+///
+/// Refusal left the engine searching with the table it already had -- in a fresh session
+/// the 16 MB default -- while the GUI believed it had configured gigabytes. The only
+/// notice was an `info string` that no GUI surfaces, so the visible symptom was a
+/// `hashfull` that saturated within the first second of every search and an engine that
+/// played like it had no memory. Clamping keeps the size the engine reports and the size
+/// it actually searches with the same number.
+///
+/// `maximum` is a parameter rather than a direct call to [`max_hash_mebibytes`] so the
+/// clamp can be tested at a size that does not require the machine's memory to exercise.
+fn resize_hash<W: Write>(
+    requested_mib: i128,
+    maximum_mib: usize,
+    state: &mut EngineState,
+    writer: &mut W,
+) -> io::Result<()> {
+    let clamped = requested_mib.min(maximum_mib as i128) as usize;
+    if requested_mib > maximum_mib as i128 {
+        writeln!(
+            writer,
+            "info string Hash {requested_mib} MB exceeds the maximum of {maximum_mib} MB; using {clamped} MB"
+        )?;
+    }
+    match TranspositionTable::new(clamped) {
+        Ok(table) => {
+            state.transposition_table = Arc::new(table);
+            writeln!(writer, "info string hash resized to {clamped} MB")?;
+        }
+        Err(error) => {
+            writeln!(
+                writer,
+                "info string unable to allocate Hash {clamped} MB: {error}"
+            )?;
         }
     }
     Ok(())
@@ -1681,20 +1725,69 @@ mod tests {
         );
     }
 
+    /// An oversize request resizes to the advertised maximum and says so.
+    ///
+    /// The old behaviour kept the previous table -- in a fresh session the 16 MB default
+    /// -- and reported only an `info string`. A GUI that offers the advertised range then
+    /// believes it configured gigabytes while the engine thrashed a table small enough to
+    /// saturate in the first second of every search. Clamping is honest about the number
+    /// the engine actually got, and the table it leaves behind is the one it named.
     #[test]
-    fn failed_hash_resize_preserves_the_existing_usable_table() {
+    fn an_oversize_hash_request_clamps_to_the_maximum() {
         let mut state = EngineState::default();
-        let original_bytes = state.transposition_table.allocated_bytes();
         let mut output = Vec::new();
 
-        handle_setoption("setoption name Hash value 1048576", &mut state, &mut output)
+        resize_hash(9_000, 8, &mut state, &mut output)
             .expect("setoption output should be writable");
 
-        assert_eq!(state.transposition_table.allocated_bytes(), original_bytes);
+        assert_eq!(
+            state.transposition_table.allocated_bytes(),
+            8 * 1024 * 1024,
+            "an oversize request must leave the clamped table behind, not the old one"
+        );
+        let output = String::from_utf8(output).expect("protocol output should be UTF-8");
         assert!(
-            String::from_utf8(output)
-                .expect("protocol output should be UTF-8")
-                .contains("unable to allocate Hash 1048576 MB")
+            output.contains("info string Hash 9000 MB exceeds the maximum of 8 MB; using 8 MB"),
+            "the clamp must be announced explicitly: {output}"
+        );
+        assert!(
+            output.contains("info string hash resized to 8 MB"),
+            "the resulting size must be reported: {output}"
+        );
+        assert!(
+            !output.contains("unable to allocate"),
+            "a clamped request is not a failure: {output}"
+        );
+    }
+
+    #[test]
+    fn a_hash_request_within_the_maximum_is_honoured_without_a_clamp_notice() {
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+
+        resize_hash(4, 8, &mut state, &mut output).expect("setoption output should be writable");
+
+        assert_eq!(state.transposition_table.allocated_bytes(), 4 * 1024 * 1024);
+        let output = String::from_utf8(output).expect("protocol output should be UTF-8");
+        assert_eq!(output.trim_end(), "info string hash resized to 4 MB");
+    }
+
+    /// The advertised maximum must be the one the resize path enforces.
+    ///
+    /// The engine used to advertise `max 1048576` and refuse everything over 4096, which
+    /// is the whole defect: the two numbers have to come from the same place.
+    #[test]
+    fn the_advertised_hash_maximum_is_the_one_the_engine_enforces() {
+        let maximum = max_hash_mebibytes();
+        assert_eq!(
+            hash_option_line(),
+            format!(
+                "option name Hash type spin default {DEFAULT_HASH_MIB} min {MIN_HASH_MIB} max {maximum}"
+            )
+        );
+        assert!(
+            TranspositionTable::new(maximum + 1).is_err(),
+            "one MB past the advertised maximum is the first refused size"
         );
     }
 

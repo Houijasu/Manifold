@@ -1,0 +1,60 @@
+Indexing opening suite...
+Started game 1 of 20 (hash-fix vs mission-start)
+Finished game 1 (hash-fix vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 2 of 20 (mission-start vs hash-fix)
+Finished game 2 (mission-start vs hash-fix): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 3 of 20 (hash-fix vs mission-start)
+Finished game 3 (hash-fix vs mission-start): 1-0 {White mates}
+Started game 4 of 20 (mission-start vs hash-fix)
+Finished game 4 (mission-start vs hash-fix): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 5 of 20 (hash-fix vs mission-start)
+Finished game 5 (hash-fix vs mission-start): 1-0 {White mates}
+Started game 6 of 20 (mission-start vs hash-fix)
+Finished game 6 (mission-start vs hash-fix): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 7 of 20 (hash-fix vs mission-start)
+Finished game 7 (hash-fix vs mission-start): 1-0 {White mates}
+Started game 8 of 20 (mission-start vs hash-fix)
+Finished game 8 (mission-start vs hash-fix): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 9 of 20 (hash-fix vs mission-start)
+Finished game 9 (hash-fix vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 10 of 20 (mission-start vs hash-fix)
+Finished game 10 (mission-start vs hash-fix): 1-0 {White mates}
+Started game 11 of 20 (hash-fix vs mission-start)
+Finished game 11 (hash-fix vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 12 of 20 (mission-start vs hash-fix)
+Finished game 12 (mission-start vs hash-fix): 1/2-1/2 {Draw by insufficient mating material}
+Started game 13 of 20 (hash-fix vs mission-start)
+Finished game 13 (hash-fix vs mission-start): 1-0 {White mates}
+Started game 14 of 20 (mission-start vs hash-fix)
+Finished game 14 (mission-start vs hash-fix): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 15 of 20 (hash-fix vs mission-start)
+Finished game 15 (hash-fix vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 16 of 20 (mission-start vs hash-fix)
+Finished game 16 (mission-start vs hash-fix): 1/2-1/2 {Draw by insufficient mating material}
+Started game 17 of 20 (hash-fix vs mission-start)
+Finished game 17 (hash-fix vs mission-start): 1-0 {White mates}
+Started game 18 of 20 (mission-start vs hash-fix)
+Finished game 18 (mission-start vs hash-fix): 1-0 {White mates}
+Started game 19 of 20 (hash-fix vs mission-start)
+Finished game 19 (hash-fix vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 20 of 20 (mission-start vs hash-fix)
+Finished game 20 (mission-start vs hash-fix): 1/2-1/2 {Draw by insufficient mating material}
+--------------------------------------------------
+Results of hash-fix vs mission-start (8+0.08, 2t, 4096MB, UHO_4060_v4.epd):
+Elo: 52.51 +/- 71.59, nElo: 115.10 +/- 152.27
+LOS: 93.08 %, DrawRatio: 50.00 %, PairsRatio: 4.00
+Games: 20, Wins: 5, Losses: 2, Draws: 13, Points: 11.5 (57.50 %)
+Ptnml(0-2): [0, 1, 5, 4, 0], WL/DD Ratio: 0.25
+--------------------------------------------------
+Finished match
+Total Time: 00:08:50 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: disabled   concurrency: 1   threads: A=2 B=2
+  hash-fix     time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  mission-start time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================

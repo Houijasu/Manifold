@@ -20,5 +20,6 @@ pub use search::{
 pub use thread_pool::{PoolError, PoolSearchResult, SearchPool};
 pub use transposition_table::{
     AllocationError, Bound, CACHE_LINE_BYTES, CLUSTER_ALIGNMENT, CLUSTER_BYTES,
-    ENTRIES_PER_CLUSTER, ENTRY_BYTES, EntryData, TranspositionTable,
+    ENTRIES_PER_CLUSTER, ENTRY_BYTES, EntryData, TranspositionTable, max_hash_for_installed_memory,
+    max_hash_mebibytes,
 };

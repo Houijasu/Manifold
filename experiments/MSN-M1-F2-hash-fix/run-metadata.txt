@@ -1,0 +1,26 @@
+Commit:      0012b361be8bbf95709e7d44be6a72a0733d2cec
+Binary A:    hash-fix -> C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+SHA-256 A:   40FF5CB2BEB92823705ADEA6C7247297BE00C237F813110B83396E7554DC1739
+Binary B:    mission-start -> C:\Users\Samaritan\Projects\Manifold\baselines\mission-start\manifold.exe
+SHA-256 B:   43EB8A0DD0C81172EFDD1F914899C080DFD757CA26EACA144913E52CEAD2CB28
+TC:          tc=8+0.08
+Seed:        20260805
+Book:        C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd  -format epd -order random -repeat -games 2
+Affinity:    disabled   Concurrency: 1   Threads: A=2 B=2   Hash: 4096
+SPRT:        (none -- fixed-length match)
+Rounds:      10 (x2 games, paired openings)
+Guardrail:   an engine runs Threads>1 (A=2 B=2); AGENTS.md 4.451 forbids -use-affinity here
+Pre-run CPU: 83% (max of 5 samples, AGENTS.md 4.8)
+Purpose:     M1-F2 large-Hash stability smoke: Hash=4096 both sides, post-fix build vs mission-start. Threads=2 forces concurrency 1 so only two engine processes exist; at 1T concurrency 8 the same Hash would need 65.7 GB against 19.7 GB free and would manufacture time forfeits.
+Date:        2026-08-05T11:33:26Z
+Driver:      harness/run_match.ps1
+Command:
+C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe -engine cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe name=hash-fix option.Hash=4096 option.Threads=2 -engine cmd=C:\Users\Samaritan\Projects\Manifold\baselines\mission-start\manifold.exe name=mission-start option.Hash=4096 option.Threads=2 -each proto=uci tc=8+0.08 -openings file=C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd format=epd order=random -repeat -games 2 -rounds 10 -concurrency 1 -srand 20260805 -report penta=true -ratinginterval 50 -pgnout file=C:\Users\Samaritan\Projects\Manifold\experiments\MSN-M1-F2-hash-fix\games.pgn append=false -log file=C:\Users\Samaritan\Projects\Manifold\experiments\MSN-M1-F2-hash-fix\fastchess.log level=warn append=false
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: disabled   concurrency: 1   threads: A=2 B=2
+  hash-fix     time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  mission-start time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================
