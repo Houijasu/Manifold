@@ -29,17 +29,25 @@ use std::time::{Duration, Instant};
 ///
 /// NNUE search integration intentionally invalidates those HCE anchors. The current
 /// normalized-centipawn NNUE signature is pinned below.
-const BENCH_NODE_COUNT: u64 = 64_756;
-const BENCH_NODES: &str = "Nodes searched: 64756";
+///
+/// The M7 search work (quiescence TT and delta pruning, the soft/hard time-management
+/// split, widened SEE pruning windows, and score-scaled aspiration windows) then moved
+/// this from `64_756` to `45_036`, a further -30.5%. Every anchor in this file moved
+/// with it, so the M4-era attribution controls below pin new values: the properties
+/// they guard are unchanged, but the numbers they guard them with are not. Their
+/// commentary is kept because it records WHY each control exists, which is the part
+/// that outlives any particular signature.
+const BENCH_NODE_COUNT: u64 = 45_036;
+const BENCH_NODES: &str = "Nodes searched: 45036";
 
 /// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
-const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 62_781;
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 47_144;
 
 /// The NNUE signature reproduced exactly by `UseContHistory=false`.
 ///
 /// This is measured with correction history off so the anchor isolates continuation
 /// history rather than folding correction-history changes into the same number.
-const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 74_544;
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 44_320;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -61,7 +69,10 @@ const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 74_544;
 /// removing LMR removes more search than it used to. The all-on arm got cheaper while
 /// the LMR-off arm got dearer, which is only possible if the new signal is being
 /// consumed by LMR rather than by move ordering alone.
-const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 142_487;
+///
+/// M7 moved it again, from `142_487` to `124_323`, in the same direction as every other
+/// anchor here.
+const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 124_323;
 
 fn workspace_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -190,7 +201,7 @@ fn run_uci_bench_ablation_session() -> Output {
         // The history tables are disabled for the whole of this session. They are a
         // move-ordering input that every other technique's isolated delta is measured
         // through, so leaving them on would fold history's effect into all eleven
-        // numbers below. The NNUE all-off signatures (`5_157_465` and `3_967_988`)
+        // numbers below. The NNUE all-off signatures (`3_473_717` and `2_848_247`)
         // are pinned separately. History gets its own isolation context in
         // `history_toggles_have_pinned_nnue_signatures`.
         //
@@ -341,7 +352,7 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     assert_eq!(nodes.len(), 14);
     let baseline = nodes[0];
     assert_eq!(
-        baseline, 5_157_465,
+        baseline, 3_473_717,
         "the NNUE all-selectivity-off signature must leave check extensions enabled"
     );
     for (name, enabled) in [
@@ -385,7 +396,7 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     );
 
     assert_eq!(
-        nodes[13], 3_967_988,
+        nodes[13], 2_848_247,
         "UseCheckExt=false must reproduce the NNUE all-selectivity-off signature"
     );
 }
@@ -421,7 +432,7 @@ fn history_toggles_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 4);
 
-    assert_eq!(nodes, [62_781, 76_593, 64_008, 74_544]);
+    assert_eq!(nodes, [47_144, 44_881, 48_561, 44_320]);
 
     assert!(
         nodes[2] > nodes[0],
@@ -500,6 +511,10 @@ fn correction_history_off_reproduces_the_nnue_signature() {
 /// The NNUE evaluator changes the shallow bench direction of the material variant, so
 /// this test pins both exact signatures rather than pretending both still save nodes.
 /// The match evidence, not the bench direction, remains the reason both ship disabled.
+///
+/// After M7 neither variant reads better on bench any more: `47_970` and `49_331`
+/// against the shipped `45_036`. That removes the last tempting number, but it changes
+/// nothing about the decision, which was never the bench delta's to make.
 #[test]
 fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     require_bench_network!();
@@ -520,7 +535,7 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 3);
 
-    assert_eq!(nodes, [BENCH_NODE_COUNT, 58_835, 65_025]);
+    assert_eq!(nodes, [BENCH_NODE_COUNT, 47_970, 49_331]);
 }
 
 /// Turning history off must reproduce the pinned NNUE all-off signatures bit-for-bit.
@@ -538,11 +553,11 @@ fn disabling_history_reproduces_nnue_all_selectivity_off_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
 
     assert_eq!(
-        nodes[0], 5_157_465,
+        nodes[0], 3_473_717,
         "ten selectivity toggles off with history off must match the NNUE anchor exactly"
     );
     assert_eq!(
-        nodes[13], 3_967_988,
+        nodes[13], 2_848_247,
         "all selectivity off with history off must match the NNUE anchor exactly"
     );
 }
@@ -571,9 +586,11 @@ fn disabling_history_reproduces_nnue_all_selectivity_off_signatures() {
 /// regression, so the prediction that continuation history alone would make history
 /// pruning viable is DISPROVEN, not merely unconfirmed.
 ///
-/// The bench delta is now +0.14% (`135_257` -> `135_443`): enabling it no longer even
-/// saves nodes, so there is no longer a favourable bench number tempting anyone to
-/// flip the default.
+/// The bench delta has moved twice since. M4-F2 measured +0.14% (`135_257` ->
+/// `135_443`), i.e. enabling it no longer even saved nodes. Under the M7 search it is
+/// favourable again, -4.6% (`45_036` -> `42_959`). That is precisely the trap this
+/// comment exists to disarm: the technique has now shown a tempting bench number under
+/// two different searches and lost a match under both. Bench is not the evidence.
 ///
 /// This test therefore pins only that the toggle ships off and still reaches the
 /// search. The old "must save nodes" assertion is deliberately NOT retained: it
@@ -618,9 +635,9 @@ fn history_pruning_ships_disabled_after_being_re_measured_on_the_continuation_si
 /// for revisiting it. It still ships OFF, but the picture improved a lot: as a
 /// standalone signal M4-F1 measured it 9.18% WORSE than no history at all, whereas as
 /// a term in the sum it is now statistically indistinguishable from not having it
-/// (**-1.74 +/- 20.98 Elo**, 600 games, LLR -1.22, inconclusive at the cap). It costs
-/// 2.0% bench nodes (`135_257` -> `137_940`). See
-/// `experiments/M4-F2-conthist/pawn-history/`.
+/// (**-1.74 +/- 20.98 Elo**, 600 games, LLR -1.22, inconclusive at the cap). It cost
+/// 2.0% bench nodes at M4-F2 (`135_257` -> `137_940`) and costs 2.7% under M7
+/// (`45_036` -> `46_257`). See `experiments/M4-F2-conthist/pawn-history/`.
 ///
 /// "Not measurably harmful" is not a reason to enable something, so the default stands
 /// unchanged. Pawn history remains wired as a term in `pruning_history` only, where it
@@ -696,9 +713,9 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
     require_bench_network!();
     let output = run_uci_session(
         // Correction history is off for this whole session. The property under test is
-        // which values `use_lmr` gates, and all four anchors below are M4-F2 values
-        // held fixed across M4-F3 so that a future coupling regression is still read
-        // off the same numbers. Correction history feeds the static eval that futility
+        // which values `use_lmr` gates, and all four anchors below were re-pinned to the
+        // M7 build so that a future coupling regression is still read off one
+        // self-consistent set of numbers. Correction history feeds the static eval that futility
         // and SEE pruning threshold against, so leaving it on would move all four
         // anchors for a reason that has nothing to do with LMR gating.
         "setoption name UseCorrHistory value false\n\
@@ -730,11 +747,11 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 83_622,
+        nodes[2], 68_397,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(
-        nodes[3], 109_200,
+        nodes[3], 151_903,
         "with futility and SEE already off, UseLMR=false is unchanged by the split"
     );
 

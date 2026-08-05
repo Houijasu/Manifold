@@ -1,0 +1,66 @@
+# Rung 1 of the M5 architecture ladder: (768 -> 1024)x2 -> 1, SCReLU.
+#
+# This is deliberately NOT a clone of the top reference architecture. bullet's own
+# documentation warns that newcomers lose Elo cloning one, and Alexandria reached 6th
+# on CCRL Blitz with a plain (768->1536)x2->1x8. The reference is on SFNNv16 with
+# L1 = 1024, not 3072 — the first layer SHRANK in Nov 2025 when threat features
+# landed, for +13.9 Elo, because input density beat first-layer width. Width is not
+# the lever.
+#
+# `manifold train --preflight --config <this file>` estimates the VRAM this
+# configuration needs and refuses to launch bullet if the GPU cannot hold it.
+
+net_id = "manifold-m5-rung1"
+
+# --- architecture -----------------------------------------------------------------
+# Ladder rung 1. Rungs 2-4 (output buckets, mirrored king buckets, threat features)
+# get their own configs; do not widen this one.
+hidden_size = 1024
+quantisation_a = 255
+quantisation_b = 64
+eval_scale = 400.0
+
+# --- objective --------------------------------------------------------------------
+# WDL lambda is 0.0 — PURE EVAL — and it is not a tunable here. The bootstrap corpus
+# is the CC0 Lichess *evaluation* database: analysed positions, not played games, so
+# every record's result byte is a neutral Draw placeholder. Blending in that byte
+# would train against a constant; sigmoiding the eval into a WDL label and training on
+# that is circular. Genuine WDL labels arrive later from self-play (M5-F1).
+wdl_lambda = 0.0
+
+# --- data -------------------------------------------------------------------------
+# 91,081,113 records x 32 bytes = 2,914,595,616 bytes, produced by M5-F1B with
+# `--sample-stride 3` across all 394.7M source lines. A STRIDE, not a prefix: the
+# source file is ordered, and mean piece count spans 52% from head to tail.
+data = "C:/temp/mf-data/lichess_bootstrap.bullet"
+data_records = 91081113
+
+# --- schedule ---------------------------------------------------------------------
+# batches_per_superbatch = data_records / batch_size, so one superbatch is one epoch.
+# bullet loops the file silently when the schedule outruns it, so this has to be set
+# from the file size rather than left at an example's default.
+batch_size = 16384
+batches_per_superbatch = 5559
+superbatches = 40
+save_rate = 10
+learning_rate = 0.001
+learning_rate_gamma = 0.3
+learning_rate_step = 15
+
+# --- local settings ---------------------------------------------------------------
+# `threads` feeds bullet's LocalSettings and parallelises feature mapping on the host,
+# not the GPU. This box has 8 P-cores; 4 leaves headroom for the data reader.
+threads = 4
+output_directory = "C:/temp/mf-scratch/bullet/checkpoints"
+
+# bullet lives outside the project directory on purpose: it is a foreign MIT checkout
+# with its own workspace, and vendoring it into `crates/` would drag its CUDA build
+# script into every `cargo build` here.
+bullet_path = "C:/temp/mf-scratch/bullet"
+bullet_example = "mf_rung1"
+
+# --- reference artifacts ----------------------------------------------------------
+# A-NNUE-006 checks the engine's quantised scalar inference against the trainer's own
+# quantised forward pass. The trainer emits it; it is not retrofitted afterwards.
+refset = "C:/Users/Samaritan/Projects/Manifold/nets/reference/refset_10k.fen"
+refeval_out = "C:/Users/Samaritan/Projects/Manifold/nets/reference/manifold-m5-rung1.refeval.csv"
