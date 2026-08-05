@@ -7,13 +7,13 @@ use core::fmt;
 use mf_core::{CastlingSide, Color, Move, Piece, PieceKind, Position, Square, Undo};
 
 use crate::halfka;
+#[cfg(feature = "instrumentation")]
+use crate::instrumentation;
 use crate::network::{L1, Network, PSQT_BUCKETS};
 use crate::simd::{
     ForwardMode, SimdBackend, UnsupportedBackend, add_i8_row, add_i16_row, add_psqt_row,
     fused_accumulator_update, production_forward_mode,
 };
-#[cfg(feature = "instrumentation")]
-use crate::threats::discover_changed_threats_profiled;
 use crate::threats::{
     ChangedThreatBuffer, MAX_ACTIVE, MAX_CHANGED, append_active_threats,
     append_changed_threat_indices, discover_changed_threats,
@@ -159,8 +159,18 @@ impl AccumulatorState {
         threat_removals: &mut [u32; MAX_CHANGED],
     ) {
         if changed_threats.overflowed() {
+            #[cfg(feature = "instrumentation")]
+            let started = instrumentation::cycles();
             *self = Self::build_with_backend(context.network, context.child, context.backend);
             *child_metadata = FrameMetadata::from_position(context.child);
+            #[cfg(feature = "instrumentation")]
+            {
+                let elapsed = instrumentation::cycles().wrapping_sub(started);
+                instrumentation::record(|counters| {
+                    counters.overflow_rebuilds += 1;
+                    counters.rebuild_cycles += elapsed;
+                });
+            }
             return;
         }
 
@@ -174,12 +184,22 @@ impl AccumulatorState {
             child_metadata.king_squares[index] = child_king;
 
             if previous_king != child_king {
+                #[cfg(feature = "instrumentation")]
+                let started = instrumentation::cycles();
                 self.accumulators[index] = Accumulator::build(
                     context.network,
                     context.child,
                     perspective,
                     context.backend,
                 );
+                #[cfg(feature = "instrumentation")]
+                {
+                    let elapsed = instrumentation::cycles().wrapping_sub(started);
+                    instrumentation::record(|counters| {
+                        counters.king_rebuilds += 1;
+                        counters.rebuild_cycles += elapsed;
+                    });
+                }
                 continue;
             }
 
@@ -314,7 +334,7 @@ impl<'network> AccumulatorStack<'network> {
         parent.unmake_move(mv, undo.clone());
         let mut changed_threats = ChangedThreatBuffer::<MAX_CHANGED>::new();
         let sliders_scanned =
-            discover_changed_threats_profiled(&parent, child, mv, undo, &mut changed_threats);
+            discover_changed_threats(&parent, child, mv, undo, &mut changed_threats);
 
         UpdateProfile {
             halfka_removals,
@@ -411,13 +431,18 @@ impl<'network> AccumulatorStack<'network> {
         self.scratch.changed_threats.reset();
         let next_depth = self.depth + 1;
         let (parents, children) = self.frames.split_at_mut(next_depth);
-        discover_changed_threats(
+        #[cfg(feature = "instrumentation")]
+        let discovery_started = instrumentation::cycles();
+        #[cfg_attr(not(feature = "instrumentation"), allow(unused_variables))]
+        let sliders_scanned = discover_changed_threats(
             &parents[self.depth].position,
             child,
             mv,
             undo,
             &mut self.scratch.changed_threats,
         );
+        #[cfg(feature = "instrumentation")]
+        let update_started = instrumentation::cycles();
         children[0].position.clone_from(child);
         children[0].state.update_from(
             &parents[self.depth].state,
@@ -434,6 +459,18 @@ impl<'network> AccumulatorStack<'network> {
             &mut self.scratch.threat_additions,
             &mut self.scratch.threat_removals,
         );
+        #[cfg(feature = "instrumentation")]
+        {
+            let finished = instrumentation::cycles();
+            let edges = self.scratch.changed_threats.len() as u64;
+            instrumentation::record(|counters| {
+                counters.real_pushes += 1;
+                counters.changed_threat_edges += edges;
+                counters.sliders_scanned += sliders_scanned as u64;
+                counters.threat_discovery_cycles += update_started.wrapping_sub(discovery_started);
+                counters.accumulator_update_cycles += finished.wrapping_sub(update_started);
+            });
+        }
         self.depth = next_depth;
         Ok(())
     }
@@ -497,6 +534,8 @@ impl<'network> AccumulatorStack<'network> {
         let next_depth = self.depth + 1;
         let (parents, children) = self.frames.split_at_mut(next_depth);
         children[0].clone_from(&parents[self.depth]);
+        #[cfg(feature = "instrumentation")]
+        instrumentation::record(|counters| counters.null_pushes += 1);
         self.depth = next_depth;
         Ok(())
     }
@@ -513,8 +552,20 @@ impl<'network> AccumulatorStack<'network> {
     /// Evaluates the current state in side-to-move-relative centipawns.
     #[must_use]
     pub fn evaluate(&self, position: &Position) -> i32 {
-        self.network
-            .evaluate_from_state_with_mode(position, self.current(), self.mode)
+        #[cfg(feature = "instrumentation")]
+        let started = instrumentation::cycles();
+        let evaluation =
+            self.network
+                .evaluate_from_state_with_mode(position, self.current(), self.mode);
+        #[cfg(feature = "instrumentation")]
+        {
+            let elapsed = instrumentation::cycles().wrapping_sub(started);
+            instrumentation::record(|counters| {
+                counters.forward_evaluations += 1;
+                counters.forward_cycles += elapsed;
+            });
+        }
+        evaluation
     }
 
     /// Returns the raw blended NNUE value for the current state.
@@ -809,6 +860,77 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue")
         );
         assert!(!is_explicit);
+    }
+
+    #[cfg(feature = "instrumentation")]
+    #[test]
+    fn stack_counters_separate_incremental_updates_from_rebuilds_and_forwards() {
+        let Some(network) = local_network("stack update counter test") else {
+            return;
+        };
+        let root = Position::from_fen(
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            false,
+        )
+        .expect("counter-test FEN should parse");
+        let mut stack = AccumulatorStack::new(&network, &root);
+
+        crate::reset_update_counters();
+        let mut current = root;
+        for notation in ["e1g1", "e7d6"] {
+            let mv = mf_core::parse_uci_move(&current, notation, false)
+                .expect("counter-test move should be legal");
+            let mut child = current.clone();
+            let undo = child.make_move(mv);
+            stack.push_real(&child, mv, &undo).expect("push should fit");
+            let _ = stack.evaluate(&child);
+            current = child;
+        }
+        stack.push_null().expect("null push should fit");
+
+        let counters = crate::update_counters();
+        assert_eq!(counters.real_pushes, 2);
+        assert_eq!(counters.null_pushes, 1);
+        assert_eq!(counters.forward_evaluations, 2);
+        // The castle moves the white king, so exactly one perspective rebuilds.
+        assert_eq!(counters.king_rebuilds, 1);
+        assert_eq!(counters.overflow_rebuilds, 0);
+        assert!(counters.changed_threat_edges > 0);
+        assert!(counters.sliders_scanned > 0);
+        assert!(counters.threat_discovery_cycles > 0);
+        assert!(counters.accumulator_update_cycles > 0);
+        assert!(counters.forward_cycles > 0);
+        // The rebuild timer is a strict subset of the update timer it sits inside.
+        assert!(counters.rebuild_cycles > 0);
+        assert!(counters.rebuild_cycles < counters.accumulator_update_cycles);
+    }
+
+    #[cfg(feature = "instrumentation")]
+    #[test]
+    fn overflowing_pushes_are_counted_as_full_rebuilds() {
+        let Some(network) = local_network("overflow counter test") else {
+            return;
+        };
+        let parent = Position::from_fen(
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            false,
+        )
+        .expect("overflow counter FEN should parse");
+        let mv = mf_core::parse_uci_move(&parent, "e5d7", false)
+            .expect("overflow counter move should be legal");
+        let mut child = parent.clone();
+        let undo = child.make_move(mv);
+        let mut stack = AccumulatorStack::new(&network, &parent);
+
+        crate::reset_update_counters();
+        stack
+            .push_real_with_threat_capacity::<0>(&child, mv, &undo)
+            .expect("overflow push should fit");
+
+        let counters = crate::update_counters();
+        assert_eq!(counters.overflow_rebuilds, 1);
+        assert_eq!(counters.king_rebuilds, 0);
+        assert!(counters.rebuild_cycles > 0);
     }
 
     #[cfg(feature = "instrumentation")]

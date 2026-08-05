@@ -5,6 +5,16 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+# Forwards to the NNUE update counters so `nnue_update_profile` can read them. Kept off by
+# default: the counters add an rdtsc pair to the hottest loop in the engine.
+instrumentation = ["mf-nnue/instrumentation"]
+
 [dependencies]
 mf-core = { path = "../mf-core" }
 mf-nnue = { path = "../mf-nnue" }
+
+[[example]]
+name = "nnue_update_profile"
+required-features = ["instrumentation"]

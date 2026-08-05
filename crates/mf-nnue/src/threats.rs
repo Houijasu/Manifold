@@ -603,26 +603,11 @@ pub fn append_active_threats(
 ///
 /// The scan is restricted to moved/captured/replaced squares, their direct contacts, and sliders
 /// whose ray crosses one of those squares. It never enumerates every threat in both positions.
+///
+/// Returns the number of slider candidates inspected, which is always zero unless the
+/// `instrumentation` feature is enabled: counting them costs a `popcnt` per affected square in
+/// the hottest loop in the engine, so the production build must not pay for it.
 pub(crate) fn discover_changed_threats<const CAPACITY: usize>(
-    parent: &Position,
-    child: &Position,
-    mv: Move,
-    undo: &Undo,
-    changed: &mut ChangedThreatBuffer<CAPACITY>,
-) {
-    let mut ignored_sliders = 0;
-    discover_changed_threats_impl::<CAPACITY, false>(
-        parent,
-        child,
-        mv,
-        undo,
-        changed,
-        &mut ignored_sliders,
-    );
-}
-
-#[cfg(feature = "instrumentation")]
-pub(crate) fn discover_changed_threats_profiled<const CAPACITY: usize>(
     parent: &Position,
     child: &Position,
     mv: Move,
@@ -630,7 +615,7 @@ pub(crate) fn discover_changed_threats_profiled<const CAPACITY: usize>(
     changed: &mut ChangedThreatBuffer<CAPACITY>,
 ) -> usize {
     let mut sliders_scanned = 0;
-    discover_changed_threats_impl::<CAPACITY, true>(
+    discover_changed_threats_impl::<CAPACITY, { cfg!(feature = "instrumentation") }>(
         parent,
         child,
         mv,

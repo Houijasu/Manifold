@@ -1,0 +1,10 @@
+id name Manifold
+option name Hash type spin default 16 min 1 max 8192
+uciok
+info string hash resized to 64 MB
+readyok
+info depth 17 seldepth 40 multipv 1 score cp -149 nodes 1264948 nps 470590 hashfull 169 time 2688 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e7h4 a6d3 e8c8 f4e5 h8h5
+info depth 18 currmove e2a6 currmovenumber 1
+info depth 18 currmove d5e6 currmovenumber 2
+bestmove e2a6
+192888832

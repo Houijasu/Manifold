@@ -1,0 +1,6 @@
+supplied-state forward: 50000 iterations x 9 samples, C:\Users\Samaritan\Projects\Manifold\crates\mf-nnue\../../nets/main.nnue
+ForwardMode { backend: Scalar, sparse_fc0: false }: median 1670.42 ns/eval, 598651 eval/s, checksum=121500000
+ForwardMode { backend: Avx2, sparse_fc0: false }: median 314.07 ns/eval, 3183983 eval/s, checksum=121500000
+ForwardMode { backend: Avx2, sparse_fc0: true }: median 203.15 ns/eval, 4922471 eval/s, checksum=121500000
+ForwardMode { backend: Avx2Vnni, sparse_fc0: false }: median 279.67 ns/eval, 3575592 eval/s, checksum=121500000
+ForwardMode { backend: Avx2Vnni, sparse_fc0: true }: median 189.61 ns/eval, 5274039 eval/s, checksum=121500000

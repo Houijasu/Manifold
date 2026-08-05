@@ -1,0 +1,40 @@
+Commit:      d2036f479869ede3a2b47495888ed32aae86c46f (feature/nnue-optimizations)
+Purpose:     M2-F1 NNUE performance baseline and incremental-update profile. Measurement
+             only -- no match was run, so this file is written by the worker rather than by
+             harness/run_match.ps1 (which only writes metadata for fastchess matches).
+Binary:      C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+SHA-256:     015C6BD60EAB3AB69FF9C562EEDA61E4240BDD7B5CB839E6BFC7E76DEA29FB66
+Size:        112949248 bytes
+Baseline:    baselines\mission-start\manifold.exe (commit 0012b36,
+             SHA-256 43EB8A0DD0C81172EFDD1F914899C080DFD757CA26EACA144913E52CEAD2CB28)
+Machine:     13th Gen Intel(R) Core(TM) i9-13980HX -- 8P+16E, 32 logical, 31.6 GB RAM
+Toolchain:   rustc 1.97.1 (8bab26f4f 2026-07-14), --release, target-cpu=native
+Net:         nets\main.nnue (111,261,604 bytes); production mode Avx2Vnni + sparse FC0
+Pinning:     every run executed in a shell pinned to the 8 P-cores (ProcessorAffinity=0xFFFF)
+Date:        2026-08-05T15:51:13Z
+
+Commands (in order):
+
+1. cargo run --release -p mf-nnue --example forward_throughput -- 50000 9
+     -> forward-throughput.txt
+
+2. cargo run --release -p mf-nnue --features instrumentation \
+       --example push_pop_throughput -- 200000
+     -> push-pop-throughput.txt
+
+3. cargo run --release -p mf-search --features instrumentation \
+       --example nnue_update_profile -- 7
+     -> update-profile.txt
+
+4. .\target\release\manifold.exe bench   (x3, uninstrumented control for #3)
+     -> bench-control.txt
+
+5. py -3.14 harness\nps_compare.py \
+       --engine current=.\target\release\manifold.exe \
+       --engine mission-start=.\baselines\mission-start\manifold.exe \
+       --depth 12 --hash 64 --warmup 1 --repeat 3 \
+       --json experiments\MSN-NNUE-baseline\nps-depth12.json
+     -> nps-depth12.json
+
+Bench signature: 45036 nodes, two consecutive runs identical (unchanged anchor).
+Processes:       no fastchess/stockfish involved; no engine processes left running.

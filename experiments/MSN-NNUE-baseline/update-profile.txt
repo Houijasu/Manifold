@@ -1,0 +1,21 @@
+net=C:\Users\Samaritan\Projects\Manifold\crates\mf-search\../../nets/main.nnue hash=16MiB threads=1
+position     d      nodes     pushes      nulls      thr%      upd%     rbld%      fwd%     nnue%  kingR/kn   ovfR/kn  edges/pu         nps
+bench1       7       8884       8786         15     22.4%     58.4%      5.7%     19.2%     45.1%     21.72      0.00      6.25      666042
+bench2       7      15926      15202        653     18.9%     66.3%     18.2%     14.7%     43.7%    107.06      0.00     10.39      394334
+bench3       7       3121       3011         94     16.3%     65.5%     27.5%     18.3%     40.6%    308.88      0.00      2.30      756533
+bench4       7       6101       5890        178     18.9%     65.6%     11.0%     15.5%     46.8%     54.91      0.00      9.00      479710
+bench5       7       2971       2913         45     18.9%     68.3%     21.2%     12.8%     44.7%    135.31      0.00      6.63      529571
+bench6       7       8033       7503        498     20.4%     63.4%     14.3%     16.1%     43.9%     70.21      0.00      9.57      527197
+BENCH        7      45036      43305       1483     19.6%     64.7%     15.2%     15.8%     44.3%     92.44      0.00      8.40      492646
+deep-d14    14     225979     218293       5055     20.2%     59.2%      9.8%     20.6%     45.2%     50.71      0.00      7.98      559046
+deep-d13    13     303157     278242      17376     18.4%     66.1%     19.6%     15.4%     44.3%    135.45      0.00      9.54      452486
+deep-d13    13      69240      66751       1395     22.6%     58.9%      6.5%     18.5%     44.8%     30.94      0.00      9.61      555355
+TOTAL        0     643412     606591      25309     19.5%     63.1%     14.9%     17.4%     44.6%     91.43      0.00      8.91      498654
+
+totals: nodes=643412 real_pushes=606591 null_pushes=25309 forwards=443664
+rebuilds: king=58826 (91.428/1000 nodes) overflow=0 (0.000/1000 nodes)
+per real push: changed_edges=8.91 sliders_scanned=4.38
+per real push (ns, TSC 2.419 GHz): threat_discovery=185.1 accumulator_update=599.3 (of which rebuild=141.7, incremental=457.6)
+per rebuild (ns): 1461.0
+per forward (ns): 225.7
+unread pushes: 188236 of 631900 (29.8%) -- ceiling on what lazy updates can skip

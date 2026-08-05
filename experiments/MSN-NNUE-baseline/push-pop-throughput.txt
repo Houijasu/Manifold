@@ -1,0 +1,5 @@
+backend=Avx2Vnni iterations=200000 net=C:\Users\Samaritan\Projects\Manifold\crates\mf-nnue\../../nets/main.nnue
+case=quiet moves=20 push_ns=272.29 eval_ns=176.06 combined_ns=452.44 eval_checksum=-5800000 combined_checksum=-4640000
+case=quiet halfka_removed=1/1.0/1/1 halfka_added=1/1.0/1/1 changed_edges=0/3.6/4/8 sliders_scanned=0/2.5/2/5
+case=busy moves=48 push_ns=643.05 eval_ns=202.24 combined_ns=841.75 eval_checksum=127800000 combined_checksum=179259389
+case=busy halfka_removed=1/1.2/1/2 halfka_added=1/1.0/1/2 changed_edges=3/11.0/10/25 sliders_scanned=0/5.2/4/14
