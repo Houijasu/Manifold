@@ -9,7 +9,7 @@ use mf_core::Position;
 use mf_nnue::Network;
 
 use crate::history::SharedHistory;
-use crate::search::{WorkerParameters, search_worker_with_history_callback_options};
+use crate::search::{RootMoveInfo, WorkerParameters, search_worker_with_history_callback_options};
 use crate::vote::select_best_result;
 use crate::{IterationInfo, SearchLimits, SearchOptions, SearchResult, TranspositionTable};
 
@@ -125,8 +125,9 @@ impl SearchPool {
         Ok(())
     }
 
+    /// Lazy-SMP search: every worker searches, and their results are voted on.
     #[allow(clippy::too_many_arguments)]
-    pub fn search_with_history_callback_options<F>(
+    pub fn search_with_history_callback<F>(
         &self,
         position: &Position,
         history: &[u64],
@@ -134,34 +135,7 @@ impl SearchPool {
         limits: SearchLimits,
         options: SearchOptions,
         stop: Arc<AtomicBool>,
-        on_iteration: F,
-    ) -> Result<PoolSearchResult, PoolError>
-    where
-        F: FnMut(&IterationInfo),
-    {
-        self.search_impl(
-            position,
-            history,
-            table,
-            limits,
-            options,
-            stop,
-            None,
-            DispatchMode::AllWorkers,
-            on_iteration,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn search_with_history_callback_network_options<F>(
-        &self,
-        position: &Position,
-        history: &[u64],
-        table: Arc<TranspositionTable>,
-        limits: SearchLimits,
-        options: SearchOptions,
-        stop: Arc<AtomicBool>,
-        network: Option<Arc<Network>>,
+        network: Arc<Network>,
         on_iteration: F,
     ) -> Result<PoolSearchResult, PoolError>
     where
@@ -177,11 +151,17 @@ impl SearchPool {
             network,
             DispatchMode::AllWorkers,
             on_iteration,
+            |_| {},
         )
     }
 
+    /// Lazy-SMP search that also reports the root move being searched.
+    ///
+    /// Separate from [`Self::search_with_history_callback`] so the many callers that only
+    /// want analysis lines keep their existing signature; `currmove` is a UCI display
+    /// concern that only the protocol layer cares about.
     #[allow(clippy::too_many_arguments)]
-    pub fn search_fixed_depth_with_history_callback_options<F>(
+    pub fn search_with_history_progress<F, G>(
         &self,
         position: &Position,
         history: &[u64],
@@ -189,10 +169,13 @@ impl SearchPool {
         limits: SearchLimits,
         options: SearchOptions,
         stop: Arc<AtomicBool>,
+        network: Arc<Network>,
         on_iteration: F,
+        on_current_move: G,
     ) -> Result<PoolSearchResult, PoolError>
     where
         F: FnMut(&IterationInfo),
+        G: FnMut(&RootMoveInfo),
     {
         self.search_impl(
             position,
@@ -201,14 +184,16 @@ impl SearchPool {
             limits,
             options,
             stop,
-            None,
-            DispatchMode::WorkerZeroOnly,
+            network,
+            DispatchMode::AllWorkers,
             on_iteration,
+            on_current_move,
         )
     }
 
+    /// Deterministic fixed-depth search on worker zero only, for reproducible node counts.
     #[allow(clippy::too_many_arguments)]
-    pub fn search_fixed_depth_with_history_callback_network_options<F>(
+    pub fn search_fixed_depth_with_history_callback<F>(
         &self,
         position: &Position,
         history: &[u64],
@@ -216,7 +201,7 @@ impl SearchPool {
         limits: SearchLimits,
         options: SearchOptions,
         stop: Arc<AtomicBool>,
-        network: Option<Arc<Network>>,
+        network: Arc<Network>,
         on_iteration: F,
     ) -> Result<PoolSearchResult, PoolError>
     where
@@ -232,11 +217,13 @@ impl SearchPool {
             network,
             DispatchMode::WorkerZeroOnly,
             on_iteration,
+            |_| {},
         )
     }
 
+    /// Fixed-depth search across all workers, for measuring SMP scaling.
     #[allow(clippy::too_many_arguments)]
-    pub fn search_fixed_depth_smp_with_history_callback_options<F>(
+    pub fn search_fixed_depth_smp_with_history_callback<F>(
         &self,
         position: &Position,
         history: &[u64],
@@ -244,34 +231,7 @@ impl SearchPool {
         limits: SearchLimits,
         options: SearchOptions,
         stop: Arc<AtomicBool>,
-        on_iteration: F,
-    ) -> Result<PoolSearchResult, PoolError>
-    where
-        F: FnMut(&IterationInfo),
-    {
-        self.search_impl(
-            position,
-            history,
-            table,
-            limits,
-            options,
-            stop,
-            None,
-            DispatchMode::AllWorkers,
-            on_iteration,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn search_fixed_depth_smp_with_history_callback_network_options<F>(
-        &self,
-        position: &Position,
-        history: &[u64],
-        table: Arc<TranspositionTable>,
-        limits: SearchLimits,
-        options: SearchOptions,
-        stop: Arc<AtomicBool>,
-        network: Option<Arc<Network>>,
+        network: Arc<Network>,
         on_iteration: F,
     ) -> Result<PoolSearchResult, PoolError>
     where
@@ -287,11 +247,12 @@ impl SearchPool {
             network,
             DispatchMode::AllWorkers,
             on_iteration,
+            |_| {},
         )
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn search_impl<F>(
+    fn search_impl<F, G>(
         &self,
         position: &Position,
         history: &[u64],
@@ -299,12 +260,14 @@ impl SearchPool {
         limits: SearchLimits,
         options: SearchOptions,
         stop: Arc<AtomicBool>,
-        network: Option<Arc<Network>>,
+        network: Arc<Network>,
         dispatch_mode: DispatchMode,
         mut on_iteration: F,
+        mut on_current_move: G,
     ) -> Result<PoolSearchResult, PoolError>
     where
         F: FnMut(&IterationInfo),
+        G: FnMut(&RootMoveInfo),
     {
         let _active = self.acquire()?;
         stop.store(false, Ordering::Relaxed);
@@ -364,7 +327,7 @@ impl SearchPool {
                 limits: worker_limits,
                 options,
                 stop: Arc::clone(&stop),
-                network: network.as_ref().map(Arc::clone),
+                network: Arc::clone(&network),
                 counters: Arc::clone(&counters),
                 events: events.clone(),
             };
@@ -392,6 +355,15 @@ impl SearchPool {
                     if callback_panic.is_none()
                         && let Err(payload) =
                             catch_unwind(AssertUnwindSafe(|| on_iteration(&iteration)))
+                    {
+                        callback_panic = Some(payload);
+                        stop.store(true, Ordering::Relaxed);
+                    }
+                }
+                Ok(WorkerEvent::CurrentMove(root_move)) => {
+                    if callback_panic.is_none()
+                        && let Err(payload) =
+                            catch_unwind(AssertUnwindSafe(|| on_current_move(&root_move)))
                     {
                         callback_panic = Some(payload);
                         stop.store(true, Ordering::Relaxed);
@@ -497,13 +469,14 @@ struct SearchJob {
     limits: SearchLimits,
     options: SearchOptions,
     stop: Arc<AtomicBool>,
-    network: Option<Arc<Network>>,
+    network: Arc<Network>,
     counters: Arc<[AtomicU64]>,
     events: mpsc::Sender<WorkerEvent>,
 }
 
 enum WorkerEvent {
     Progress(IterationInfo),
+    CurrentMove(RootMoveInfo),
     Done {
         worker_id: usize,
         result: SearchResult,
@@ -520,6 +493,22 @@ fn worker_loop(receiver: mpsc::Receiver<WorkerCommand>) {
         match command {
             WorkerCommand::Search(job) => {
                 let events = job.events.clone();
+                let mut parameters = WorkerParameters::new(
+                    job.worker_id,
+                    job.generation,
+                    &job.counters,
+                    &job.shared_history,
+                    &job.network,
+                );
+                // Only worker 0 reports `currmove`. Helpers search the same root moves in
+                // their own order, so letting them report too would interleave
+                // contradictory "now searching" updates for one depth.
+                let currmove_events = job.events.clone();
+                if job.worker_id == 0 {
+                    parameters = parameters.with_root_move_reporter(move |root_move| {
+                        let _ = currmove_events.send(WorkerEvent::CurrentMove(root_move));
+                    });
+                }
                 let result = search_worker_with_history_callback_options(
                     &job.position,
                     &job.history,
@@ -527,13 +516,7 @@ fn worker_loop(receiver: mpsc::Receiver<WorkerCommand>) {
                     job.limits,
                     job.options,
                     &job.stop,
-                    WorkerParameters::new(
-                        job.worker_id,
-                        job.generation,
-                        &job.counters,
-                        &job.shared_history,
-                    )
-                    .with_network(job.network.as_deref()),
+                    parameters,
                     |iteration| {
                         if job.worker_id == 0 {
                             let _ = events.send(WorkerEvent::Progress(iteration.clone()));

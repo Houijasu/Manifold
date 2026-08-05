@@ -10,7 +10,7 @@ const BUTTERFLY_MAX: i32 = 7_183;
 const CAPTURE_MAX: i32 = 10_692;
 /// Gravity saturation bound for pawn-structure history.
 const PAWN_MAX: i32 = 8_192;
-/// Gravity saturation bound for continuation history (Stockfish `PieceToHistory`).
+/// Gravity saturation bound for continuation history (the piece-to history table).
 ///
 /// This is deliberately ~4x the butterfly bound: a continuation entry is conditioned on
 /// a specific predecessor move, so it is a far sharper statistic than a from-to average
@@ -24,16 +24,16 @@ const CONTINUATION_MAX: i32 = 30_000;
 /// out of it without a separate counter-move structure.
 ///
 /// `{1, 2, 4, 6}` is the community consensus subset for a new engine (Berserk,
-/// Stormphrax). Stockfish's dense 1-6 is a late refinement, and plies 3 and 5 carry the
-/// two weakest weights in its own bonus table (290 and 132 against 1040/780/502/418).
+/// Stormphrax). The dense 1-6 set is a late refinement, and plies 3 and 5 carry the
+/// two weakest weights in the reference bonus table (290 and 132 against 1040/780/502/418).
 pub(crate) const CONTINUATION_PLIES: [usize; 4] = [1, 2, 4, 6];
-/// Update weights in 1024ths, taken from Stockfish `conthist_bonuses` for exactly the
-/// plies in `CONTINUATION_PLIES`.
+/// Update weights in 1024ths, from the reference continuation-history bonus table for
+/// exactly the plies in `CONTINUATION_PLIES`.
 pub(crate) const CONTINUATION_WEIGHTS: [i32; CONTINUATION_PLIES.len()] = [1_040, 780, 502, 418];
 
 /// Gravity saturation bound for every correction-history table.
 ///
-/// This is Stockfish's `CORRECTION_HISTORY_LIMIT` and it is deliberately far smaller
+/// This is the reference `CORRECTION_HISTORY_LIMIT` and it is deliberately far smaller
 /// than the ordering bounds above: a corrhist entry is a *mean residual in eval units*
 /// that gets divided by [`CORRECTION_SCALE`] before it touches the static evaluation,
 /// not a relative ordering score. The two families are not comparable and must not be
@@ -43,10 +43,10 @@ pub(crate) const CORRECTION_MAX: i32 = 1_024;
 /// Bucket count of each hash-keyed correction table at one thread.
 ///
 /// Sized by the BUCKET COUNT, never by the gravity bound (mission AGENTS.md 4.54 trap
-/// 2 -- sizing pawn history from Stockfish's gravity divisor instead of its bucket
+/// 2 -- sizing pawn history from the reference's gravity divisor instead of its bucket
 /// count built a 12 MiB L2-thrashing table and cost 18% NPS). At 16,384 buckets x 2
 /// colors x `i16` each table is 64 KiB, so all four together are 256 KiB and stay
-/// inside L2. Stockfish uses 65,536, but it packs all four variants into ONE
+/// inside L2. The reference uses 65,536, but it packs all four variants into ONE
 /// `CorrectionBundle` table sharing a single size mask; four separate 256 KiB tables
 /// would be 1 MiB of independently-strided lookups on the eval path. A search tree
 /// visits far fewer distinct pawn structures than 16,384 per node region, so the
@@ -67,16 +67,16 @@ pub const CORRECTION_SOURCES: usize = 4;
 
 /// Blend weights, applied before the `/ CORRECTION_SCALE` division.
 ///
-/// Stockfish: `15341*pawn + 10569*minor + 12906*(nonPawnWhite + nonPawnBlack) + cont`.
+/// Reference: `15341*pawn + 10569*minor + 12906*(nonPawnWhite + nonPawnBlack) + cont`.
 /// Manifold's `major` and `material` keys both stand in for a non-pawn characterisation
 /// of the position, so both take the reference's non-pawn weight.
 pub(crate) const CORRECTION_WEIGHTS: [i32; CORRECTION_SOURCES] = [15_341, 10_569, 12_906, 12_906];
-/// Stockfish's `8761 *` multiplier on the summed continuation-corrhist entries.
+/// The reference's `8761 *` multiplier on the summed continuation-corrhist entries.
 pub(crate) const CORRECTION_CONTINUATION_WEIGHT: i32 = 8_761;
-/// Stockfish `to_corrected_static_eval`: `v + cv / 131072`.
+/// The reference `to_corrected_static_eval`: `v + cv / 131072`.
 pub(crate) const CORRECTION_SCALE: i32 = 131_072;
 
-/// Per-source update weights in 128ths (Stockfish: pawn `bonus`, minor `150/128`,
+/// Per-source update weights in 128ths (reference: pawn `bonus`, minor `150/128`,
 /// non-pawn `186/128`).
 pub(crate) const CORRECTION_UPDATE_WEIGHTS: [i32; CORRECTION_SOURCES] = [128, 150, 186, 186];
 
@@ -87,7 +87,7 @@ pub(crate) const CORRECTION_UPDATE_WEIGHTS: [i32; CORRECTION_SOURCES] = [128, 15
 /// previous moves, so it steps two plies at a time. Getting this wrong silently indexes
 /// the residual on the opponent's move instead.
 pub(crate) const CORRECTION_CONTINUATION_PLIES: [usize; 2] = [2, 4];
-/// Stockfish's `130/128` and `70/128` update weights for plies 2 and 4.
+/// The reference's `130/128` and `70/128` update weights for plies 2 and 4.
 pub(crate) const CORRECTION_CONTINUATION_UPDATE_WEIGHTS: [i32; CORRECTION_CONTINUATION_PLIES
     .len()] = [130, 70];
 
@@ -99,12 +99,12 @@ const PIECES: usize = 12;
 const VICTIMS: usize = 6;
 const NO_VICTIM: usize = PieceKind::King.index();
 
-/// Bucket count of the pawn-history table at one thread, per Stockfish's
+/// Bucket count of the pawn-history table at one thread, per the reference's
 /// `PAWN_HISTORY_SIZE`. Scaled by `nextPow2(threads)` so a wider pool gets a
 /// proportionally larger table and the collision rate stays flat.
 ///
 /// This is deliberately NOT `PAWN_MAX`: the two are different numbers that both
-/// happen to be powers of two in Stockfish's source. 512 buckets is 768 KiB, which
+/// happen to be powers of two in the reference source. 512 buckets is 768 KiB, which
 /// stays inside L2; 8192 buckets would be 12 MiB and cost ~18% NPS to cache misses
 /// for no ordering benefit.
 const PAWN_BASE_BUCKETS: usize = 512;
@@ -166,7 +166,7 @@ impl ContinuationKey {
 
 /// Relaxed-atomic history tables shared by every search worker.
 ///
-/// Thread-private history is obsolete: Stockfish moved correction, pawn, and
+/// Thread-private history is obsolete: the reference moved correction, pawn, and
 /// continuation history to shared relaxed-atomic tables between Dec 2025 and Jun 2026,
 /// SPRT-verified at 1, 8, 16, and 64 threads. Sharing lets a worker reuse ordering
 /// knowledge another worker already paid for. Updates race exactly like the
@@ -181,7 +181,7 @@ pub struct SharedHistory {
     continuation: [CacheAligned<Box<[AtomicI16]>>; CONTINUATION_PLIES.len()],
     /// One table per entry in [`CORRECTION_SOURCES`], each `[bucket][color]`.
     ///
-    /// Kept as four separate allocations rather than Stockfish's packed
+    /// Kept as four separate allocations rather than the reference's packed
     /// `CorrectionBundle` because Manifold's four keys are genuinely independent
     /// hashes: bundling them would make every read of one variant pull the other three
     /// into cache on a line they will never be used from, since a single position
@@ -201,7 +201,7 @@ impl SharedHistory {
             .checked_mul(thread_count.next_power_of_two())
             .expect("pawn history bucket count must not overflow");
         // Corrhist scales with the thread count for the same reason pawn history does,
-        // and for the reason Stockfish gives explicitly: a shared table lets thread 1
+        // and for the reason the reference gives explicitly: a shared table lets thread 1
         // consume correction values thread 2 already paid to search for. More threads
         // means more distinct positions in flight, so the table grows to hold the
         // collision rate flat.
@@ -214,7 +214,7 @@ impl SharedHistory {
             capture: CacheAligned(zeroed(CAPTURE_LEN)),
             pawn: CacheAligned(zeroed(buckets * PAWN_BUCKET_LEN)),
             // Continuation history is FIXED SIZE and does not scale with the thread
-            // count, unlike pawn history and corrhist. Stockfish says so explicitly, and
+            // count, unlike pawn history and corrhist. The reference says so explicitly, and
             // the reason is structural: this table is keyed on an exact predecessor move
             // rather than on a hashed structure, so there is no collision rate for a
             // larger table to hold flat. Four planes at 9 MiB each is already the whole
@@ -288,7 +288,7 @@ impl SharedHistory {
     }
 
     /// Pawn history uses an asymmetric update: penalties land at roughly 42% of the
-    /// strength of bonuses (Stockfish `bonus * (bonus > -4 ? 1104 : 459) / 1024`).
+    /// strength of bonuses (reference `bonus * (bonus > -4 ? 1104 : 459) / 1024`).
     pub(crate) fn update_pawn(&self, pawn_key: u64, piece: Piece, to: Square, bonus: i32) {
         let scaled = bonus * if bonus > -4 { 1_104 } else { 459 } / 1_024;
         apply(
@@ -349,8 +349,9 @@ impl SharedHistory {
     ///
     /// `slot` indexes [`CORRECTION_CONTINUATION_PLIES`], not the ply distance itself.
     /// `plane` is the move at that distance; `entry` is the IMMEDIATELY preceding move,
-    /// matching Stockfish's `(*(ss-2)->continuationCorrectionHistory)[piece_on(m.to)][m.to]`
-    /// where `m = (ss-1)->currentMove`.
+    /// matching the reference's
+    /// `(*(ss-2)->continuationCorrectionHistory)[piece_on(m.to)][m.to]` where
+    /// `m = (ss-1)->currentMove`.
     #[inline]
     pub(crate) fn correction_continuation_score(
         &self,
@@ -737,10 +738,10 @@ mod tests {
     #[test]
     fn continuation_history_uses_the_reference_ply_set_and_weights() {
         // {1, 2, 4, 6} is the community consensus subset for a new engine (Berserk,
-        // Stormphrax). Stockfish's dense 1-6 is a late refinement; plies 3 and 5 carry
-        // the two weakest weights in its own table and are deliberately not built here.
+        // Stormphrax). The dense 1-6 set is a late refinement; plies 3 and 5 carry
+        // the two weakest weights in the reference table and are deliberately not built here.
         assert_eq!(CONTINUATION_PLIES, [1, 2, 4, 6]);
-        // Stockfish `conthist_bonuses` entries for exactly those plies, in 1024ths.
+        // Reference continuation-history bonus entries for exactly those plies, in 1024ths.
         assert_eq!(CONTINUATION_WEIGHTS, [1_040, 780, 502, 418]);
         assert!(
             CONTINUATION_WEIGHTS
@@ -908,7 +909,7 @@ mod tests {
 
     #[test]
     fn correction_history_applies_the_reference_per_source_update_weights() {
-        // Stockfish: pawn takes `bonus`, minor `bonus * 150/128`, non-pawn
+        // Reference: pawn takes `bonus`, minor `bonus * 150/128`, non-pawn
         // `bonus * 186/128`. Manifold's major and material keys both characterise the
         // non-pawn position, so both take the non-pawn weight.
         assert_eq!(CORRECTION_UPDATE_WEIGHTS, [128, 150, 186, 186]);
@@ -936,7 +937,7 @@ mod tests {
             history.correction_score(CORRECTION_PAWN, 0x1234, Color::White),
             -CORRECTION_MAX
         );
-        // 1024 is Stockfish's CORRECTION_HISTORY_LIMIT and is deliberately three orders
+        // 1024 is the reference CORRECTION_HISTORY_LIMIT and is deliberately three orders
         // of magnitude below the ordering bounds: a corrhist entry is a mean residual
         // in eval units that gets divided by 131,072, not an ordering score. Giving the
         // two families each other's constants is how this feature goes silently wrong.
@@ -946,7 +947,7 @@ mod tests {
 
     #[test]
     fn correction_history_uses_the_reference_blend_weights() {
-        // Stockfish: 15341*pawn + 10569*minor + 12906*(nonPawnWhite + nonPawnBlack),
+        // Reference: 15341*pawn + 10569*minor + 12906*(nonPawnWhite + nonPawnBlack),
         // then `8761 *` the summed continuation entries, all divided by 131,072.
         assert_eq!(CORRECTION_WEIGHTS, [15_341, 10_569, 12_906, 12_906]);
         assert_eq!(super::CORRECTION_CONTINUATION_WEIGHT, 8_761);
@@ -1028,7 +1029,7 @@ mod tests {
     #[test]
     fn correction_history_scales_with_the_next_power_of_two_thread_count() {
         // Corrhist is SHARED and grows with the pool, exactly as pawn history does and
-        // for the reason Stockfish gives: thread 1 consumes correction values thread 2
+        // for the reason the reference gives: thread 1 consumes correction values thread 2
         // already paid to search for, and more threads means more distinct positions in
         // flight, so the table grows to hold the collision rate flat.
         assert_eq!(

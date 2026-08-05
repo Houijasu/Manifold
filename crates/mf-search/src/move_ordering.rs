@@ -3,8 +3,64 @@ use mf_core::{
     static_exchange_evaluation,
 };
 
-use crate::evaluation::piece_square_value;
 use crate::history::{CONTINUATION_PLIES, ContinuationKey, SharedHistory, captured_kind};
+
+/// Middle-game piece-square values used purely to order quiet moves.
+///
+/// These outlived the hand-crafted evaluation they were born in. NNUE scores positions,
+/// but the move picker still needs a cheap static hint for "does this square look better
+/// than the one I came from", and it must not call the network to get it. The table is
+/// therefore an ordering heuristic, not an evaluation term: changing it changes the node
+/// counts the deterministic bench signature pins, but never the score of any position.
+const PIECE_SQUARE_VALUES: [[i32; 64]; 6] = build_piece_square_values();
+
+const fn build_piece_square_values() -> [[i32; 64]; 6] {
+    let mut tables = [[0; 64]; 6];
+    let mut kind = 0;
+    while kind < PieceKind::ALL.len() {
+        let mut square = 0;
+        while square < 64 {
+            let file = (square & 7) as i32;
+            let rank = (square >> 3) as i32;
+            let file_center = center_distance(file);
+            let center = file_center + center_distance(rank);
+            tables[kind][square] = match PieceKind::ALL[kind] {
+                PieceKind::Pawn => rank * 8 + file_center * 2,
+                PieceKind::Knight => center * 12,
+                PieceKind::Bishop => center * 7 + rank * 2,
+                PieceKind::Rook => rank * 2 + file_center,
+                PieceKind::Queen => center * 3,
+                PieceKind::King => -center * 8,
+            };
+            square += 1;
+        }
+        kind += 1;
+    }
+    tables
+}
+
+const fn center_distance(coordinate: i32) -> i32 {
+    let from_three = abs(coordinate - 3);
+    let from_four = abs(coordinate - 4);
+    3 - min(from_three, from_four)
+}
+
+const fn abs(value: i32) -> i32 {
+    if value < 0 { -value } else { value }
+}
+
+const fn min(left: i32, right: i32) -> i32 {
+    if left < right { left } else { right }
+}
+
+/// Mirrors the square for black so both colours read the same white-relative table.
+fn piece_square_value(kind: PieceKind, color: Color, square: Square) -> i32 {
+    let index = match color {
+        Color::White => square.index(),
+        Color::Black => (7 - square.rank()) * 8 + square.file(),
+    };
+    PIECE_SQUARE_VALUES[kind.index()][index as usize]
+}
 
 /// Everything the move picker needs to score a move, bundled so the read sites stay
 /// in one place.

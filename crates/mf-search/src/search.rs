@@ -9,7 +9,6 @@ use mf_core::{
 };
 use mf_nnue::{ACCUMULATOR_STACK_CAPACITY, AccumulatorStack, AccumulatorStackError, Network};
 
-use crate::evaluation::{EVALUATION_LIMIT, evaluate};
 use crate::history::{
     CONTINUATION_PLIES, CONTINUATION_WEIGHTS, CORRECTION_CONTINUATION_PLIES,
     CORRECTION_CONTINUATION_WEIGHT, CORRECTION_MAJOR, CORRECTION_MATERIAL, CORRECTION_MAX,
@@ -25,11 +24,20 @@ pub const MAX_SEARCH_PLY: usize = 128;
 const _: () = assert!(MAX_SEARCH_PLY == ACCUMULATOR_STACK_CAPACITY);
 /// Marks a TT entry whose static evaluation was intentionally not computed.
 pub const UNEVALUATED_STATIC_EVAL: i16 = i16::MIN;
+/// Largest magnitude a non-mate score may report. Keeps evaluation clear of the mate
+/// band so a big positional score can never be mistaken for a forced mate.
+const EVALUATION_LIMIT: i32 = 10_000;
 const INFINITY: i32 = MATE_SCORE + 1;
 const TABLEBASE_SCORE: i32 = MATE_SCORE - MAX_SEARCH_PLY as i32 - 1;
 const TABLEBASE_WIN_IN_MAX_PLY: i32 = TABLEBASE_SCORE - MAX_SEARCH_PLY as i32;
-const ASPIRATION_INITIAL_DELTA: i32 = 25;
+const ASPIRATION_INITIAL_DELTA: i32 = 8;
 const ASPIRATION_JITTER_BUCKETS: usize = 8;
+/// Divisor on `previous_score^2` in the initial aspiration half-width.
+const ASPIRATION_SCORE_DIVISOR: i32 = 16_053;
+/// Ceiling on the score-scaled half-width, before per-worker jitter.
+const ASPIRATION_MAX_DELTA: i32 = 512;
+/// Most plies a repeated root fail high may shave off the re-search.
+const ASPIRATION_MAX_DEPTH_REDUCTION: u32 = 3;
 const DEFAULT_MAX_DEPTH: u32 = 64;
 const TIME_CHECK_INTERVAL: u64 = 512;
 const NODE_PUBLISH_INTERVAL: u64 = 1_024;
@@ -107,17 +115,17 @@ const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
 const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
 
 struct SearchEvaluator<'network> {
-    accumulators: Option<AccumulatorStack<'network>>,
+    accumulators: AccumulatorStack<'network>,
     #[cfg(test)]
-    network: Option<&'network Network>,
+    network: &'network Network,
     #[cfg(test)]
     verify_incremental: bool,
 }
 
 impl<'network> SearchEvaluator<'network> {
-    fn new(network: Option<&'network Network>, root: &Position) -> Self {
+    fn new(network: &'network Network, root: &Position) -> Self {
         Self {
-            accumulators: network.map(|network| AccumulatorStack::new_production(network, root)),
+            accumulators: AccumulatorStack::new_production(network, root),
             #[cfg(test)]
             network,
             #[cfg(test)]
@@ -129,19 +137,11 @@ impl<'network> SearchEvaluator<'network> {
     fn evaluate(&self, position: &Position) -> i32 {
         #[cfg(test)]
         if self.verify_incremental {
-            let network = self.network.expect("verification requires an NNUE network");
-            let expected = mf_nnue::AccumulatorState::from_position_production(network, position);
-            assert_eq!(
-                self.accumulators
-                    .as_ref()
-                    .expect("verification requires an accumulator stack")
-                    .current(),
-                &expected
-            );
+            let expected =
+                mf_nnue::AccumulatorState::from_position_production(self.network, position);
+            assert_eq!(self.accumulators.current(), &expected);
         }
-        self.accumulators
-            .as_ref()
-            .map_or_else(|| evaluate(position), |stack| stack.evaluate(position))
+        self.accumulators.evaluate(position)
     }
 
     fn push_real(
@@ -150,41 +150,29 @@ impl<'network> SearchEvaluator<'network> {
         mv: Move,
         undo: &Undo,
     ) -> Result<(), AccumulatorStackError> {
-        self.accumulators
-            .as_mut()
-            .map_or(Ok(()), |stack| stack.push_real(child, mv, undo))
+        self.accumulators.push_real(child, mv, undo)
     }
 
     fn push_null(&mut self) -> Result<(), AccumulatorStackError> {
-        self.accumulators
-            .as_mut()
-            .map_or(Ok(()), AccumulatorStack::push_null)
+        self.accumulators.push_null()
     }
 
     fn pop(&mut self) -> Result<(), AccumulatorStackError> {
-        self.accumulators
-            .as_mut()
-            .map_or(Ok(()), AccumulatorStack::pop)
+        self.accumulators.pop()
     }
 
     #[cfg(test)]
     fn depth(&self) -> usize {
-        self.accumulators
-            .as_ref()
-            .map_or(0, AccumulatorStack::depth)
+        self.accumulators.depth()
     }
 
     #[cfg(test)]
     fn current(&self) -> &mf_nnue::AccumulatorState {
-        self.accumulators
-            .as_ref()
-            .expect("current NNUE state requires a network")
-            .current()
+        self.accumulators.current()
     }
 
     #[cfg(test)]
     fn enable_verification(&mut self) {
-        assert!(self.network.is_some());
         self.verify_incremental = true;
     }
 }
@@ -322,6 +310,20 @@ pub struct IterationInfo {
     pub pv: Vec<Move>,
 }
 
+/// The root move currently being searched, for the UCI `currmove` line.
+///
+/// Kept separate from [`IterationInfo`] because it describes progress *within* an
+/// iteration rather than a completed one: it carries no score, PV, or node count, and the
+/// reference engine likewise models it as its own message rather than a field on the
+/// iteration. GUIs render it as a "searching X (n/m)" status rather than an analysis row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootMoveInfo {
+    pub depth: u32,
+    pub best_move: Move,
+    /// 1-based, matching the UCI `currmovenumber` field.
+    pub move_number: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SearchResult {
     pub best_move: Option<Move>,
@@ -340,7 +342,8 @@ pub(crate) struct WorkerParameters<'a> {
     generation: u8,
     node_counters: &'a [AtomicU64],
     history: &'a SharedHistory,
-    network: Option<&'a Network>,
+    network: &'a Network,
+    root_move_reporter: Option<Box<dyn FnMut(RootMoveInfo) + 'a>>,
 }
 
 impl<'a> WorkerParameters<'a> {
@@ -349,6 +352,7 @@ impl<'a> WorkerParameters<'a> {
         generation: u8,
         node_counters: &'a [AtomicU64],
         history: &'a SharedHistory,
+        network: &'a Network,
     ) -> Self {
         assert!(worker_id < node_counters.len());
         Self {
@@ -356,95 +360,94 @@ impl<'a> WorkerParameters<'a> {
             generation: generation & 31,
             node_counters,
             history,
-            network: None,
+            network,
+            root_move_reporter: None,
         }
     }
 
-    pub(crate) fn with_network(mut self, network: Option<&'a Network>) -> Self {
-        self.network = network;
+    /// Attaches a `currmove` sink. Only worker 0 should carry one: helpers search the same
+    /// root moves in a different order, so reporting from all of them would interleave
+    /// contradictory progress for the same depth.
+    pub(crate) fn with_root_move_reporter(
+        mut self,
+        reporter: impl FnMut(RootMoveInfo) + 'a,
+    ) -> Self {
+        self.root_move_reporter = Some(Box::new(reporter));
         self
     }
 }
 
+/// One-shot single-threaded search from a root position.
+///
+/// The network is mandatory: this engine evaluates only with NNUE, so there is no
+/// caller-visible mode in which it is absent.
 pub fn search(
     position: &Position,
     transposition_table: &TranspositionTable,
     limits: SearchLimits,
-) -> SearchResult {
-    search_with_options(
-        position,
-        transposition_table,
-        limits,
-        SearchOptions::default(),
-    )
-}
-
-pub fn search_with_options(
-    position: &Position,
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
     options: SearchOptions,
-) -> SearchResult {
-    search_with_network_options(position, transposition_table, limits, options, None)
-}
-
-pub fn search_with_network_options(
-    position: &Position,
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
-    options: SearchOptions,
-    network: Option<&Network>,
+    network: &Network,
 ) -> SearchResult {
     let history = [position.repetition_key()];
-    let node_counters = [AtomicU64::new(0)];
     let stop = AtomicBool::new(false);
-    let shared_history = SharedHistory::new(1);
-    search_worker_with_history_callback_options(
+    search_with_callback(
         position,
         &history,
         transposition_table,
         limits,
         options,
+        network,
         &stop,
-        WorkerParameters::new(0, 0, &node_counters, &shared_history).with_network(network),
         |_| {},
+    )
+}
+
+/// Single-threaded search with full control over history, stopping, and per-iteration
+/// reporting. This is the entry point the UCI layer drives.
+#[allow(clippy::too_many_arguments)]
+pub fn search_with_callback<F>(
+    position: &Position,
+    history: &[u64],
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+    options: SearchOptions,
+    network: &Network,
+    stop: &AtomicBool,
+    on_iteration: F,
+) -> SearchResult
+where
+    F: FnMut(&IterationInfo),
+{
+    let node_counters = [AtomicU64::new(0)];
+    let shared_history = SharedHistory::new(1);
+    search_worker_with_history_callback_options(
+        position,
+        history,
+        transposition_table,
+        limits,
+        options,
+        stop,
+        WorkerParameters::new(0, 0, &node_counters, &shared_history, network),
+        on_iteration,
     )
 }
 
 /// Single-threaded search reusing a caller-owned [`SharedHistory`].
 ///
-/// Every other single-threaded entry point constructs a `SharedHistory` internally,
-/// which allocates and zeroes tens of MiB. That is correct for a one-shot search but
-/// wrong inside a timed benchmark loop: `bench` used to pay the allocation once per
-/// position *inside its own timed region*, so bench NPS misstated the cost of adding
-/// history tables (mission AGENTS.md 4.54). Match play allocates once per game, so the
-/// benchmark now matches it by hoisting the construction out and calling `clear()`
-/// between positions instead. Node counts are unaffected: a cleared table is
-/// bit-identical to a fresh one.
-pub fn search_with_shared_history_options(
+/// The other entry points construct a `SharedHistory` internally, which allocates and
+/// zeroes tens of MiB. That is correct for a one-shot search but wrong inside a timed
+/// benchmark loop: `bench` used to pay the allocation once per position *inside its own
+/// timed region*, so bench NPS misstated the cost of adding history tables (mission
+/// AGENTS.md 4.54). Match play allocates once per game, so the benchmark matches it by
+/// hoisting the construction out and calling `clear()` between positions instead. Node
+/// counts are unaffected: a cleared table is bit-identical to a fresh one.
+pub fn search_with_shared_history(
     position: &Position,
     transposition_table: &TranspositionTable,
     limits: SearchLimits,
     options: SearchOptions,
     shared_history: &SharedHistory,
-) -> SearchResult {
-    search_with_shared_history_network_options(
-        position,
-        transposition_table,
-        limits,
-        options,
-        shared_history,
-        None,
-    )
-}
-
-pub fn search_with_shared_history_network_options(
-    position: &Position,
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
-    options: SearchOptions,
-    shared_history: &SharedHistory,
-    network: Option<&Network>,
+    network: &Network,
 ) -> SearchResult {
     let position_history = [position.repetition_key()];
     let node_counters = [AtomicU64::new(0)];
@@ -456,133 +459,8 @@ pub fn search_with_shared_history_network_options(
         limits,
         options,
         &stop,
-        WorkerParameters::new(0, 0, &node_counters, shared_history).with_network(network),
+        WorkerParameters::new(0, 0, &node_counters, shared_history, network),
         |_| {},
-    )
-}
-
-pub fn search_with_history(
-    position: &Position,
-    history: &[u64],
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
-) -> SearchResult {
-    search_with_history_options(
-        position,
-        history,
-        transposition_table,
-        limits,
-        SearchOptions::default(),
-    )
-}
-
-pub fn search_with_history_options(
-    position: &Position,
-    history: &[u64],
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
-    options: SearchOptions,
-) -> SearchResult {
-    let stop = AtomicBool::new(false);
-    search_with_history_callback_options(
-        position,
-        history,
-        transposition_table,
-        limits,
-        options,
-        &stop,
-        |_| {},
-    )
-}
-
-pub fn search_with_callback<F>(
-    position: &Position,
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
-    stop: &AtomicBool,
-    on_iteration: F,
-) -> SearchResult
-where
-    F: FnMut(&IterationInfo),
-{
-    search_with_callback_options(
-        position,
-        transposition_table,
-        limits,
-        SearchOptions::default(),
-        stop,
-        on_iteration,
-    )
-}
-
-pub fn search_with_callback_options<F>(
-    position: &Position,
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
-    options: SearchOptions,
-    stop: &AtomicBool,
-    on_iteration: F,
-) -> SearchResult
-where
-    F: FnMut(&IterationInfo),
-{
-    let history = [position.repetition_key()];
-    search_with_history_callback_options(
-        position,
-        &history,
-        transposition_table,
-        limits,
-        options,
-        stop,
-        on_iteration,
-    )
-}
-
-pub fn search_with_history_callback<F>(
-    position: &Position,
-    history: &[u64],
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
-    stop: &AtomicBool,
-    on_iteration: F,
-) -> SearchResult
-where
-    F: FnMut(&IterationInfo),
-{
-    search_with_history_callback_options(
-        position,
-        history,
-        transposition_table,
-        limits,
-        SearchOptions::default(),
-        stop,
-        on_iteration,
-    )
-}
-
-pub fn search_with_history_callback_options<F>(
-    position: &Position,
-    history: &[u64],
-    transposition_table: &TranspositionTable,
-    limits: SearchLimits,
-    options: SearchOptions,
-    stop: &AtomicBool,
-    on_iteration: F,
-) -> SearchResult
-where
-    F: FnMut(&IterationInfo),
-{
-    let node_counters = [AtomicU64::new(0)];
-    let shared_history = SharedHistory::new(1);
-    search_worker_with_history_callback_options(
-        position,
-        history,
-        transposition_table,
-        limits,
-        options,
-        stop,
-        WorkerParameters::new(0, 0, &node_counters, &shared_history),
-        on_iteration,
     )
 }
 
@@ -602,6 +480,8 @@ where
 {
     debug_assert!(worker.worker_id < worker.node_counters.len());
     let worker_id = worker.worker_id;
+    let mut worker = worker;
+    let root_move_reporter = worker.root_move_reporter.take();
     let started = if worker_id == 0 {
         Some(Instant::now())
     } else {
@@ -635,6 +515,7 @@ where
         worker.node_counters,
         worker.network,
     );
+    context.root_move_reporter = root_move_reporter;
     let root_moves = generate_legal_moves(position);
 
     if root_moves.is_empty() {
@@ -762,29 +643,54 @@ fn aspiration_search(
     previous_score: i32,
     context: &mut SearchContext<'_>,
 ) -> Option<(i32, Vec<Move>)> {
-    let mut delta = aspiration_delta(context.worker_id);
+    let mut delta = aspiration_delta(context.worker_id, previous_score);
     let mut alpha = (previous_score - delta).max(-INFINITY);
     let mut beta = (previous_score + delta).min(INFINITY);
+    // A fail high means the root move is better than believed. Re-searching at full
+    // depth to confirm a bound that is about to be raised again wastes the iteration,
+    // so each successive fail high gives up a ply, down to a floor.
+    let mut search_depth = depth;
 
     loop {
-        let result = root_search(position, depth, alpha, beta, context)?;
+        let result = root_search(position, search_depth.max(1), alpha, beta, context)?;
         if result.0 <= alpha {
+            // Fail low: the position is worse than believed, so the move about to be
+            // played is in doubt and the full depth is worth paying for. Beta is pulled
+            // back toward the score as alpha drops, so the window stays centred rather
+            // than growing in one direction only.
+            beta = (alpha + beta) / 2;
             alpha = (result.0 - delta).max(-INFINITY);
+            search_depth = depth;
         } else if result.0 >= beta {
             beta = (result.0 + delta).min(INFINITY);
+            search_depth = search_depth
+                .saturating_sub(1)
+                .max(depth.saturating_sub(ASPIRATION_MAX_DEPTH_REDUCTION));
         } else {
             return Some(result);
         }
-        delta += (47 * delta / 128).max(1);
+        // Widen by a third per failure. Doubling was measured and did not pay: the
+        // bundle containing it returned +10.72 +/- 11.00 Elo, LLR 0.82 after 1200 games
+        // (experiments/M7-F4-aspiration), which straddles zero. The gentler ramp keeps
+        // the re-search window tight when the first failure was a near miss.
+        delta += (delta / 3).max(1);
         if alpha == -INFINITY && beta == INFINITY {
             return root_search(position, depth, alpha, beta, context);
         }
     }
 }
 
+/// Half-width of the first aspiration window at this iteration.
+///
+/// The width scales with the magnitude of the previous score: a search already several
+/// pawns from equality is likelier to swing than one hovering near zero, and a fixed
+/// width re-searches those positions repeatedly. A flat 25cp was simultaneously too
+/// wide near equality -- where most of the tree lives -- and too narrow once decided.
 #[inline]
-fn aspiration_delta(worker_id: usize) -> i32 {
-    ASPIRATION_INITIAL_DELTA + (worker_id % ASPIRATION_JITTER_BUCKETS) as i32
+fn aspiration_delta(worker_id: usize, previous_score: i32) -> i32 {
+    let scaled = ASPIRATION_INITIAL_DELTA
+        + previous_score.saturating_mul(previous_score) / ASPIRATION_SCORE_DIVISOR;
+    scaled.min(ASPIRATION_MAX_DELTA) + (worker_id % ASPIRATION_JITTER_BUCKETS) as i32
 }
 
 fn published_node_total(counters: &[AtomicU64]) -> u64 {
@@ -825,6 +731,17 @@ fn root_search(
             position.unmake_move(mv, undo);
             continue;
         }
+        // A move that captured a king leaves the board with a side missing one. That is
+        // reachable here because the corpus below tolerates a position where the side
+        // not to move is already in check, and `is_in_check` reports `false` for an
+        // absent king rather than panicking -- so the capture passes the legality filter
+        // above. NNUE then asks for the king square and panics inside the search thread,
+        // killing the engine mid-analysis. Such a "move" is not a chess move at all, so
+        // drop it here rather than teaching the evaluator to tolerate a kingless board.
+        if position.pieces(!mover, PieceKind::King).first().is_none() {
+            position.unmake_move(mv, undo);
+            continue;
+        }
         // The externally validated mate corpus contains legacy composed positions
         // where the side not to move starts in check. Match the reference engine's
         // convention by not treating a continued, pre-existing check as mate in one.
@@ -835,6 +752,9 @@ fn root_search(
             position.unmake_move(mv, undo);
             continue;
         }
+        // Reported after the legality filters above, so `currmovenumber` counts the moves
+        // actually searched. Numbering is 1-based per the UCI spec, hence `searched + 1`.
+        context.report_root_move(depth, mv, searched + 1);
         context.push_position(&position, 1, mv, continuation, &undo);
         let mut child_pv = Vec::new();
         let score = if searched == 0 {
@@ -2595,6 +2515,12 @@ struct SearchContext<'a> {
     /// Percentage the soft limit is scaled by, updated between iterations.
     time_scale_percent: u32,
     generation: u8,
+    /// Sink for `currmove` progress, set only for the worker that owns the clock.
+    ///
+    /// Boxed rather than generic because `SearchContext` is threaded through every node
+    /// of the search; adding a type parameter for a callback used once per root move
+    /// would infect the whole recursion for no benefit.
+    root_move_reporter: Option<Box<dyn FnMut(RootMoveInfo) + 'a>>,
 }
 
 impl<'a> SearchContext<'a> {
@@ -2611,7 +2537,7 @@ impl<'a> SearchContext<'a> {
         worker_id: usize,
         generation: u8,
         node_counters: &'a [AtomicU64],
-        network: Option<&'a Network>,
+        network: &'a Network,
     ) -> Self {
         Self {
             transposition_table,
@@ -2636,6 +2562,23 @@ impl<'a> SearchContext<'a> {
             soft_time_reached: false,
             time_scale_percent: 100,
             generation,
+            root_move_reporter: None,
+        }
+    }
+
+    /// Reports the root move about to be searched, if this worker reports progress.
+    ///
+    /// Reported from the first move of the first depth. The reference engine withholds
+    /// these lines until a few seconds in, on the reasoning that early depths resolve
+    /// faster than a GUI can draw them; we report unconditionally instead, so a GUI that
+    /// drives short searches still gets progress rather than silence.
+    fn report_root_move(&mut self, depth: u32, best_move: Move, move_number: usize) {
+        if let Some(reporter) = self.root_move_reporter.as_mut() {
+            reporter(RootMoveInfo {
+                depth,
+                best_move,
+                move_number,
+            });
         }
     }
 
@@ -2878,7 +2821,7 @@ mod tests {
     }
 
     #[test]
-    fn search_evaluator_selects_nnue_or_hce_without_rescaling() {
+    fn search_evaluator_reports_the_network_score_unrescaled() {
         let position = Position::from_fen(
             "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
             false,
@@ -2887,15 +2830,12 @@ mod tests {
         let Some(network) = local_network() else {
             return;
         };
-        let nnue = SearchEvaluator::new(Some(network), &position);
-        let hce = SearchEvaluator::new(None, &position);
+        let evaluator = SearchEvaluator::new(network, &position);
 
         assert_eq!(
-            nnue.evaluate(&position),
+            evaluator.evaluate(&position),
             network.evaluate_production(&position)
         );
-        assert_eq!(hce.evaluate(&position), evaluate(&position));
-        assert_ne!(nnue.evaluate(&position), hce.evaluate(&position));
     }
 
     #[test]
@@ -2905,7 +2845,7 @@ mod tests {
         };
         let mut position = Position::startpos();
         let root = position.clone();
-        let mut evaluator = SearchEvaluator::new(Some(network), &position);
+        let mut evaluator = SearchEvaluator::new(network, &position);
         let mv = mf_core::parse_uci_move(&position, "e2e4", false).expect("test move should parse");
         let undo = position.make_move(mv);
 
@@ -2945,7 +2885,7 @@ mod tests {
         let Some(network) = local_network() else {
             return;
         };
-        let mut evaluator = SearchEvaluator::new(Some(network), &position);
+        let mut evaluator = SearchEvaluator::new(network, &position);
 
         for _ in 0..MAX_SEARCH_PLY {
             evaluator
@@ -2979,7 +2919,7 @@ mod tests {
             0,
             0,
             &counters,
-            Some(network),
+            network,
         );
         let mv = mf_core::parse_uci_move(&position, "e2e4", false).expect("test move should parse");
         let continuation = continuation_key(&position, mv);
@@ -3005,7 +2945,7 @@ mod tests {
     }
 
     #[test]
-    fn public_search_uses_nnue_when_a_network_is_supplied() {
+    fn public_search_scores_the_root_with_the_network() {
         let Some(network) = local_network() else {
             return;
         };
@@ -3017,18 +2957,9 @@ mod tests {
             ..SearchLimits::default()
         };
 
-        let nnue = search_with_network_options(
-            &position,
-            &table,
-            limits,
-            SearchOptions::default(),
-            Some(network),
-        );
-        let hce = search_with_options(&position, &table, limits, SearchOptions::default());
+        let result = search(&position, &table, limits, SearchOptions::default(), network);
 
-        assert_eq!(nnue.score, network.evaluate_production(&position));
-        assert_eq!(hce.score, evaluate(&position));
-        assert_ne!(nnue.score, hce.score);
+        assert_eq!(result.score, network.evaluate_production(&position));
     }
 
     #[test]
@@ -3066,7 +2997,7 @@ mod tests {
                 0,
                 0,
                 &counters,
-                Some(network),
+                network,
             );
             let root_state = context.evaluator.current().clone();
             context.evaluator.enable_verification();
@@ -3081,14 +3012,31 @@ mod tests {
 
     #[test]
     fn worker_zero_preserves_the_original_aspiration_delta() {
-        assert_eq!(aspiration_delta(0), ASPIRATION_INITIAL_DELTA);
+        assert_eq!(aspiration_delta(0, 0), ASPIRATION_INITIAL_DELTA);
     }
 
     #[test]
     fn helpers_receive_distinct_bounded_aspiration_deltas() {
-        let values: Vec<_> = (0..8).map(aspiration_delta).collect();
+        let values: Vec<_> = (0..8).map(|worker| aspiration_delta(worker, 0)).collect();
         assert_eq!(values[0], ASPIRATION_INITIAL_DELTA);
         assert!(values.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn aspiration_window_widens_with_the_magnitude_of_the_previous_score() {
+        // Near equality the window is tight, because that is where the score is most
+        // predictable and most of the tree lives.
+        assert_eq!(aspiration_delta(0, 0), 8);
+        // `100^2 / ASPIRATION_SCORE_DIVISOR` truncates to zero, so a hundredth of a pawn
+        // does not widen the window at all.
+        assert_eq!(aspiration_delta(0, 100), 8);
+        // A decided position swings more, so it starts wider instead of paying for a
+        // chain of re-searches.
+        assert!(aspiration_delta(0, 800) > aspiration_delta(0, 200));
+        // Sign does not matter, only distance from equality.
+        assert_eq!(aspiration_delta(0, -600), aspiration_delta(0, 600));
+        // And the width is capped rather than exploding near mate scores.
+        assert_eq!(aspiration_delta(0, MATE_SCORE), ASPIRATION_MAX_DELTA);
     }
 
     #[test]
@@ -3099,6 +3047,9 @@ mod tests {
 
     #[test]
     fn one_worker_node_limit_is_exact() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
@@ -3116,7 +3067,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(0, 0, &counters, &shared_history),
+            WorkerParameters::new(0, 0, &counters, &shared_history, network),
             |_| {},
         );
 
@@ -3126,6 +3077,9 @@ mod tests {
 
     #[test]
     fn one_worker_accepts_the_limit_node_across_publication_boundary() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
@@ -3149,7 +3103,7 @@ mod tests {
                 0,
                 0,
                 &counters,
-                None,
+                network,
             );
 
             for node in 1..=limit {
@@ -3164,6 +3118,9 @@ mod tests {
 
     #[test]
     fn helper_uses_aggregate_published_node_limit() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
@@ -3181,7 +3138,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(1, 0, &counters, &shared_history),
+            WorkerParameters::new(1, 0, &counters, &shared_history, network),
             |_| {},
         );
 
@@ -3191,6 +3148,9 @@ mod tests {
 
     #[test]
     fn helper_search_does_not_observe_clock_limits() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
@@ -3210,7 +3170,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(1, 0, &counters, &shared_history),
+            WorkerParameters::new(1, 0, &counters, &shared_history, network),
             |_| {},
         );
 
@@ -3221,6 +3181,9 @@ mod tests {
 
     #[test]
     fn worker_zero_iteration_nodes_include_published_helpers() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
@@ -3239,7 +3202,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(0, 0, &counters, &shared_history),
+            WorkerParameters::new(0, 0, &counters, &shared_history, network),
             |info| reported_nodes = Some(info.nodes),
         );
 
@@ -3248,6 +3211,9 @@ mod tests {
 
     #[test]
     fn worker_generation_is_written_to_root_tt_entries() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
@@ -3265,7 +3231,7 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(0, 9, &counters, &shared_history),
+            WorkerParameters::new(0, 9, &counters, &shared_history, network),
             |_| {},
         );
 
@@ -3508,6 +3474,9 @@ mod tests {
 
     #[test]
     fn null_move_is_a_hard_boundary_for_repetition_history() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::from_fen(
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 10 1",
             false,
@@ -3531,7 +3500,7 @@ mod tests {
             0,
             0,
             &counters,
-            None,
+            network,
         );
 
         assert!(context.repetition_history.is_repetition(0));
@@ -3673,6 +3642,9 @@ mod tests {
 
     #[test]
     fn the_scaled_soft_limit_can_never_exceed_the_hard_limit() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::startpos();
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
@@ -3695,7 +3667,7 @@ mod tests {
             0,
             0,
             &counters,
-            None,
+            network,
         );
 
         context.set_time_scale(100);
@@ -3750,6 +3722,9 @@ mod tests {
 
     #[test]
     fn singular_verification_does_not_probe_or_overwrite_the_parent_tt_entry() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::startpos();
         let depth = 6;
         let key = tt_key(&position, depth);
@@ -3757,7 +3732,8 @@ mod tests {
         let original = EntryData {
             best_move: Some(tt_move),
             score: 100,
-            static_eval: evaluate(&position) as i16,
+            // Any value works here; the test only checks the entry survives untouched.
+            static_eval: 42,
             depth: depth as u8,
             bound: Bound::Lower,
             age: 0,
@@ -3783,7 +3759,7 @@ mod tests {
             0,
             0,
             &counters,
-            None,
+            network,
         );
         let mut searched = position.clone();
         let mut pv = Vec::new();
@@ -3809,6 +3785,9 @@ mod tests {
 
     #[test]
     fn excluded_move_search_without_alternatives_returns_alpha_not_draw() {
+        let Some(network) = local_network() else {
+            return;
+        };
         let position = Position::from_fen("8/8/8/8/8/k7/8/KQ6 b - - 0 1", false).unwrap();
         let legal_moves = generate_legal_moves(&position);
         assert_eq!(legal_moves.len(), 1);
@@ -3830,7 +3809,7 @@ mod tests {
             0,
             0,
             &counters,
-            None,
+            network,
         );
         let mut searched = position.clone();
         let mut pv = Vec::new();

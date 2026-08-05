@@ -102,6 +102,9 @@ fn pool_reports_its_persistent_worker_count() {
 #[test]
 fn fixed_depth_public_path_uses_worker_zero_from_a_larger_pool() {
     run_bounded(|| {
+        let Some(network) = local_network() else {
+            return;
+        };
         let pool = SearchPool::new(4).expect("worker pool should start");
         let baseline_pool = SearchPool::new(1).expect("baseline worker should start");
         let position = Position::startpos();
@@ -112,24 +115,26 @@ fn fixed_depth_public_path_uses_worker_zero_from_a_larger_pool() {
         let mut callback_depths = Vec::new();
 
         let pooled = pool
-            .search_fixed_depth_with_history_callback_options(
+            .search_fixed_depth_with_history_callback(
                 &position,
                 &history(&position),
                 table,
                 depth_limits(4),
                 SearchOptions::default(),
                 Arc::clone(&stop),
+                Arc::clone(&network),
                 |iteration| callback_depths.push(iteration.depth),
             )
             .expect("worker-zero search should complete");
         let baseline = baseline_pool
-            .search_fixed_depth_with_history_callback_options(
+            .search_fixed_depth_with_history_callback(
                 &position,
                 &history(&position),
                 baseline_table,
                 depth_limits(4),
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
+                Arc::clone(&network),
                 |_| {},
             )
             .expect("baseline search should complete");
@@ -160,19 +165,23 @@ fn fixed_depth_public_path_uses_worker_zero_from_a_larger_pool() {
 #[test]
 fn explicit_fixed_depth_smp_path_returns_a_legal_result() {
     run_bounded(|| {
+        let Some(network) = local_network() else {
+            return;
+        };
         let pool = SearchPool::new(4).expect("worker pool should start");
         let position = Position::from_fen(KIWIPETE, false).expect("test FEN should parse");
         let table = Arc::new(TranspositionTable::new(8).expect("test TT should allocate"));
         let stop = Arc::new(AtomicBool::new(false));
 
         let pooled = pool
-            .search_fixed_depth_smp_with_history_callback_options(
+            .search_fixed_depth_smp_with_history_callback(
                 &position,
                 &history(&position),
                 table,
                 depth_limits(4),
                 SearchOptions::default(),
                 Arc::clone(&stop),
+                Arc::clone(&network),
                 |_| {},
             )
             .expect("SMP search should complete");
@@ -194,26 +203,26 @@ fn nnue_fixed_depth_is_identical_across_pool_sizes() {
         };
 
         let one_result = one
-            .search_fixed_depth_with_history_callback_network_options(
+            .search_fixed_depth_with_history_callback(
                 &position,
                 &history(&position),
                 Arc::new(TranspositionTable::new(8).expect("test TT should allocate")),
                 depth_limits(4),
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
-                Some(Arc::clone(&network)),
+                Arc::clone(&network),
                 |_| {},
             )
             .expect("single worker NNUE search should complete");
         let eight_result = eight
-            .search_fixed_depth_with_history_callback_network_options(
+            .search_fixed_depth_with_history_callback(
                 &position,
                 &history(&position),
                 Arc::new(TranspositionTable::new(8).expect("test TT should allocate")),
                 depth_limits(4),
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
-                Some(network),
+                network,
                 |_| {},
             )
             .expect("eight worker NNUE search should complete");
@@ -236,14 +245,14 @@ fn nnue_fixed_depth_smp_uses_a_network_on_every_worker() {
         let pool = SearchPool::new(4).expect("worker pool should start");
         let position = Position::from_fen(KIWIPETE, false).expect("test FEN should parse");
         let pooled = pool
-            .search_fixed_depth_smp_with_history_callback_network_options(
+            .search_fixed_depth_smp_with_history_callback(
                 &position,
                 &history(&position),
                 Arc::new(TranspositionTable::new(8).expect("test TT should allocate")),
                 depth_limits(3),
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
-                Some(network),
+                network,
                 |_| {},
             )
             .expect("SMP NNUE search should complete");
@@ -255,6 +264,9 @@ fn nnue_fixed_depth_smp_uses_a_network_on_every_worker() {
 
 #[test]
 fn external_stop_ends_an_infinite_smp_search() {
+    let Some(network) = local_network() else {
+        return;
+    };
     let pool = Arc::new(SearchPool::new(4).expect("worker pool should start"));
     let position = Position::startpos();
     let table = Arc::new(TranspositionTable::new(8).expect("test TT should allocate"));
@@ -265,13 +277,14 @@ fn external_stop_ends_an_infinite_smp_search() {
     let search_pool = Arc::clone(&pool);
     let search_stop = Arc::clone(&stop);
     let handle = std::thread::spawn(move || {
-        let result = search_pool.search_with_history_callback_options(
+        let result = search_pool.search_with_history_callback(
             &position,
             &history(&position),
             table,
             infinite_limits(),
             SearchOptions::default(),
             search_stop,
+            Arc::clone(&network),
             |_| {
                 let _ = started_tx.try_send(());
             },
@@ -295,6 +308,9 @@ fn external_stop_ends_an_infinite_smp_search() {
 #[test]
 fn callback_panic_drains_workers_before_pool_reuse_and_drop() {
     run_bounded(|| {
+        let Some(network) = local_network() else {
+            return;
+        };
         let pool = SearchPool::new(4).expect("worker pool should start");
         let position = Position::startpos();
         let table = Arc::new(TranspositionTable::new(8).expect("test TT should allocate"));
@@ -302,13 +318,14 @@ fn callback_panic_drains_workers_before_pool_reuse_and_drop() {
         let mut callback_count = 0;
 
         let callback_panic = catch_unwind(AssertUnwindSafe(|| {
-            let _ = pool.search_with_history_callback_options(
+            let _ = pool.search_with_history_callback(
                 &position,
                 &history(&position),
                 Arc::clone(&table),
                 infinite_limits(),
                 SearchOptions::default(),
                 stop,
+                Arc::clone(&network),
                 |_| {
                     callback_count += 1;
                     panic!("callback failure");
@@ -321,13 +338,14 @@ fn callback_panic_drains_workers_before_pool_reuse_and_drop() {
         pool.clear(Arc::clone(&table))
             .expect("pool should be reusable after callback panic");
         let pooled = pool
-            .search_fixed_depth_with_history_callback_options(
+            .search_fixed_depth_with_history_callback(
                 &position,
                 &history(&position),
                 table,
                 depth_limits(2),
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
+                Arc::clone(&network),
                 |_| {},
             )
             .expect("search after callback panic should complete");
@@ -338,6 +356,9 @@ fn callback_panic_drains_workers_before_pool_reuse_and_drop() {
 
 #[test]
 fn infinite_search_ignores_embedded_limits_until_external_stop() {
+    let Some(network) = local_network() else {
+        return;
+    };
     let pool = Arc::new(SearchPool::new(4).expect("worker pool should start"));
     let position = Position::startpos();
     let table = Arc::new(TranspositionTable::new(8).expect("test TT should allocate"));
@@ -348,7 +369,7 @@ fn infinite_search_ignores_embedded_limits_until_external_stop() {
     let search_pool = Arc::clone(&pool);
     let search_stop = Arc::clone(&stop);
     let handle = std::thread::spawn(move || {
-        let result = search_pool.search_with_history_callback_options(
+        let result = search_pool.search_with_history_callback(
             &position,
             &history(&position),
             table,
@@ -361,6 +382,7 @@ fn infinite_search_ignores_embedded_limits_until_external_stop() {
             },
             SearchOptions::default(),
             search_stop,
+            Arc::clone(&network),
             |_| {
                 let _ = started_tx.try_send(());
             },
@@ -394,6 +416,9 @@ fn infinite_search_ignores_embedded_limits_until_external_stop() {
 #[test]
 fn concurrent_pool_calls_are_rejected_as_busy() {
     run_bounded(|| {
+        let Some(network) = local_network() else {
+            return;
+        };
         let pool = Arc::new(SearchPool::new(4).expect("worker pool should start"));
         let position = Position::startpos();
         let history = history(&position);
@@ -407,14 +432,16 @@ fn concurrent_pool_calls_are_rejected_as_busy() {
         let search_history = history.clone();
         let search_table = Arc::clone(&table);
         let search_stop = Arc::clone(&stop);
+        let search_network = Arc::clone(&network);
         let handle = std::thread::spawn(move || {
-            let result = search_pool.search_with_history_callback_options(
+            let result = search_pool.search_with_history_callback(
                 &search_position,
                 &search_history,
                 search_table,
                 infinite_limits(),
                 SearchOptions::default(),
                 search_stop,
+                search_network,
                 |_| {
                     let _ = started_tx.try_send(());
                 },
@@ -429,13 +456,14 @@ fn concurrent_pool_calls_are_rejected_as_busy() {
             pool.clear(Arc::clone(&table)),
             Err(PoolError::Busy)
         ));
-        let second = pool.search_fixed_depth_with_history_callback_options(
+        let second = pool.search_fixed_depth_with_history_callback(
             &position,
             &history,
             table,
             depth_limits(1),
             SearchOptions::default(),
             Arc::new(AtomicBool::new(false)),
+            Arc::clone(&network),
             |_| {},
         );
         assert!(matches!(second, Err(PoolError::Busy)));
@@ -483,6 +511,9 @@ fn parallel_clear_removes_shared_table_entries() {
 #[test]
 fn eight_thread_pool_survives_representative_position_stress() {
     run_bounded(|| {
+        let Some(network) = local_network() else {
+            return;
+        };
         let pool = SearchPool::new(8).expect("worker pool should start");
         let table = Arc::new(TranspositionTable::new(16).expect("test TT should allocate"));
         let positions = [
@@ -500,13 +531,14 @@ fn eight_thread_pool_survives_representative_position_stress() {
         for _ in 0..2 {
             for position in &positions {
                 let pooled = pool
-                    .search_fixed_depth_smp_with_history_callback_options(
+                    .search_fixed_depth_smp_with_history_callback(
                         position,
                         &history(position),
                         Arc::clone(&table),
                         depth_limits(3),
                         SearchOptions::default(),
                         Arc::new(AtomicBool::new(false)),
+                        Arc::clone(&network),
                         |_| {},
                     )
                     .expect("stress search should complete");

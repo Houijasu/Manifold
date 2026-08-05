@@ -1,6 +1,6 @@
 use core::fmt;
 use core::mem::{align_of, size_of};
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::collections::TryReserveError;
 
 use mf_core::Move;
@@ -147,6 +147,14 @@ const _: () = assert!(align_of::<Cluster>() == CACHE_LINE_BYTES);
 
 pub struct TranspositionTable {
     clusters: Box<[Cluster]>,
+    /// Whether anything has been stored since the last clear.
+    ///
+    /// `hashfull` samples only the first 1000 clusters, so a large table holding a small
+    /// search is very likely to have every stored entry outside the sample and read as
+    /// empty. This flag makes "empty" exact without widening the sample. It is only ever
+    /// set to `true` on the store path, so after the first store it is a read-only load
+    /// from a shared cache line.
+    has_stored: AtomicBool,
 }
 
 impl TranspositionTable {
@@ -176,6 +184,7 @@ impl TranspositionTable {
         clusters.resize_with(cluster_count, Cluster::empty);
         Ok(Self {
             clusters: clusters.into_boxed_slice(),
+            has_stored: AtomicBool::new(false),
         })
     }
 
@@ -192,6 +201,7 @@ impl TranspositionTable {
 
     pub fn clear(&self) {
         self.clear_cluster_range(0, self.clusters.len());
+        self.has_stored.store(false, Ordering::Relaxed);
     }
 
     pub(crate) fn cluster_count(&self) -> usize {
@@ -219,7 +229,18 @@ impl TranspositionTable {
             .flat_map(|cluster| &cluster.entries)
             .filter(|entry| entry.data.load(Ordering::Relaxed) != 0)
             .count();
-        ((occupied * 1_000) / sampled_entries) as u16
+        let per_mille = ((occupied * 1_000) / sampled_entries) as u16;
+        // A table that has been written to never reports 0, so that `hashfull 0` means
+        // "empty" and nothing else. Two things otherwise floor a live table to zero: the
+        // integer division above, and the sample itself -- only the first 1000 clusters
+        // are examined, so a 4 GiB table holding a short search will usually have every
+        // stored entry outside the sample. Both read as empty, and at least one GUI
+        // renders `hashfull 0` as 100% used rather than 0%. The reported value is never
+        // off by as much as one per-mille, which is finer than the field can express.
+        if per_mille == 0 && self.has_stored.load(Ordering::Relaxed) {
+            return 1;
+        }
+        per_mille
     }
 
     #[inline]
@@ -239,6 +260,7 @@ impl TranspositionTable {
         );
         let packed = PackedEntry::pack(key, data);
         let cluster = self.cluster(key);
+        self.has_stored.store(true, Ordering::Relaxed);
 
         if let Some((entry, stored)) = cluster.entries.iter().find_map(|entry| {
             entry

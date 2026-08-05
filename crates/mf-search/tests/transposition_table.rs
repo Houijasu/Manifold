@@ -412,6 +412,41 @@ fn hashfull_reports_sampled_occupancy_in_per_mille() {
     assert_eq!(table.hashfull_per_mille(), 0);
 }
 
+/// `hashfull 0` must mean "empty", never "occupied but rounded down".
+///
+/// A large table holding a small search floors to zero under integer division, which is
+/// accurate but collides with the empty-table reading. GUIs distinguish the two, and at
+/// least one renders `hashfull 0` as 100% usage.
+#[test]
+fn a_table_holding_entries_never_reports_zero_occupancy() {
+    let table = TranspositionTable::new(256).expect("test TT should allocate");
+    assert_eq!(
+        table.hashfull_per_mille(),
+        0,
+        "an untouched table is the only thing allowed to report 0"
+    );
+
+    // One entry in a 256 MiB table is ~0.0000002 per-mille: as close to zero as the
+    // field can get without being empty.
+    table.store(
+        0x9e37_79b9_7f4a_7c15,
+        EntryData {
+            best_move: None,
+            score: 1,
+            static_eval: 0,
+            depth: 1,
+            bound: Bound::Exact,
+            age: 0,
+            pv: false,
+        },
+    );
+
+    assert!(
+        table.hashfull_per_mille() >= 1,
+        "a table with a stored entry must not be reported as empty"
+    );
+}
+
 #[test]
 fn prefetch_is_safe_for_arbitrary_keys() {
     let table = TranspositionTable::new(1).expect("test table should allocate");

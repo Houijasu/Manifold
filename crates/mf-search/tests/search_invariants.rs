@@ -1,10 +1,70 @@
 use std::time::Duration;
 
+use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
+
 use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move};
+use mf_nnue::Network;
 use mf_search::{
     MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, SearchOptions, TranspositionTable,
-    UNEVALUATED_STATIC_EVAL, search, search_with_history, search_with_options,
+    UNEVALUATED_STATIC_EVAL, search, search_with_callback,
 };
+
+/// The engine evaluates only with NNUE, so every search here needs a network.
+///
+/// Loaded once for the whole target: the file is ~106 MiB, and re-reading it per test
+/// dominated the runtime. Returns `None` when the (gitignored) network is absent so a
+/// fresh clone reports skips rather than 20 confusing failures.
+fn network() -> Option<&'static Network> {
+    static NETWORK: OnceLock<Option<Network>> = OnceLock::new();
+    NETWORK
+        .get_or_init(|| {
+            let path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+                || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+                PathBuf::from,
+            );
+            if !path.is_file() {
+                eprintln!("SKIPPED: search invariants need {}", path.display());
+                return None;
+            }
+            Some(Network::load(&path).unwrap_or_else(|error| {
+                panic!("failed to load NNUE network {}: {error}", path.display())
+            }))
+        })
+        .as_ref()
+}
+
+/// `search` with the default options, which is what most invariants below want.
+fn search_default(
+    position: &Position,
+    table: &TranspositionTable,
+    limits: SearchLimits,
+    network: &Network,
+) -> mf_search::SearchResult {
+    search(position, table, limits, SearchOptions::default(), network)
+}
+
+/// `search` seeded with a game history, for repetition and fifty-move invariants.
+fn search_history(
+    position: &Position,
+    history: &[u64],
+    table: &TranspositionTable,
+    limits: SearchLimits,
+    network: &Network,
+) -> mf_search::SearchResult {
+    let stop = AtomicBool::new(false);
+    search_with_callback(
+        position,
+        history,
+        table,
+        limits,
+        SearchOptions::default(),
+        network,
+        &stop,
+        |_| {},
+    )
+}
 
 const MATE_CASES: [(&str, i32); 12] = [
     ("7k/8/6QK/8/8/8/8/8 w - - 0 1", 1),
@@ -108,17 +168,21 @@ fn selectivity_options_default_to_enabled() {
 
 #[test]
 fn null_move_pruning_is_inert_without_non_pawn_material() {
+    let Some(network) = network() else {
+        return;
+    };
     let position = Position::from_fen("7k/8/p1p5/1p5p/1P5P/2P5/P4K2/8 w - - 0 1", false)
         .expect("pawn-only FEN should parse");
     let enabled_table = TranspositionTable::new(4).expect("test TT should allocate");
     let disabled_table = TranspositionTable::new(4).expect("test TT should allocate");
-    let enabled = search_with_options(
+    let enabled = search(
         &position,
         &enabled_table,
         limits(7),
         SearchOptions::default(),
+        network,
     );
-    let disabled = search_with_options(
+    let disabled = search(
         &position,
         &disabled_table,
         limits(7),
@@ -126,6 +190,7 @@ fn null_move_pruning_is_inert_without_non_pawn_material() {
             use_nmp: false,
             ..SearchOptions::default()
         },
+        network,
     );
 
     assert_eq!(enabled.best_move, disabled.best_move);
@@ -135,12 +200,15 @@ fn null_move_pruning_is_inert_without_non_pawn_material() {
 
 #[test]
 fn pv_is_legal() {
+    let Some(network) = network() else {
+        return;
+    };
     let mut position = Position::startpos();
     let table = TranspositionTable::new(16).expect("test TT should allocate");
 
     for sample in 0..32 {
         let before = position.clone();
-        let result = search(&position, &table, limits(5));
+        let result = search_default(&position, &table, limits(5), network);
         let mut replay = position.clone();
         for (ply, &mv) in result.pv.iter().enumerate() {
             assert!(
@@ -163,10 +231,13 @@ fn pv_is_legal() {
 
 #[test]
 fn mate_in_n_found() {
+    let Some(network) = network() else {
+        return;
+    };
     for (fen, expected) in MATE_CASES {
         let position = Position::from_fen(fen, false).expect("mate FEN should parse");
         let table = TranspositionTable::new(16).expect("test TT should allocate");
-        let result = search_with_options(
+        let result = search(
             &position,
             &table,
             limits(24),
@@ -206,6 +277,7 @@ fn mate_in_n_found() {
                 use_correction_history: true,
                 use_correction_sources: SearchOptions::default().use_correction_sources,
             },
+            network,
         );
 
         assert_eq!(
@@ -230,10 +302,13 @@ fn mate_in_n_found() {
 
 #[test]
 fn selectivity_preserves_shallow_forced_mates() {
+    let Some(network) = network() else {
+        return;
+    };
     for (fen, expected) in &MATE_CASES[..9] {
         let position = Position::from_fen(fen, false).expect("mate FEN should parse");
         let table = TranspositionTable::new(16).expect("test TT should allocate");
-        let result = search(&position, &table, limits(24));
+        let result = search_default(&position, &table, limits(24), network);
 
         assert_eq!(
             mate_moves(result.score),
@@ -247,6 +322,9 @@ fn selectivity_preserves_shallow_forced_mates() {
 
 #[test]
 fn score_bounds_sane() {
+    let Some(network) = network() else {
+        return;
+    };
     let positions = [
         Position::startpos(),
         Position::from_fen(
@@ -259,7 +337,7 @@ fn score_bounds_sane() {
 
     for position in positions {
         let table = TranspositionTable::new(4).expect("test TT should allocate");
-        let result = search(&position, &table, limits(6));
+        let result = search_default(&position, &table, limits(6), network);
         assert!(
             (-MATE_SCORE..=MATE_SCORE).contains(&result.score),
             "score escaped representable bounds: {}",
@@ -272,6 +350,9 @@ fn score_bounds_sane() {
 
 #[test]
 fn deterministic_single_thread() {
+    let Some(network) = network() else {
+        return;
+    };
     let position = Position::from_fen(
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
         false,
@@ -287,8 +368,8 @@ fn deterministic_single_thread() {
 
     let first_table = TranspositionTable::new(16).expect("test TT should allocate");
     let second_table = TranspositionTable::new(16).expect("test TT should allocate");
-    let first = search(&position, &first_table, limits);
-    let second = search(&position, &second_table, limits);
+    let first = search_default(&position, &first_table, limits, network);
+    let second = search_default(&position, &second_table, limits, network);
 
     assert_eq!(first.best_move, second.best_move);
     assert_eq!(first.nodes, 20_000);
@@ -296,13 +377,16 @@ fn deterministic_single_thread() {
     assert_eq!(first.score, second.score);
     assert_eq!(first.pv, second.pv);
 
-    let warm = search(&position, &first_table, limits);
+    let warm = search_default(&position, &first_table, limits, network);
     assert_eq!(warm.best_move, first.best_move);
     assert_eq!(warm.nodes, first.nodes);
 }
 
 #[test]
 fn selective_fixed_depth_search_is_reproducible_with_fresh_and_warm_tt() {
+    let Some(network) = network() else {
+        return;
+    };
     let position = Position::from_fen(
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
         false,
@@ -312,7 +396,7 @@ fn selective_fixed_depth_search_is_reproducible_with_fresh_and_warm_tt() {
 
     for _ in 0..5 {
         let table = TranspositionTable::new(16).expect("test TT should allocate");
-        let result = search(&position, &table, limits(7));
+        let result = search_default(&position, &table, limits(7), network);
         let signature = (
             result.best_move,
             result.score,
@@ -337,7 +421,7 @@ fn selective_fixed_depth_search_is_reproducible_with_fresh_and_warm_tt() {
         // The real invariant is the one asserted above: independent FRESH tables must
         // reproduce the full signature bit-for-bit, which they do (66_739 nodes at
         // depth 7 here, identical across runs).
-        let warm = search(&position, &table, limits(7));
+        let warm = search_default(&position, &table, limits(7), network);
         assert!(
             warm.best_move.is_some(),
             "a warm re-search must still return a legal move"
@@ -347,15 +431,18 @@ fn selective_fixed_depth_search_is_reproducible_with_fresh_and_warm_tt() {
 
 #[test]
 fn campbell_ghi_position_is_stable_with_warm_and_cleared_tt() {
+    let Some(network) = network() else {
+        return;
+    };
     let position = Position::from_fen("5B2/1p3pk1/3p4/8/3p4/p7/8/7K b - - 78 30", false).unwrap();
     let table = TranspositionTable::new(16).expect("test TT should allocate");
 
     let drawing_line =
         Position::from_fen("5k2/1p3p2/3p4/8/3p4/p7/8/7K w - - 99 31", false).unwrap();
-    let draw_first = search(&drawing_line, &table, limits(9));
-    let warm = search(&position, &table, limits(10));
+    let draw_first = search_default(&drawing_line, &table, limits(9), network);
+    let warm = search_default(&position, &table, limits(10), network);
     table.clear();
-    let after_new_game = search(&position, &table, limits(10));
+    let after_new_game = search_default(&position, &table, limits(10), network);
 
     assert_eq!(draw_first.score, 0);
     for result in [&warm, &after_new_game] {
@@ -376,10 +463,13 @@ fn campbell_ghi_position_is_stable_with_warm_and_cleared_tt() {
 
 #[test]
 fn m2_tt_marks_static_evaluation_as_unavailable() {
+    let Some(network) = network() else {
+        return;
+    };
     let position = Position::startpos();
     let table = TranspositionTable::new(4).expect("test TT should allocate");
 
-    search(&position, &table, limits(2));
+    search_default(&position, &table, limits(2), network);
 
     let entry = table
         .probe(position.zobrist().main())
@@ -389,6 +479,9 @@ fn m2_tt_marks_static_evaluation_as_unavailable() {
 
 #[test]
 fn time_limits_are_observed_without_returning_immediately() {
+    let Some(network) = network() else {
+        return;
+    };
     let position = Position::startpos();
     let table = TranspositionTable::new(4).expect("test TT should allocate");
     let result = search(
@@ -401,6 +494,8 @@ fn time_limits_are_observed_without_returning_immediately() {
             hard_time: Some(Duration::from_millis(40)),
             infinite: false,
         },
+        SearchOptions::default(),
+        network,
     );
 
     assert!(result.elapsed >= Duration::from_millis(15));
@@ -410,26 +505,32 @@ fn time_limits_are_observed_without_returning_immediately() {
 
 #[test]
 fn fifty_move_rule_draws_at_the_boundary_but_not_from_a_fresh_clock() {
+    let Some(network) = network() else {
+        return;
+    };
     let near_draw = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 98 1", false).unwrap();
     let fresh = Position::from_fen("8/8/8/4k3/8/8/8/K1Q5 w - - 0 1", false).unwrap();
     let table = TranspositionTable::new(4).expect("test TT should allocate");
 
-    assert_eq!(search(&near_draw, &table, limits(6)).score, 0);
+    assert_eq!(
+        search_default(&near_draw, &table, limits(6), network).score,
+        0
+    );
 
     let fresh_parent = Position::from_fen("8/8/4k3/8/8/8/8/K1Q5 b - - 0 1", false).unwrap();
     assert!(
-        search(&fresh_parent, &table, limits(6)).score <= -400,
+        search_default(&fresh_parent, &table, limits(6), network).score <= -400,
         "a parent must not reuse a draw cached for the same child board at clock 98"
     );
     assert!(
-        search(&fresh, &table, limits(6)).score >= 400,
+        search_default(&fresh, &table, limits(6), network).score >= 400,
         "positions with different halfmove clocks must not share TT scores"
     );
 
     let draw_last_table = TranspositionTable::new(4).expect("test TT should allocate");
-    assert!(search(&fresh, &draw_last_table, limits(6)).score >= 400);
+    assert!(search_default(&fresh, &draw_last_table, limits(6), network).score >= 400);
     assert_eq!(
-        search(&near_draw, &draw_last_table, limits(6)).score,
+        search_default(&near_draw, &draw_last_table, limits(6), network).score,
         0,
         "a decisive value stored first must not poison the later draw path"
     );
@@ -437,9 +538,12 @@ fn fifty_move_rule_draws_at_the_boundary_but_not_from_a_fresh_clock() {
 
 #[test]
 fn already_claimable_fifty_move_draw_is_scored_at_the_root() {
+    let Some(network) = network() else {
+        return;
+    };
     let position = Position::from_fen("7k/8/8/8/8/8/P1q5/K7 w - - 100 1", false).unwrap();
     let table = TranspositionTable::new(4).expect("test TT should allocate");
-    let result = search(&position, &table, limits(6));
+    let result = search_default(&position, &table, limits(6), network);
 
     assert_eq!(result.score, 0);
     assert!(result.best_move.is_some());
@@ -447,13 +551,16 @@ fn already_claimable_fifty_move_draw_is_scored_at_the_root() {
 
 #[test]
 fn supplied_history_detects_threefold_repetition_and_selects_the_drawing_move() {
+    let Some(network) = network() else {
+        return;
+    };
     let fen = "1q5k/8/8/8/8/8/8/R5K1 w - - 0 1";
     let moves = [
         "a1a2", "b8b7", "a2a1", "b7b8", "a1a2", "b8b7", "a2a1", "b7b8", "a1a2", "b8b7",
     ];
     let (position, history) = position_and_history(fen, &moves);
     let table = TranspositionTable::new(4).expect("test TT should allocate");
-    let result = search_with_history(&position, &history, &table, limits(6));
+    let result = search_history(&position, &history, &table, limits(6), network);
 
     assert_eq!(result.score, 0);
     assert_eq!(
@@ -466,11 +573,14 @@ fn supplied_history_detects_threefold_repetition_and_selects_the_drawing_move() 
 
 #[test]
 fn winning_side_avoids_completing_a_threefold_repetition() {
+    let Some(network) = network() else {
+        return;
+    };
     let fen = "8/8/8/4k3/8/8/8/K1Q5 w - - 0 1";
     let moves = ["c1c2", "e5e6", "c2c1", "e6e5", "c1c2", "e5e6"];
     let (position, history) = position_and_history(fen, &moves);
     let table = TranspositionTable::new(4).expect("test TT should allocate");
-    let result = search_with_history(&position, &history, &table, limits(6));
+    let result = search_history(&position, &history, &table, limits(6), network);
     let best_move = result
         .best_move
         .map(|mv| format_uci_move(&position, mv, false));
@@ -481,6 +591,9 @@ fn winning_side_avoids_completing_a_threefold_repetition() {
 
 #[test]
 fn insufficient_material_is_scored_as_a_draw_without_masking_two_bishops() {
+    let Some(network) = network() else {
+        return;
+    };
     for fen in [
         "8/8/8/4k3/8/8/8/4K3 w - - 0 1",
         "8/8/8/4k3/8/8/8/4KB2 w - - 0 1",
@@ -488,19 +601,26 @@ fn insufficient_material_is_scored_as_a_draw_without_masking_two_bishops() {
     ] {
         let position = Position::from_fen(fen, false).unwrap();
         let table = TranspositionTable::new(4).expect("test TT should allocate");
-        assert_eq!(search(&position, &table, limits(4)).score, 0, "{fen}");
+        assert_eq!(
+            search_default(&position, &table, limits(4), network).score,
+            0,
+            "{fen}"
+        );
     }
 
     let position = Position::from_fen("8/8/8/4k3/8/8/8/2B1KB2 w - - 0 1", false).unwrap();
     let table = TranspositionTable::new(4).expect("test TT should allocate");
-    assert!(search(&position, &table, limits(4)).score >= 100);
+    assert!(search_default(&position, &table, limits(4), network).score >= 100);
 }
 
 #[test]
 fn stalemate_resource_is_visible_through_quiescence() {
+    let Some(network) = network() else {
+        return;
+    };
     let position = Position::from_fen("1r5k/7p/8/8/8/8/1r6/K6Q w - - 0 1", false).unwrap();
     let table = TranspositionTable::new(4).expect("test TT should allocate");
-    let result = search(&position, &table, limits(4));
+    let result = search_default(&position, &table, limits(4), network);
 
     assert_eq!(result.score, 0);
     assert_eq!(

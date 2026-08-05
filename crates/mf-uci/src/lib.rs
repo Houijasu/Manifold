@@ -14,9 +14,9 @@ use std::time::{Duration, Instant};
 use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move, perft_divide};
 use mf_nnue::{Network, NetworkSource, production_forward_mode, resolve_network};
 use mf_search::{
-    IterationInfo, PoolError, PoolSearchResult, SearchLimits, SearchOptions, SearchPool,
-    SearchResult, SharedHistory, TranspositionTable, clamp_centipawn_score, score_to_uci_mate,
-    search_with_shared_history_network_options,
+    IterationInfo, PoolError, PoolSearchResult, RootMoveInfo, SearchLimits, SearchOptions,
+    SearchPool, SearchResult, SharedHistory, TranspositionTable, clamp_centipawn_score,
+    score_to_uci_mate, search_with_shared_history,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
@@ -53,7 +53,6 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseCorrHistMajor type check default false",
     "option name UseCorrHistMaterial type check default false",
     "option name UseCorrHistCont type check default true",
-    "option name UseNnue type check default true",
     "option name EvalFile type string default <empty>",
     "uciok",
 ];
@@ -94,11 +93,16 @@ const NULL_BESTMOVE: &str = "0000";
 struct EngineState {
     position: Position,
     position_history: Vec<u64>,
+    /// Set when a `position` command failed, meaning `position` no longer describes the
+    /// board the GUI is on. A search started from it would return a move that is illegal
+    /// in the real position, so `go` declines until a `position` command succeeds.
+    position_is_stale: bool,
     chess960: bool,
-    use_nnue: bool,
-    network: Option<Arc<Network>>,
-    network_source: Option<NetworkSource>,
-    network_resolution_error: Option<Arc<str>>,
+    /// The engine evaluates only with NNUE, so a network is always loaded. A default
+    /// build embeds one, which is why this can be an unconditional value rather than
+    /// something the search has to check on every node.
+    network: Arc<Network>,
+    network_source: NetworkSource,
     search_pool: Arc<SearchPool>,
     search_options: SearchOptions,
     transposition_table: Arc<TranspositionTable>,
@@ -111,11 +115,10 @@ impl Default for EngineState {
         Self {
             position_history: vec![position.repetition_key()],
             position,
+            position_is_stale: false,
             chess960: false,
-            use_nnue: true,
             network: network.network,
             network_source: network.source,
-            network_resolution_error: network.error,
             search_pool: Arc::new(
                 SearchPool::new(1).expect("the default search worker should start"),
             ),
@@ -130,33 +133,28 @@ impl Default for EngineState {
 
 #[derive(Clone)]
 struct SharedNetworkResolution {
-    network: Option<Arc<Network>>,
-    source: Option<NetworkSource>,
-    error: Option<Arc<str>>,
+    network: Arc<Network>,
+    source: NetworkSource,
 }
 
+/// Resolves the automatic network once per process.
+///
+/// Automatic resolution ends in the embedded network, so it cannot come up empty in a
+/// default build. If it fails anyway -- a corrupt explicit override of the discovery
+/// path, or an `embedded-net`-less build with nothing on disk -- the engine cannot
+/// evaluate a single position, so there is nothing useful to degrade to.
 fn default_network_resolution() -> SharedNetworkResolution {
     static RESOLUTION: OnceLock<SharedNetworkResolution> = OnceLock::new();
     RESOLUTION
         .get_or_init(|| match resolve_network(None) {
-            Ok(Some(resolved)) => {
+            Ok(resolved) => {
                 let (network, source) = resolved.into_parts();
                 SharedNetworkResolution {
-                    network: Some(Arc::new(network)),
-                    source: Some(source),
-                    error: None,
+                    network: Arc::new(network),
+                    source,
                 }
             }
-            Ok(None) => SharedNetworkResolution {
-                network: None,
-                source: None,
-                error: None,
-            },
-            Err(error) => SharedNetworkResolution {
-                network: None,
-                source: None,
-                error: Some(Arc::from(error.to_string())),
-            },
+            Err(error) => panic!("manifold requires an NNUE network to evaluate: {error}"),
         })
         .clone()
 }
@@ -165,6 +163,9 @@ impl EngineState {
     fn new_game(&mut self) -> Result<(), PoolError> {
         self.position = Position::startpos();
         self.position_history = vec![self.position.repetition_key()];
+        // A known board again, so searching is safe even if the previous game ended on a
+        // rejected `position` command.
+        self.position_is_stale = false;
         self.search_pool
             .clear(Arc::clone(&self.transposition_table))
     }
@@ -238,18 +239,8 @@ where
             let mut writer = writer
                 .lock()
                 .expect("UCI writer lock should not be poisoned");
-            match active_bench_network(&state) {
-                Ok(network) => {
-                    write_bench(&mut *writer, state.search_options, network.as_deref())
-                        .map_err(io::Error::other)?;
-                }
-                Err(error) => {
-                    writeln!(
-                        writer,
-                        "info string unable to run bench: NNUE resolution failed: {error}"
-                    )?;
-                }
-            }
+            write_bench(&mut *writer, state.search_options, &state.network)
+                .map_err(io::Error::other)?;
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("setoption") {
             stop_active_search(&mut active_search);
@@ -260,12 +251,42 @@ where
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("position") {
             stop_active_search(&mut active_search);
-            let _ = handle_position(command, &mut state);
+            match handle_position(command, &mut state) {
+                Ok(()) => state.position_is_stale = false,
+                Err(error) => {
+                    // The command named a board this engine could not construct, so
+                    // whatever `state.position` still holds is NOT what the GUI is
+                    // showing. Remember that, so the next `go` refuses to answer from it.
+                    state.position_is_stale = true;
+                    let mut writer = writer
+                        .lock()
+                        .expect("UCI writer lock should not be poisoned");
+                    writeln!(writer, "info string invalid position command: {error}")?;
+                    writer.flush()?;
+                }
+            }
         } else if keyword.eq_ignore_ascii_case("go") {
             let Some(request) = GoRequest::parse(&tokens) else {
                 continue;
             };
             stop_active_search(&mut active_search);
+            // Answering from a board the GUI is not showing produces a move that is
+            // illegal there, which most GUIs score as an immediate loss. UCI still
+            // requires a reply to every `go`, so emit the null move rather than a
+            // confidently wrong one, and say why.
+            if state.position_is_stale && !matches!(request, GoRequest::Perft(_)) {
+                let mut writer = writer
+                    .lock()
+                    .expect("UCI writer lock should not be poisoned");
+                writeln!(
+                    writer,
+                    "info string refusing to search: the last position command failed, \
+                     so the engine does not know the current position"
+                )?;
+                writeln!(writer, "bestmove {NULL_BESTMOVE}")?;
+                writer.flush()?;
+                continue;
+            }
             match request {
                 GoRequest::Perft(depth) => {
                     let mut writer = writer
@@ -274,8 +295,9 @@ where
                     write_perft(&mut *writer, &mut state.position, depth, state.chess960)?;
                     writer.flush()?;
                 }
-                GoRequest::Search(parameters) if parameters.infinite => {
-                    let network = active_search_network(&state);
+                GoRequest::Search(parameters, ignored) if parameters.infinite => {
+                    report_ignored_go_arguments(&writer, &ignored)?;
+                    let network = Arc::clone(&state.network);
                     let evaluator_diagnostic = active_evaluator_diagnostic(&state);
                     active_search = Some(start_search(
                         state.position.clone(),
@@ -292,9 +314,10 @@ where
                         false,
                     ));
                 }
-                GoRequest::Search(parameters) => {
+                GoRequest::Search(parameters, ignored) => {
+                    report_ignored_go_arguments(&writer, &ignored)?;
                     let fixed_depth = parameters.depth.is_some();
-                    let network = active_search_network(&state);
+                    let network = Arc::clone(&state.network);
                     let evaluator_diagnostic = active_evaluator_diagnostic(&state);
                     active_search = Some(start_search(
                         state.position.clone(),
@@ -319,52 +342,40 @@ where
     Ok(())
 }
 
+/// Reports `go` arguments the engine could not act on, so a dialect gap stays visible.
+fn report_ignored_go_arguments<W: Write>(
+    writer: &Arc<Mutex<W>>,
+    ignored: &[String],
+) -> io::Result<()> {
+    if ignored.is_empty() {
+        return Ok(());
+    }
+    let mut writer = writer
+        .lock()
+        .expect("UCI writer lock should not be poisoned");
+    writeln!(
+        writer,
+        "info string ignoring unrecognized go arguments: {}",
+        ignored.join(", ")
+    )?;
+    writer.flush()
+}
+
 fn stop_active_search(active_search: &mut Option<ActiveSearch>) {
     if let Some(search) = active_search.take() {
         search.stop_and_join();
     }
 }
 
-fn active_search_network(state: &EngineState) -> Option<Arc<Network>> {
-    state
-        .use_nnue
-        .then(|| state.network.as_ref().map(Arc::clone))
-        .flatten()
-}
-
-fn active_bench_network(state: &EngineState) -> Result<Option<Arc<Network>>, &str> {
-    if state.use_nnue
-        && state.network.is_none()
-        && let Some(error) = state.network_resolution_error.as_deref()
-    {
-        return Err(error);
-    }
-    Ok(active_search_network(state))
-}
-
 fn active_evaluator_diagnostic(state: &EngineState) -> String {
-    if state.use_nnue
-        && state.network.is_none()
-        && let Some(error) = state.network_resolution_error.as_ref()
-    {
-        return format!("info string evaluation HCE because NNUE resolution failed: {error}");
-    }
-    match (
-        state.use_nnue,
-        state.network.as_ref(),
-        state.network_source.as_ref(),
-    ) {
-        (true, Some(network), Some(source)) => {
-            let mode = production_forward_mode();
-            format!(
-                "info string evaluation NNUE from {source}; network \"{}\"; backend {:?}; sparse FC0 {}",
-                network.description(),
-                mode.backend(),
-                mode.sparse_fc0()
-            )
-        }
-        _ => "info string evaluation HCE".to_string(),
-    }
+    let mode = production_forward_mode();
+    format!(
+        "info string evaluation NNUE from {}; network \"{}\"; backend {:?}; sparse FC0 {}",
+        state.network_source,
+        state.network.description(),
+        mode.backend(),
+        mode.sparse_fc0()
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -375,7 +386,7 @@ fn start_search<W>(
     transposition_table: Arc<TranspositionTable>,
     limits: SearchLimits,
     options: SearchOptions,
-    network: Option<Arc<Network>>,
+    network: Arc<Network>,
     evaluator_diagnostic: String,
     chess960: bool,
     writer: Arc<Mutex<W>>,
@@ -398,19 +409,25 @@ where
                 let _ = writer.flush();
             }
         };
+        let on_current_move = |root_move: &RootMoveInfo| {
+            if let Ok(mut writer) = writer.lock() {
+                let _ = write_current_move_info(&mut *writer, &position, root_move, chess960);
+                let _ = writer.flush();
+            }
+        };
         let result = if fixed_depth {
-            search_pool.search_fixed_depth_with_history_callback_network_options(
+            search_pool.search_fixed_depth_with_history_callback(
                 &position,
                 &position_history,
                 Arc::clone(&transposition_table),
                 limits,
                 options,
                 Arc::clone(&search_stop),
-                network.as_ref().map(Arc::clone),
+                Arc::clone(&network),
                 on_iteration,
             )
         } else {
-            search_pool.search_with_history_callback_network_options(
+            search_pool.search_with_history_progress(
                 &position,
                 &position_history,
                 Arc::clone(&transposition_table),
@@ -419,6 +436,7 @@ where
                 Arc::clone(&search_stop),
                 network,
                 on_iteration,
+                on_current_move,
             )
         };
         while wait_for_stop && !search_stop.load(Ordering::Relaxed) {
@@ -496,15 +514,8 @@ where
         return Err(bench_usage("bench does not accept arguments"));
     }
 
-    let resolution = benchmark_network_resolution();
-    if let Some(error) = resolution.error {
-        return Err(format!("unable to resolve bench NNUE network: {error}"));
-    }
-    write_bench(
-        &mut writer,
-        SearchOptions::default(),
-        resolution.network.as_deref(),
-    )
+    let resolution = benchmark_network_resolution()?;
+    write_bench(&mut writer, SearchOptions::default(), &resolution.network)
 }
 
 /// Runs the standalone multi-thread search scaling benchmark.
@@ -515,11 +526,7 @@ where
     W: Write,
 {
     let options = parse_mtbench_arguments(arguments)?;
-    let resolution = benchmark_network_resolution();
-    if let Some(error) = resolution.error {
-        return Err(format!("unable to resolve mtbench NNUE network: {error}"));
-    }
-    let network = resolution.network;
+    let network = benchmark_network_resolution()?.network;
     let positions = BENCH_CASES
         .iter()
         .map(|fen| {
@@ -545,7 +552,7 @@ where
                 .map_err(|error| format!("unable to clear mtbench search state: {error}"))?;
             let history = [position.repetition_key()];
             let pooled = pool
-                .search_fixed_depth_smp_with_history_callback_network_options(
+                .search_fixed_depth_smp_with_history_callback(
                     position,
                     &history,
                     Arc::clone(&transposition_table),
@@ -555,7 +562,7 @@ where
                     },
                     SearchOptions::default(),
                     Arc::new(AtomicBool::new(false)),
-                    network.as_ref().map(Arc::clone),
+                    Arc::clone(&network),
                     |_| {},
                 )
                 .map_err(|error| format!("mtbench search failed: {error}"))?;
@@ -577,25 +584,25 @@ where
     Ok(())
 }
 
-fn benchmark_network_resolution() -> SharedNetworkResolution {
+/// The network the `bench` and `mtbench` subcommands measure with.
+///
+/// `MF_NNUE_TEST_NET` overrides it so a test can pin a specific network; otherwise this
+/// is the same automatic resolution the engine plays with.
+fn benchmark_network_resolution() -> Result<SharedNetworkResolution, String> {
     let Some(path) = std::env::var_os("MF_NNUE_TEST_NET") else {
-        return default_network_resolution();
+        return Ok(default_network_resolution());
     };
     match resolve_network(Some(Path::new(&path))) {
-        Ok(Some(resolved)) => {
+        Ok(resolved) => {
             let (network, source) = resolved.into_parts();
-            SharedNetworkResolution {
-                network: Some(Arc::new(network)),
-                source: Some(source),
-                error: None,
-            }
+            Ok(SharedNetworkResolution {
+                network: Arc::new(network),
+                source,
+            })
         }
-        Ok(None) => unreachable!("an explicit benchmark network never resolves to none"),
-        Err(error) => SharedNetworkResolution {
-            network: None,
-            source: None,
-            error: Some(Arc::from(error.to_string())),
-        },
+        Err(error) => Err(format!(
+            "unable to resolve benchmark NNUE network from MF_NNUE_TEST_NET: {error}"
+        )),
     }
 }
 
@@ -680,7 +687,7 @@ fn parse_mtbench_thread_list(value: &str) -> Result<Vec<usize>, String> {
 fn write_bench<W: Write>(
     writer: &mut W,
     options: SearchOptions,
-    network: Option<&Network>,
+    network: &Network,
 ) -> Result<(), String> {
     let positions = BENCH_CASES
         .iter()
@@ -708,7 +715,7 @@ fn write_bench<W: Write>(
         transposition_table.clear();
         shared_history.clear();
         let started = Instant::now();
-        let result = search_with_shared_history_network_options(
+        let result = search_with_shared_history(
             position,
             &transposition_table,
             SearchLimits {
@@ -758,13 +765,6 @@ fn handle_setoption<W: Write>(
     if name.eq_ignore_ascii_case("UCI_Chess960") {
         if let Some(enabled) = parse_check_option(&value) {
             state.chess960 = enabled;
-        }
-    } else if name.eq_ignore_ascii_case("UseNnue") {
-        if let Some(enabled) = parse_check_option(&value)
-            && state.use_nnue != enabled
-        {
-            state.use_nnue = enabled;
-            clear_eval_dependent_search_state(state, writer, "UseNnue")?;
         }
     } else if name.eq_ignore_ascii_case("UseNMP") {
         if let Some(enabled) = parse_check_option(&value) {
@@ -925,36 +925,27 @@ fn handle_eval_file<W: Write>(
     let automatic = value.is_empty() || value.eq_ignore_ascii_case("<empty>");
     if automatic {
         let resolution = default_network_resolution();
-        if let Some(error) = resolution.error {
-            state.network_resolution_error = Some(Arc::clone(&error));
-            writeln!(
-                writer,
-                "info string unable to load EvalFile automatic source: {error}"
-            )?;
-            return Ok(());
-        }
-
         state.network = resolution.network;
         state.network_source = resolution.source;
-        state.network_resolution_error = None;
         clear_eval_dependent_search_state(state, writer, "EvalFile")?;
         return write_network_selection(writer, state, "automatic resolution");
     }
 
+    // An explicit path that fails to load leaves the previous network in place: the
+    // engine keeps playing at full strength with the net it already had, and says so.
     match resolve_network(Some(Path::new(value))) {
-        Ok(Some(resolved)) => {
+        Ok(resolved) => {
             let (network, source) = resolved.into_parts();
-            state.network = Some(Arc::new(network));
-            state.network_source = Some(source);
-            state.network_resolution_error = None;
+            state.network = Arc::new(network);
+            state.network_source = source;
             clear_eval_dependent_search_state(state, writer, "EvalFile")?;
             write_network_selection(writer, state, "EvalFile")
         }
-        Ok(None) => unreachable!("an explicit EvalFile never resolves to no network"),
-        Err(error) => {
-            state.network_resolution_error = Some(Arc::from(error.to_string()));
-            writeln!(writer, "info string unable to load EvalFile {error}")
-        }
+        Err(error) => writeln!(
+            writer,
+            "info string unable to load EvalFile {error}; keeping {}",
+            state.network_source
+        ),
     }
 }
 
@@ -963,13 +954,8 @@ fn write_network_selection<W: Write>(
     state: &EngineState,
     selection: &str,
 ) -> io::Result<()> {
-    let Some(network) = state.network.as_ref() else {
-        return writeln!(writer, "info string {selection} found no NNUE network");
-    };
-    let source = state
-        .network_source
-        .as_ref()
-        .expect("a loaded network must retain its source");
+    let network = &state.network;
+    let source = &state.network_source;
     let mode = production_forward_mode();
     writeln!(
         writer,
@@ -1020,43 +1006,77 @@ fn handle_position(command: &str, state: &mut EngineState) -> Result<(), String>
         .next()
         .ok_or_else(|| "missing position type".to_string())?;
 
+    // Set when the FEN branch has already consumed the `moves` separator while
+    // scanning for the end of the variable-length FEN.
+    let mut moves_follow = false;
     let mut position = if kind.eq_ignore_ascii_case("startpos") {
         Position::startpos()
     } else if kind.eq_ignore_ascii_case("fen") {
-        let fen = (0..6)
-            .map(|_| {
-                tokens
-                    .next()
-                    .ok_or_else(|| "FEN requires six fields".to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .join(" ");
-        Position::from_fen(&fen, state.chess960).map_err(|error| error.to_string())?
+        // GUIs routinely omit the trailing fields: the counters a four- or five-field
+        // FEN leaves out, and the en-passant dash along with them when a position-setup
+        // dialog leaves every optional field blank (three fields). Take every token up
+        // to the `moves` separator rather than a fixed six, then pad what is missing;
+        // the en-passant field is advisory (see parse_en_passant), so a padded "-"
+        // drops nothing.
+        let mut fields = Vec::new();
+        for token in tokens.by_ref() {
+            if token.eq_ignore_ascii_case("moves") {
+                moves_follow = true;
+                break;
+            }
+            fields.push(token);
+        }
+        match fields.len() {
+            2 => fields.extend(["-", "-", "0", "1"]),
+            3 => fields.extend(["-", "0", "1"]),
+            4 => fields.extend(["0", "1"]),
+            5 => fields.push("1"),
+            6 => {}
+            count => return Err(format!("FEN requires two to six fields, found {count}")),
+        }
+        Position::from_fen(&fields.join(" "), state.chess960).map_err(|error| error.to_string())?
     } else {
         return Err(format!("unknown position type '{kind}'"));
     };
 
-    let mut position_history = vec![position.repetition_key()];
-    if let Some(separator) = tokens.next() {
-        if !separator.eq_ignore_ascii_case("moves") {
-            return Err(format!("unexpected position argument '{separator}'"));
+    if !moves_follow {
+        match tokens.next() {
+            None => moves_follow = false,
+            Some(separator) if separator.eq_ignore_ascii_case("moves") => moves_follow = true,
+            Some(separator) => {
+                return Err(format!("unexpected position argument '{separator}'"));
+            }
         }
+    }
+
+    let mut position_history = vec![position.repetition_key()];
+    let mut rejected = None;
+    if moves_follow {
         for notation in tokens {
-            let mv = parse_uci_move(&position, notation, state.chess960)
-                .ok_or_else(|| format!("illegal move '{notation}'"))?;
+            let Some(mv) = parse_uci_move(&position, notation, state.chess960) else {
+                rejected = Some(format!("illegal move '{notation}'"));
+                break;
+            };
             position.make_move(mv);
             position_history.push(position.repetition_key());
         }
     }
 
+    // Keep whatever prefix did parse. Abandoning the command entirely would leave the
+    // engine on the *previous* position, so it would analyse a board the GUI is not
+    // showing and answer with a move that is illegal there -- a far worse failure than
+    // analysing this one a few plies early.
     state.position = position;
     state.position_history = position_history;
-    Ok(())
+    match rejected {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 enum GoRequest {
     Perft(u32),
-    Search(GoParameters),
+    Search(GoParameters, Vec<String>),
 }
 
 impl GoRequest {
@@ -1067,11 +1087,36 @@ impl GoRequest {
         {
             return None;
         }
-        if tokens.len() == 3 && tokens[1].eq_ignore_ascii_case("perft") {
-            return tokens[2].parse().ok().map(Self::Perft);
+        if tokens.len() >= 3
+            && tokens[1].eq_ignore_ascii_case("perft")
+            && let Ok(depth) = tokens[2].parse()
+        {
+            return Some(Self::Perft(depth));
         }
-        GoParameters::parse(&tokens[1..]).map(Self::Search)
+        let (parameters, ignored) = GoParameters::parse(&tokens[1..])?;
+        Some(Self::Search(parameters, ignored))
     }
+}
+
+/// Whether a token starts a new `go` argument, used to find the end of `searchmoves`.
+fn is_go_keyword(token: &str) -> bool {
+    const KEYWORDS: [&str; 10] = [
+        "searchmoves",
+        "ponder",
+        "wtime",
+        "btime",
+        "winc",
+        "binc",
+        "movestogo",
+        "depth",
+        "nodes",
+        "movetime",
+    ];
+    token.eq_ignore_ascii_case("infinite")
+        || token.eq_ignore_ascii_case("mate")
+        || KEYWORDS
+            .iter()
+            .any(|keyword| token.eq_ignore_ascii_case(keyword))
 }
 
 #[derive(Default)]
@@ -1087,51 +1132,140 @@ struct GoParameters {
     infinite: bool,
 }
 
+/// Reads a non-negative millisecond or count value, clamping a negative one to zero.
+///
+/// GUIs send a negative clock when the flag has fallen (`go wtime -134 ...` from Arena,
+/// CuteChess, and Banksia). Rejecting it used to abandon the whole `go`, so the engine
+/// went mute in exactly the time pressure where a move matters most. Zero is the honest
+/// reading and already produces an immediate move.
+fn parse_go_value(value: &str) -> Option<u64> {
+    value
+        .parse::<i64>()
+        .ok()
+        .map(|value| u64::try_from(value).unwrap_or(0))
+}
+
 impl GoParameters {
-    fn parse(tokens: &[&str]) -> Option<Self> {
+    /// Parses `go` arguments, failing only when *nothing* in them was recognized.
+    ///
+    /// UCI requires a `bestmove` for every `go`, and the spec directs engines to ignore
+    /// unexpected tokens rather than reject the command, so a recognized argument
+    /// alongside an unrecognized one still searches: dropping the command silently
+    /// hangs a GUI forever waiting for a reply that never comes.
+    ///
+    /// The one exception is a `go` whose arguments are *entirely* unrecognized, such as
+    /// `go banana`. That is a malformed command rather than a dialect this engine does
+    /// not speak, and treating it as an analysis request would let a typo silently
+    /// abandon a running search. Bare `go` stays valid -- it has no arguments to fail.
+    fn parse(tokens: &[&str]) -> Option<(Self, Vec<String>)> {
         let mut parameters = Self::default();
+        let mut ignored = Vec::new();
+        let mut recognized = false;
         let mut index = 0;
         while index < tokens.len() {
             let key = tokens[index];
             index += 1;
             if key.eq_ignore_ascii_case("infinite") {
-                if parameters.infinite {
-                    return None;
-                }
                 parameters.infinite = true;
+                recognized = true;
                 continue;
             }
-            let value = *tokens.get(index)?;
-            index += 1;
+            // `ponder` takes no value. Treat it as an ordinary search rather than
+            // dropping the command: without real pondering the engine still owes the
+            // GUI a `bestmove`, and a GUI that sent `go ponder` waits forever without
+            // one.
+            if key.eq_ignore_ascii_case("ponder") {
+                recognized = true;
+                continue;
+            }
+            // `searchmoves` is a trailing list of moves, not a key/value pair. The
+            // search has no root-move restriction, so consume the list and search
+            // normally; answering the wrong move set still beats never answering.
+            if key.eq_ignore_ascii_case("searchmoves") {
+                while index < tokens.len() && !is_go_keyword(tokens[index]) {
+                    index += 1;
+                }
+                recognized = true;
+                continue;
+            }
+            // `mate N` asks for a mate search this engine does not implement. Consume
+            // the value and fall through to the unbounded-analysis default below.
+            if key.eq_ignore_ascii_case("mate") {
+                if index < tokens.len() && parse_go_value(tokens[index]).is_some() {
+                    index += 1;
+                }
+                ignored.push(key.to_string());
+                recognized = true;
+                continue;
+            }
 
-            if key.eq_ignore_ascii_case("depth") {
-                parameters.depth = Some(value.parse().ok()?);
-            } else if key.eq_ignore_ascii_case("nodes") {
-                parameters.nodes = Some(value.parse().ok()?);
+            let Some(value) = tokens.get(index).copied() else {
+                ignored.push(key.to_string());
+                break;
+            };
+
+            let slot: Option<&mut Option<u64>> = if key.eq_ignore_ascii_case("nodes") {
+                Some(&mut parameters.nodes)
             } else if key.eq_ignore_ascii_case("movetime") {
-                parameters.movetime = Some(value.parse().ok()?);
+                Some(&mut parameters.movetime)
             } else if key.eq_ignore_ascii_case("wtime") {
-                parameters.wtime = Some(value.parse().ok()?);
+                Some(&mut parameters.wtime)
             } else if key.eq_ignore_ascii_case("btime") {
-                parameters.btime = Some(value.parse().ok()?);
+                Some(&mut parameters.btime)
             } else if key.eq_ignore_ascii_case("winc") {
-                parameters.winc = Some(value.parse().ok()?);
+                Some(&mut parameters.winc)
             } else if key.eq_ignore_ascii_case("binc") {
-                parameters.binc = Some(value.parse().ok()?);
+                Some(&mut parameters.binc)
             } else if key.eq_ignore_ascii_case("movestogo") {
-                parameters.movestogo = Some(value.parse().ok()?);
+                Some(&mut parameters.movestogo)
             } else {
-                return None;
+                None
+            };
+
+            if let Some(slot) = slot {
+                index += 1;
+                recognized = true;
+                match parse_go_value(value) {
+                    Some(parsed) => *slot = Some(parsed),
+                    None => ignored.push(format!("{key} {value}")),
+                }
+            } else if key.eq_ignore_ascii_case("depth") {
+                index += 1;
+                recognized = true;
+                match parse_go_value(value) {
+                    Some(parsed) => {
+                        parameters.depth = Some(parsed.min(u64::from(u32::MAX)) as u32);
+                    }
+                    None => ignored.push(format!("{key} {value}")),
+                }
+            } else {
+                // An unrecognized key. Skip a numeric follower too, on the assumption it
+                // was that key's value rather than the next argument.
+                ignored.push(key.to_string());
+                if parse_go_value(value).is_some() {
+                    index += 1;
+                }
             }
         }
 
-        (parameters.depth.is_some()
-            || parameters.nodes.is_some()
-            || parameters.movetime.is_some()
-            || parameters.wtime.is_some()
-            || parameters.btime.is_some()
-            || parameters.infinite)
-            .then_some(parameters)
+        // A `go` carrying no budget at all -- bare `go`, or one whose only arguments
+        // were `ponder`/`searchmoves`/`mate` -- is an unbounded analysis request. UCI
+        // requires a `bestmove` for every `go`, so treat it as infinite and let `stop`
+        // end it rather than silently ignoring the command and hanging the GUI.
+        if parameters.depth.is_none()
+            && parameters.nodes.is_none()
+            && parameters.movetime.is_none()
+            && parameters.wtime.is_none()
+            && parameters.btime.is_none()
+        {
+            parameters.infinite = true;
+        }
+        // Arguments were given but none of them meant anything: a malformed command,
+        // not a dialect gap.
+        if !tokens.is_empty() && !recognized {
+            return None;
+        }
+        Some((parameters, ignored))
     }
 
     fn search_limits(&self, position: &Position) -> SearchLimits {
@@ -1222,7 +1356,7 @@ fn write_search_summary<W: Write>(
         let pv = format_pv(position, &result.pv, chess960);
         writeln!(
             writer,
-            "info depth {} seldepth {} score {} nodes {} nps 0 hashfull {} time {} pv {}",
+            "info depth {} seldepth {} multipv 1 score {} nodes {} nps 0 hashfull {} time {} pv {}",
             result.depth,
             result.seldepth,
             score,
@@ -1266,10 +1400,22 @@ fn write_selected_result_info<W: Write>(
         .unwrap_or(0);
     let score = format_score(result.score);
     let pv = format_pv(position, &result.pv, chess960);
+    // `depth`/`seldepth` must be present. This line carries the engine's final score and
+    // PV whenever a helper thread wins the race, and it is frequently a different score
+    // than the last line worker 0 printed. GUIs index their analysis display by depth and
+    // drop an `info` line that has none, so omitting it made the true final answer
+    // invisible -- the GUI kept showing a superseded score from the previous line.
     writeln!(
         writer,
-        "info score {} nodes {} nps {} hashfull {} time {} pv {}",
-        score, result.nodes, nps, result.hashfull, elapsed_millis, pv
+        "info depth {} seldepth {} multipv 1 score {} nodes {} nps {} hashfull {} time {} pv {}",
+        result.depth,
+        result.seldepth,
+        score,
+        result.nodes,
+        nps,
+        result.hashfull,
+        elapsed_millis,
+        pv
     )
 }
 
@@ -1298,6 +1444,27 @@ fn write_bestmove<W: Write>(
     writeln!(writer, "bestmove {bestmove}")
 }
 
+/// Writes the UCI `currmove` progress line.
+///
+/// Deliberately carries only `depth`, `currmove` and `currmovenumber`. A GUI treats a line
+/// with `currmove` as a transient status ("searching Nf3, 2/34") rather than an analysis
+/// row, so adding a score or PV here would push a half-finished evaluation into the
+/// analysis display. The reference engine sends the same three fields for the same reason.
+fn write_current_move_info<W: Write>(
+    writer: &mut W,
+    position: &Position,
+    root_move: &RootMoveInfo,
+    chess960: bool,
+) -> io::Result<()> {
+    writeln!(
+        writer,
+        "info depth {} currmove {} currmovenumber {}",
+        root_move.depth,
+        format_uci_move(position, root_move.best_move, chess960),
+        root_move.move_number
+    )
+}
+
 fn write_iteration_info<W: Write>(
     writer: &mut W,
     position: &Position,
@@ -1314,7 +1481,11 @@ fn write_iteration_info<W: Write>(
     let pv = format_pv(position, &iteration.pv, chess960);
     writeln!(
         writer,
-        "info depth {} seldepth {} score {} nodes {} nps {} hashfull {} time {} pv {}",
+        // `multipv 1` is constant because the engine searches a single PV. It is emitted
+        // anyway: it is the field GUIs read to decide which analysis row a line belongs
+        // to, and some hide lines that lack it. Stockfish emits it unconditionally in
+        // this slot, between `seldepth` and `score`.
+        "info depth {} seldepth {} multipv 1 score {} nodes {} nps {} hashfull {} time {} pv {}",
         iteration.depth,
         iteration.seldepth,
         score,
@@ -1427,7 +1598,7 @@ mod tests {
     }
 
     #[test]
-    fn helper_selected_terminal_line_omits_depth_before_bestmove() {
+    fn helper_selected_terminal_line_reports_depth_before_bestmove() {
         let position = Position::startpos();
         let best_move = generate_legal_moves(&position)[0];
         let pooled = PoolSearchResult {
@@ -1455,11 +1626,13 @@ mod tests {
         assert_eq!(
             lines[0],
             format!(
-                "info score cp 42 nodes 1234 nps 61700 hashfull 17 time 20 pv {}",
+                "info depth 5 seldepth 8 multipv 1 score cp 42 nodes 1234 nps 61700 hashfull 17 time 20 pv {}",
                 format_uci_move(&position, best_move, false)
             )
         );
-        assert!(!lines[0].split_whitespace().any(|token| token == "depth"));
+        // A GUI indexes analysis output by depth and discards an `info` line without one,
+        // so this line -- which carries the final score when a helper wins -- must have it.
+        assert!(lines[0].split_whitespace().any(|token| token == "depth"));
         assert_eq!(
             lines[1],
             format!("bestmove {}", format_uci_move(&position, best_move, false))
@@ -1659,125 +1832,16 @@ mod tests {
     }
 
     #[test]
-    fn use_nnue_parses_case_insensitively_and_survives_new_game() {
-        let mut state = EngineState::default();
-        let mut output = Vec::new();
-
-        handle_setoption(
-            "SeToPtIoN NaMe UsEnNuE VaLuE FaLsE",
-            &mut state,
-            &mut output,
-        )
-        .expect("UseNnue output should be writable");
-        state
-            .new_game()
-            .expect("the default search pool should clear the table");
-
-        assert!(!state.use_nnue);
-        assert!(output.is_empty());
-    }
-
-    #[test]
-    fn use_nnue_controls_search_network_without_unloading_it() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
-        let mut state = EngineState::default();
-        let mut output = Vec::new();
-        handle_setoption(
-            &format!("setoption name EvalFile value {}", path.display()),
-            &mut state,
-            &mut output,
-        )
-        .expect("test EvalFile should load");
-        let loaded = Arc::clone(state.network.as_ref().expect("network should be loaded"));
-
-        assert!(Arc::ptr_eq(
-            active_search_network(&state)
-                .as_ref()
-                .expect("enabled NNUE should reach search"),
-            &loaded
-        ));
-
-        handle_setoption(
-            "setoption name UseNnue value false",
-            &mut state,
-            &mut output,
-        )
-        .expect("UseNnue false should be writable");
-        assert!(active_search_network(&state).is_none());
-        assert!(Arc::ptr_eq(
-            state
-                .network
-                .as_ref()
-                .expect("disabling NNUE must not unload it"),
-            &loaded
-        ));
-
-        handle_setoption("setoption name UseNnue value true", &mut state, &mut output)
-            .expect("UseNnue true should be writable");
-        assert!(Arc::ptr_eq(
-            active_search_network(&state)
-                .as_ref()
-                .expect("re-enabled NNUE should reach search"),
-            &loaded
-        ));
-    }
-
-    #[test]
-    fn changing_use_nnue_clears_eval_dependent_search_state() {
-        let mut state = EngineState::default();
-        let key = state.position.zobrist().main();
-        state.transposition_table.store(
-            key,
-            EntryData {
-                best_move: None,
-                score: 11,
-                static_eval: 22,
-                depth: 3,
-                bound: Bound::Exact,
-                age: 0,
-                pv: false,
-            },
-        );
-        let mut output = Vec::new();
-
-        handle_setoption(
-            "setoption name UseNnue value false",
-            &mut state,
-            &mut output,
-        )
-        .expect("UseNnue change should be writable");
-
-        assert_eq!(state.transposition_table.probe(key), None);
-    }
-
-    #[test]
-    fn failed_default_network_resolution_is_not_reported_as_plain_hce() {
-        let state = EngineState {
-            use_nnue: true,
-            network: None,
-            network_source: None,
-            network_resolution_error: Some(Arc::from("invalid discovered network")),
-            ..EngineState::default()
-        };
+    fn the_evaluator_diagnostic_always_reports_nnue_and_its_source() {
+        let state = EngineState::default();
 
         let diagnostic = active_evaluator_diagnostic(&state);
 
-        assert!(diagnostic.contains("NNUE resolution failed"));
-        assert!(diagnostic.contains("invalid discovered network"));
-    }
-
-    #[test]
-    fn bench_rejects_a_failed_required_nnue_resolution() {
-        let state = EngineState {
-            use_nnue: true,
-            network: None,
-            network_source: None,
-            network_resolution_error: Some(Arc::from("invalid discovered network")),
-            ..EngineState::default()
-        };
-
-        assert!(active_bench_network(&state).is_err());
+        assert!(
+            diagnostic.starts_with("info string evaluation NNUE from "),
+            "the engine has no non-NNUE evaluator to report: {diagnostic}"
+        );
+        assert!(diagnostic.contains("backend"));
     }
 
     #[test]
@@ -1792,12 +1856,7 @@ mod tests {
             &mut output,
         )
         .expect("valid setup EvalFile should load");
-        let original = Arc::clone(
-            state
-                .network
-                .as_ref()
-                .expect("valid setup network should resolve"),
-        );
+        let original = Arc::clone(&state.network);
         let missing = std::env::temp_dir().join(format!(
             "manifold-missing-eval-file-{}.nnue",
             std::process::id()
@@ -1811,13 +1870,10 @@ mod tests {
         )
         .expect("EvalFile failure should be writable");
 
-        assert!(Arc::ptr_eq(
-            state
-                .network
-                .as_ref()
-                .expect("failed replacement should preserve the network"),
-            &original
-        ));
+        assert!(
+            Arc::ptr_eq(&state.network, &original),
+            "a failed replacement must leave the engine playing with the network it had"
+        );
         assert!(
             String::from_utf8(output)
                 .expect("protocol output should be UTF-8")
@@ -1839,23 +1895,14 @@ mod tests {
         )
         .expect("EvalFile success should be writable");
 
-        assert!(state.network.is_some());
         assert_eq!(
-            state.network_source.as_ref(),
-            Some(&mf_nnue::NetworkSource::Explicit(path.clone()))
+            state.network_source,
+            mf_nnue::NetworkSource::Explicit(path.clone())
         );
         let output = String::from_utf8(output).expect("protocol output should be UTF-8");
         assert!(output.starts_with("info string"));
         assert!(output.contains(&path.display().to_string()));
-        assert!(
-            output.contains(
-                state
-                    .network
-                    .as_ref()
-                    .expect("network should be present")
-                    .description()
-            )
-        );
+        assert!(output.contains(state.network.description()));
         assert!(output.contains("backend"));
     }
 
@@ -1901,7 +1948,10 @@ mod tests {
             &mut output,
         )
         .expect("explicit EvalFile should load");
-        assert!(state.network.is_some());
+        assert!(matches!(
+            state.network_source,
+            mf_nnue::NetworkSource::Explicit(_)
+        ));
 
         output.clear();
         handle_setoption(
@@ -1911,8 +1961,12 @@ mod tests {
         )
         .expect("automatic EvalFile reset should be writable");
 
-        assert!(state.network.is_none());
-        assert!(state.network_source.is_none());
+        // Automatic resolution always yields a network, so the observable effect of the
+        // reset is that the source is no longer the explicit one.
+        assert!(!matches!(
+            state.network_source,
+            mf_nnue::NetworkSource::Explicit(_)
+        ));
     }
 
     #[test]
@@ -1927,14 +1981,19 @@ mod tests {
             &mut output,
         )
         .expect("explicit EvalFile should load");
-        assert!(state.network.is_some());
+        assert!(matches!(
+            state.network_source,
+            mf_nnue::NetworkSource::Explicit(_)
+        ));
 
         output.clear();
         handle_setoption("setoption name EvalFile value", &mut state, &mut output)
             .expect("empty automatic EvalFile reset should be writable");
 
-        assert!(state.network.is_none());
-        assert!(state.network_source.is_none());
+        assert!(!matches!(
+            state.network_source,
+            mf_nnue::NetworkSource::Explicit(_)
+        ));
     }
 
     #[test]
@@ -1961,19 +2020,22 @@ mod tests {
         assert!(output.contains("unexpected NNUE version"));
     }
 
+    /// The bench node count is the repository's change-detection signature, so it has to
+    /// be a pure function of the network and the search options -- never of anything
+    /// left over from a previous run.
     #[test]
-    fn bench_uses_the_supplied_nnue_network() {
+    fn bench_node_count_is_deterministic_for_a_given_network() {
         let path =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
         let network = Network::load(&path)
             .unwrap_or_else(|error| panic!("test NNUE network {}: {error}", path.display()));
-        let mut nnue_output = Vec::new();
-        let mut hce_output = Vec::new();
+        let mut first_output = Vec::new();
+        let mut second_output = Vec::new();
 
-        write_bench(&mut nnue_output, SearchOptions::default(), Some(&network))
-            .expect("NNUE bench should complete");
-        write_bench(&mut hce_output, SearchOptions::default(), None)
-            .expect("HCE bench should complete");
+        write_bench(&mut first_output, SearchOptions::default(), &network)
+            .expect("first bench should complete");
+        write_bench(&mut second_output, SearchOptions::default(), &network)
+            .expect("second bench should complete");
 
         let nodes = |output: Vec<u8>| {
             String::from_utf8(output)
@@ -1984,12 +2046,13 @@ mod tests {
                 .parse::<u64>()
                 .expect("bench nodes should be numeric")
         };
-        assert_ne!(nodes(nnue_output), nodes(hce_output));
+        assert_eq!(nodes(first_output), nodes(second_output));
     }
 
     #[test]
     fn movetime_search_limits_use_the_requested_duration() {
-        let parameters = GoParameters::parse(&["movetime", "100"]).expect("movetime should parse");
+        let (parameters, _) =
+            GoParameters::parse(&["movetime", "100"]).expect("movetime should parse");
         let limits = parameters.search_limits(&Position::startpos());
 
         assert_eq!(limits.soft_time, Some(Duration::from_millis(100)));
@@ -1998,7 +2061,7 @@ mod tests {
 
     #[test]
     fn clock_limits_reserve_a_safety_margin_and_let_the_hard_limit_borrow_from_later_moves() {
-        let parameters = GoParameters::parse(&["wtime", "60000", "winc", "600"])
+        let (parameters, _) = GoParameters::parse(&["wtime", "60000", "winc", "600"])
             .expect("clock parameters should parse");
         let limits = parameters.search_limits(&Position::startpos());
         let soft = limits.soft_time.expect("a clock implies a soft limit");
@@ -2014,7 +2077,7 @@ mod tests {
 
     #[test]
     fn a_short_clock_caps_the_hard_limit_at_a_fraction_of_what_remains() {
-        let parameters =
+        let (parameters, _) =
             GoParameters::parse(&["btime", "300", "movestogo", "1"]).expect("clock should parse");
         let mut position = Position::startpos();
         position.make_move(
@@ -2034,9 +2097,9 @@ mod tests {
 
     #[test]
     fn a_distant_movestogo_is_clamped_so_the_per_move_budget_stays_usable() {
-        let far = GoParameters::parse(&["wtime", "60000", "movestogo", "200"])
+        let (far, _) = GoParameters::parse(&["wtime", "60000", "movestogo", "200"])
             .expect("clock should parse");
-        let clamped = GoParameters::parse(&["wtime", "60000", "movestogo", "50"])
+        let (clamped, _) = GoParameters::parse(&["wtime", "60000", "movestogo", "50"])
             .expect("clock should parse");
 
         assert_eq!(
