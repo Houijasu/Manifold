@@ -1,0 +1,6 @@
+lazy build (this feature):
+Nodes searched: 45036; NPS: 543949
+Nodes searched: 45036; NPS: 548483
+post-Finny baseline (a6b092f):
+Nodes searched: 45036; NPS: 512402
+Nodes searched: 45036; NPS: 511462

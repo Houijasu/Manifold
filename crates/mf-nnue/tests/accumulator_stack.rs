@@ -33,7 +33,7 @@ fn local_network() -> Option<Network> {
 
 fn assert_matches_from_scratch(
     network: &Network,
-    stack: &AccumulatorStack<'_>,
+    stack: &mut AccumulatorStack<'_>,
     position: &Position,
 ) {
     let rebuilt = AccumulatorState::from_position(network, position);
@@ -91,12 +91,12 @@ fn push_one(
     stack
         .push_real(&child, mv, &undo)
         .expect("targeted real push should fit");
-    assert_matches_from_scratch(network, &stack, &child);
+    assert_matches_from_scratch(network, &mut stack, &child);
 
     child.unmake_move(mv, undo.clone());
     stack.pop().expect("targeted pop should return to root");
     assert_eq!(child, parent);
-    assert_matches_from_scratch(network, &stack, &parent);
+    assert_matches_from_scratch(network, &mut stack, &parent);
     (parent, mv, undo)
 }
 
@@ -113,7 +113,7 @@ fn real_push_uses_only_the_already_updated_child_position() {
     stack
         .push_real(&position, mv, &undo)
         .expect("parent-free real push should fit");
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn root_state_dump_and_evaluation_match_from_scratch() {
         return;
     };
     let position = Position::startpos();
-    let stack = AccumulatorStack::new(&network, &position);
+    let mut stack = AccumulatorStack::new(&network, &position);
 
     assert_eq!(stack.depth(), 0);
     assert_eq!(stack.capacity(), ACCUMULATOR_STACK_CAPACITY);
@@ -131,7 +131,7 @@ fn root_state_dump_and_evaluation_match_from_scratch() {
         (stack.current() as *const AccumulatorState as usize) % 64,
         0
     );
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
 }
 
 #[test]
@@ -159,14 +159,14 @@ fn deterministic_legal_walk_matches_from_scratch_and_unwinds_exactly() {
             .push_real(&position, mv, &undo)
             .expect("walk should fit accumulator capacity");
         assert_eq!(stack.depth(), ply + 1);
-        assert_matches_from_scratch(&network, &stack, &position);
+        assert_matches_from_scratch(&network, &mut stack, &position);
         history.push((mv, undo));
     }
 
     while let Some((mv, undo)) = history.pop() {
         position.unmake_move(mv, undo);
         stack.pop().expect("walk pop should have a parent");
-        assert_matches_from_scratch(&network, &stack, &position);
+        assert_matches_from_scratch(&network, &mut stack, &position);
     }
     assert_eq!(position, Position::startpos());
     assert_eq!(stack.depth(), 0);
@@ -210,7 +210,7 @@ fn stored_threat_lists_survive_pop_and_multiple_sibling_branches() {
     stack
         .push_real(&position, first, &first_undo)
         .expect("first branch should fit");
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
 
     for notation in ["d7d5", "c7c5", "g8f6"] {
         let sibling = parse(&position, notation, false);
@@ -218,15 +218,15 @@ fn stored_threat_lists_survive_pop_and_multiple_sibling_branches() {
         stack
             .push_real(&position, sibling, &sibling_undo)
             .expect("child sibling should fit");
-        assert_matches_from_scratch(&network, &stack, &position);
+        assert_matches_from_scratch(&network, &mut stack, &position);
         position.unmake_move(sibling, sibling_undo);
         stack.pop().expect("child sibling should return to parent");
-        assert_matches_from_scratch(&network, &stack, &position);
+        assert_matches_from_scratch(&network, &mut stack, &position);
     }
 
     position.unmake_move(first, first_undo);
     stack.pop().expect("first branch should return to root");
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
 
     for notation in ["d2d4", "g1f3", "c2c4"] {
         let sibling = parse(&position, notation, false);
@@ -234,10 +234,10 @@ fn stored_threat_lists_survive_pop_and_multiple_sibling_branches() {
         stack
             .push_real(&position, sibling, &sibling_undo)
             .expect("root sibling should fit");
-        assert_matches_from_scratch(&network, &stack, &position);
+        assert_matches_from_scratch(&network, &mut stack, &position);
         position.unmake_move(sibling, sibling_undo);
         stack.pop().expect("root sibling should return to root");
-        assert_matches_from_scratch(&network, &stack, &position);
+        assert_matches_from_scratch(&network, &mut stack, &position);
     }
 }
 
@@ -254,13 +254,13 @@ fn null_push_copies_state_and_pop_restores_depth() {
     stack.push_null().expect("null push should fit");
     assert_eq!(stack.depth(), 1);
     assert_eq!(stack.current(), &root);
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
 
     position.unmake_null_move(undo);
     stack.pop().expect("null pop should return to root");
     assert_eq!(stack.depth(), 0);
     assert_eq!(stack.current(), &root);
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
 }
 
 #[test]
@@ -278,14 +278,14 @@ fn real_push_after_null_uses_copied_frame_metadata() {
     stack
         .push_real(&position, mv, &undo)
         .expect("real push after null should fit");
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
 
     position.unmake_move(mv, undo);
     stack.pop().expect("real pop should return to null frame");
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
     position.unmake_null_move(null_undo);
     stack.pop().expect("null pop should return to root");
-    assert_matches_from_scratch(&network, &stack, &position);
+    assert_matches_from_scratch(&network, &mut stack, &position);
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn ten_thousand_position_standard_and_chess960_walk_matches_full_rebuilds() {
                 while let Some((mv, undo)) = history.pop() {
                     position.unmake_move(mv, undo);
                     stack.pop().expect("walk pop should have a parent");
-                    assert_matches_from_scratch(&network, &stack, &position);
+                    assert_matches_from_scratch(&network, &mut stack, &position);
                     verified += 1;
                     if verified >= (root_index + 1) * 2_000 {
                         break;
@@ -354,11 +354,11 @@ fn ten_thousand_position_standard_and_chess960_walk_matches_full_rebuilds() {
             if verified.is_multiple_of(23) {
                 let undo = position.make_null_move();
                 stack.push_null().expect("null walk push should fit");
-                assert_matches_from_scratch(&network, &stack, &position);
+                assert_matches_from_scratch(&network, &mut stack, &position);
                 verified += 1;
                 position.unmake_null_move(undo);
                 stack.pop().expect("null walk pop should have a parent");
-                assert_matches_from_scratch(&network, &stack, &position);
+                assert_matches_from_scratch(&network, &mut stack, &position);
                 verified += 1;
                 continue;
             }
@@ -372,7 +372,7 @@ fn ten_thousand_position_standard_and_chess960_walk_matches_full_rebuilds() {
             stack
                 .push_real(&position, mv, &undo)
                 .expect("walk should fit accumulator capacity");
-            assert_matches_from_scratch(&network, &stack, &position);
+            assert_matches_from_scratch(&network, &mut stack, &position);
             verified += 1;
             history.push((mv, undo));
 
@@ -380,7 +380,7 @@ fn ten_thousand_position_standard_and_chess960_walk_matches_full_rebuilds() {
                 let (mv, undo) = history.pop().expect("history is non-empty");
                 position.unmake_move(mv, undo);
                 stack.pop().expect("sibling pop should have a parent");
-                assert_matches_from_scratch(&network, &stack, &position);
+                assert_matches_from_scratch(&network, &mut stack, &position);
                 verified += 1;
             }
         }

@@ -1,0 +1,89 @@
+experiment: MSN-NNUE-lazy
+feature:    M2-F2-lazy-updates (milestone M2, NNUE inference speed)
+date:       2026-08-05
+branch:     feature/nnue-optimizations
+decision:   KEEP (1.03x / 1.04x 1T NPS over two independent runs vs the post-Finny build;
+            19.2% of real pushes skipped entirely; bench signature unchanged at 45,036)
+
+No fastchess match was run for this feature. The feature description scoped the measurement to
+NPS + bench signature; the confirming ~300-game match belongs to M2-F4-nnue-confirm-match. This
+file is therefore written by hand rather than by harness/run_match.ps1.
+
+machine:    i9-13980HX (8P+16E, 32 logical), 31.6 GB RAM, Windows 11
+toolchain:  cargo --release (fat LTO, 1 CGU, panic=abort), target-cpu=native
+net:        nets/main.nnue (111,261,604 bytes)
+fwd mode:   Avx2Vnni, sparse FC0
+pinning:    every timing run in a shell pinned to the 8 P-cores (ProcessorAffinity = 0xFFFF)
+
+baseline:   the post-Finny build, commit a6b092f (M2-F3) -- the previous KEPT build, per the
+            single-variable rule. It was built from THIS working tree with the feature stashed
+            (`git stash push -u`), so the two binaries differ only by this feature. The binary
+            was kept at experiments/MSN-NNUE-lazy/manifold-postfinny.exe during measurement but
+            is NOT committed (110 MB, and reproducible with `git stash` + `cargo build
+            --release` at a6b092f).
+
+commands:
+  # Ceiling measurement, BEFORE implementing: a shadow model of the walk-back rule, run under
+  # the existing default-off instrumentation feature over the M2-F1 workload.
+  cargo run --release -p mf-search --features instrumentation \
+      --example nnue_update_profile -- 7
+    -> unread pushes 188,236 of 631,900 (29.8%)   <- M2-F1's figure, OVERSTATES the ceiling
+    -> whole-subtree-unevaluated 116,232 of 606,591 (19.2%)  <- the true ceiling
+    -> recomputed bound: 0.192 x 0.815 x 0.431 = 6.7% of wall time
+
+  py -3.14 harness/nps_compare.py \
+      --engine lazy=.\target\release\manifold.exe \
+      --engine postfinny=.\experiments\MSN-NNUE-lazy\manifold-postfinny.exe \
+      --depth 12 --hash 64 --warmup 1 --repeat 5 \
+      --json experiments\MSN-NNUE-lazy\nps-depth12.json
+    -> geometric mean NPS ratio 1.03x; startpos 1.03 kiwipete 0.97 midgame 1.03 endgame 1.08
+    -> nodes-to-depth ratio 1.00x at every position
+
+  # Run 1 landed exactly on the 3% kill threshold with kiwipete apparently regressing, which is
+  # too close to decide keep-or-revert on one sample. Repeated with more repeats:
+  py -3.14 harness/nps_compare.py ... --repeat 7 \
+      --json experiments\MSN-NNUE-lazy\nps-depth12-run2.json
+    -> geometric mean NPS ratio 1.04x; startpos 1.02 kiwipete 1.05 midgame 1.02 endgame 1.08
+    -> kiwipete's 0.97x in run 1 was noise (its run-1 samples spanned 431k-466k NPS)
+
+  cargo run --release -p mf-search --features instrumentation \
+      --example nnue_update_profile -- 7            > update-profile.txt
+    -> deferred pushes SKIPPED 116,232 of 606,591 (19.2%) -- matches the pre-implementation
+       shadow model exactly
+    -> accumulator update per push 533.9 -> 451.2 ns; threat discovery 182.2 -> 164.5 ns
+    -> edges discovered per push (bench) 8.40 -> 6.16; finny king moves 58,826 -> 49,168
+    -> king rebuilds 0, overflow rebuilds 0 (overflow path untouched, per M2-F1)
+    NOTE: instrumentation costs ~10% NPS; used for proportions/counts only, never NPS claims.
+
+  .\target\release\manifold.exe bench (x2)          > bench-control.txt
+  .\experiments\MSN-NNUE-lazy\manifold-postfinny.exe bench (x2)
+    -> 45,036 nodes on ALL FOUR runs. Identical to the baseline binary and to the pinned anchor,
+       so bench_cli needed no re-pinning. This is the bit-exactness proof: a single wrong
+       accumulator lane anywhere in the tree would move the node count.
+
+  pwsh -NoProfile -File .\experiments\MSN-NNUE-lazy\uci_session.ps1   > uci-session.txt
+    -> uciok/readyok, backend Avx2Vnni sparse FC0
+    -> startpos d18 bestmove d2d4; endgame movetime 3000 bestmove b4f4 (matches M2-F3 session)
+    -> kiwipete movetime 2000 bestmove e2a6
+    -> Chess960 1rk1r3/... bestmove e1e8 (king-takes-rook, mate 8) -- drives a DEFERRED king
+       move through the mirror-flip tier via the real protocol
+    -> working set 135.6 MiB; exit code 0
+
+gates:
+  cargo test --workspace                                        PASS (incl. bench_cli 13/13)
+  cargo test --release -p mf-nnue                               PASS (incl. 6 new lazy tests)
+  cargo test --release -p mf-search --lib \
+      incremental_nnue_matches_full_rebuild -- --ignored        PASS (parity at every eval)
+  cargo clippy --workspace --all-targets -- -D warnings          PASS
+  cargo clippy -p mf-nnue -p mf-search --all-targets \
+      --features instrumentation -- -D warnings                 PASS
+  cargo fmt --all -- --check                                    PASS
+
+artifacts:
+  results.md              full write-up, corrected ceiling, keep/revert rationale
+  nps-depth12.json        raw nps_compare output, run 1
+  nps-depth12-run2.json   raw nps_compare output, run 2 (the confirming run)
+  update-profile.txt      instrumented profile after the change
+  bench-control.txt       two bench runs of each build, all 45,036
+  uci_session.ps1         manual UCI verification driver
+  uci-session.txt         its transcript

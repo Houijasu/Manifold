@@ -306,13 +306,35 @@ impl FrameMetadata {
     }
 }
 
+/// The work a push implied, not yet applied to the frame's accumulator.
+///
+/// A pending real frame stores only the move and its `Undo`. That is enough to reconstruct
+/// everything the update needs — the HalfKA piece deltas *and* the changed threat edges — from
+/// the parent and child positions, which the stack keeps eagerly. Deferring the move rather than
+/// its computed deltas is what lets a skipped push avoid changed-threat discovery too, which the
+/// M2-F1 profile measured at a fifth of all NNUE time.
+#[derive(Clone)]
+enum PendingUpdate {
+    Real {
+        mv: Move,
+        undo: Undo,
+    },
+    /// A null move changes no piece, so the frame's accumulator is a copy of its parent's — but
+    /// the parent may itself still be pending, so the copy cannot be made at push time.
+    Null,
+}
+
 #[repr(C, align(64))]
 #[derive(Clone)]
 struct AccumulatorFrame {
     state: AccumulatorState,
     metadata: FrameMetadata,
-    // FullThreats depends only on physical piece placement, so null frames can reuse this snapshot.
+    // FullThreats depends only on physical piece placement, so null frames can reuse this
+    // snapshot. Maintained eagerly on every push, because the *next* ply's changed-threat
+    // discovery reads it as the parent position whether or not this frame is ever evaluated.
     position: Position,
+    /// `Some` while `state` and `metadata` are stale and this frame's update is still owed.
+    pending: Option<PendingUpdate>,
 }
 
 struct UpdateScratch {
@@ -436,6 +458,7 @@ impl<'network> AccumulatorStack<'network> {
             state: AccumulatorState::build_with_backend(network, root, mode.backend()),
             metadata: FrameMetadata::from_position(root),
             position: root.clone(),
+            pending: None,
         };
         Self {
             network,
@@ -460,8 +483,13 @@ impl<'network> AccumulatorStack<'network> {
     }
 
     /// Returns the complete accumulator state at the current depth.
+    ///
+    /// Takes `&mut self` because the state at the current depth may still be owed a deferred
+    /// update; handing out a shared reference to a stale frame is exactly the bug lazy updates
+    /// invite, so the type system rules it out rather than a convention.
     #[must_use]
-    pub fn current(&self) -> &AccumulatorState {
+    pub fn current(&mut self) -> &AccumulatorState {
+        self.materialize();
         &self.frames[self.depth].state
     }
 
@@ -481,17 +509,68 @@ impl<'network> AccumulatorStack<'network> {
             });
         }
 
+        let next_depth = self.depth + 1;
+        // The position is kept eagerly even though the accumulator is not: the *next* ply's
+        // changed-threat discovery reads it as the parent position whether or not this frame is
+        // ever evaluated, and reconstructing it later would cost more than storing it now.
+        let child_frame = &mut self.frames[next_depth];
+        child_frame.position.clone_from(child);
+        child_frame.pending = Some(PendingUpdate::Real {
+            mv,
+            undo: undo.clone(),
+        });
+        #[cfg(feature = "instrumentation")]
+        instrumentation::record(|counters| counters.real_pushes += 1);
+        self.depth = next_depth;
+        Ok(())
+    }
+
+    /// Applies every deferred update from the last materialized frame down to the current ply.
+    ///
+    /// Frames are materialized in order from the shallowest pending one, because each update
+    /// reads its parent's finished accumulator. The scan stops at the first frame that is
+    /// already materialized, so a chain is only ever walked once: materializing a frame leaves
+    /// every ancestor materialized too.
+    fn materialize(&mut self) {
+        let mut oldest_pending = self.depth;
+        while oldest_pending > 0 && self.frames[oldest_pending].pending.is_some() {
+            oldest_pending -= 1;
+        }
+
+        for depth in (oldest_pending + 1)..=self.depth {
+            let Some(pending) = self.frames[depth].pending.take() else {
+                continue;
+            };
+            match pending {
+                PendingUpdate::Null => {
+                    let (parents, children) = self.frames.split_at_mut(depth);
+                    // Only the accumulator and its metadata are copied: the null frame's own
+                    // position was already stored at push time and must not be overwritten.
+                    children[0].state.clone_from(&parents[depth - 1].state);
+                    children[0].metadata = parents[depth - 1].metadata;
+                }
+                PendingUpdate::Real { mv, undo } => {
+                    self.apply_real(depth, mv, &undo);
+                }
+            }
+        }
+    }
+
+    /// Applies one deferred real move onto its already-materialized parent.
+    fn apply_real(&mut self, depth: usize, mv: Move, undo: &Undo) {
         let mut removed = [EMPTY_DELTA; MAX_PIECE_DELTAS];
         let mut added = [EMPTY_DELTA; MAX_PIECE_DELTAS];
         let (removed_count, added_count) = move_deltas(mv, undo, &mut removed, &mut added);
         self.scratch.changed_threats.reset();
-        let next_depth = self.depth + 1;
-        let (parents, children) = self.frames.split_at_mut(next_depth);
+        let (parents, children) = self.frames.split_at_mut(depth);
+        let parent = &parents[depth - 1];
+        let child = &children[0].position;
+
         #[cfg(feature = "instrumentation")]
         let discovery_started = instrumentation::cycles();
         #[cfg_attr(not(feature = "instrumentation"), allow(unused_variables))]
         let sliders_scanned = discover_changed_threats(
-            &parents[self.depth].position,
+            &parent.position,
             child,
             mv,
             undo,
@@ -499,38 +578,44 @@ impl<'network> AccumulatorStack<'network> {
         );
         #[cfg(feature = "instrumentation")]
         let update_started = instrumentation::cycles();
-        children[0].position.clone_from(child);
-        children[0].state.update_from(
-            &parents[self.depth].state,
+
+        // `update_from` needs `&mut` on the child state while reading the child position, which
+        // lives in the same frame. Splitting the frame's fields borrows them independently.
+        let AccumulatorFrame {
+            state: child_state,
+            metadata: child_metadata,
+            position: child_position,
+            ..
+        } = &mut children[0];
+        child_state.update_from(
+            &parent.state,
             UpdateContext {
                 network: self.network,
-                parent: &parents[self.depth].position,
-                child,
+                parent: &parent.position,
+                child: child_position,
                 backend: self.mode.backend(),
                 finny: &mut self.finny,
             },
-            &parents[self.depth].metadata,
-            &mut children[0].metadata,
+            &parent.metadata,
+            child_metadata,
             &self.scratch.changed_threats,
             &removed[..removed_count],
             &added[..added_count],
             &mut self.scratch.threat_additions,
             &mut self.scratch.threat_removals,
         );
+
         #[cfg(feature = "instrumentation")]
         {
             let finished = instrumentation::cycles();
             let edges = self.scratch.changed_threats.len() as u64;
             instrumentation::record(|counters| {
-                counters.real_pushes += 1;
                 counters.changed_threat_edges += edges;
                 counters.sliders_scanned += sliders_scanned as u64;
                 counters.threat_discovery_cycles += update_started.wrapping_sub(discovery_started);
                 counters.accumulator_update_cycles += finished.wrapping_sub(update_started);
             });
         }
-        self.depth = next_depth;
-        Ok(())
     }
 
     #[cfg(test)]
@@ -593,7 +678,13 @@ impl<'network> AccumulatorStack<'network> {
 
         let next_depth = self.depth + 1;
         let (parents, children) = self.frames.split_at_mut(next_depth);
-        children[0].clone_from(&parents[self.depth]);
+        // FullThreats depends only on physical placement, which a null move does not change, so
+        // the parent's position snapshot is exactly this frame's. The accumulator copy is
+        // deferred with everything else, because the parent may itself still be pending.
+        children[0]
+            .position
+            .clone_from(&parents[self.depth].position);
+        children[0].pending = Some(PendingUpdate::Null);
         #[cfg(feature = "instrumentation")]
         instrumentation::record(|counters| counters.null_pushes += 1);
         self.depth = next_depth;
@@ -605,18 +696,35 @@ impl<'network> AccumulatorStack<'network> {
         if self.depth == 0 {
             return Err(AccumulatorStackError::AtRoot);
         }
+        #[cfg(feature = "instrumentation")]
+        if matches!(
+            self.frames[self.depth].pending,
+            Some(PendingUpdate::Real { .. })
+        ) {
+            instrumentation::record(|counters| counters.deferred_pushes_skipped += 1);
+        }
+        // Dropping the pending update is the whole point: a frame popped before any evaluation
+        // reached it never pays for its accumulator. Clearing it also keeps a discarded branch
+        // from leaking into the sibling that reuses this slot.
+        self.frames[self.depth].pending = None;
         self.depth -= 1;
         Ok(())
     }
 
     /// Evaluates the current state in side-to-move-relative centipawns.
+    ///
+    /// This is the point deferred work is paid for: the pending chain below the last
+    /// materialized frame is applied before the forward pass reads the accumulator.
     #[must_use]
-    pub fn evaluate(&self, position: &Position) -> i32 {
+    pub fn evaluate(&mut self, position: &Position) -> i32 {
+        self.materialize();
         #[cfg(feature = "instrumentation")]
         let started = instrumentation::cycles();
-        let evaluation =
-            self.network
-                .evaluate_from_state_with_mode(position, self.current(), self.mode);
+        let evaluation = self.network.evaluate_from_state_with_mode(
+            position,
+            &self.frames[self.depth].state,
+            self.mode,
+        );
         #[cfg(feature = "instrumentation")]
         {
             let elapsed = instrumentation::cycles().wrapping_sub(started);
@@ -630,21 +738,26 @@ impl<'network> AccumulatorStack<'network> {
 
     /// Returns the raw blended NNUE value for the current state.
     #[must_use]
-    pub fn evaluate_internal(&self, position: &Position) -> i32 {
-        self.network
-            .evaluate_internal_from_state_with_mode(position, self.current(), self.mode)
+    pub fn evaluate_internal(&mut self, position: &Position) -> i32 {
+        self.materialize();
+        self.network.evaluate_internal_from_state_with_mode(
+            position,
+            &self.frames[self.depth].state,
+            self.mode,
+        )
     }
 
     /// Dumps the current feature-transform output and evaluation metadata.
     #[must_use]
     pub fn dump_features(
-        &self,
+        &mut self,
         position: &Position,
         transformed: &mut [u8; L1],
     ) -> crate::EvaluationDump {
+        self.materialize();
         self.network.dump_features_from_state_with_mode(
             position,
-            self.current(),
+            &self.frames[self.depth].state,
             transformed,
             self.mode,
         )
@@ -952,10 +1065,13 @@ mod tests {
         assert_eq!(core::mem::size_of::<FrameMetadata>(), 2);
         assert_eq!(core::mem::size_of::<AccumulatorState>(), 4_224);
         assert_eq!(core::mem::align_of::<AccumulatorFrame>(), 64);
-        assert_eq!(core::mem::size_of::<AccumulatorFrame>(), 4_544);
+        // Lazy updates added `pending`, which costs one cache line per frame (4,544 -> 4,608):
+        // a `Move`, an `Undo`, and the enum tag, rounded up by the 64-byte alignment. That is
+        // 8 KiB more per search thread, paid to skip the accumulator work of unread pushes.
+        assert_eq!(core::mem::size_of::<AccumulatorFrame>(), 4_608);
         assert_eq!(
             core::mem::size_of::<AccumulatorFrame>() * STACK_STATES,
-            586_176
+            594_432
         );
     }
 
@@ -1339,9 +1455,9 @@ mod tests {
         };
         let position = Position::startpos();
         let sparse_mode = ForwardMode::new(backend, true).expect("backend is supported");
-        let sparse_stack = AccumulatorStack::new_with_mode(&network, &position, sparse_mode)
+        let mut sparse_stack = AccumulatorStack::new_with_mode(&network, &position, sparse_mode)
             .expect("mode is supported");
-        let dense_stack = AccumulatorStack::new_with_backend(&network, &position, backend)
+        let mut dense_stack = AccumulatorStack::new_with_backend(&network, &position, backend)
             .expect("backend is supported");
         let mut transformed = [0_u8; L1];
 

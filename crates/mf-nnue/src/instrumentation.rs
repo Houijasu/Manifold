@@ -48,6 +48,12 @@ pub struct UpdateCounters {
     pub finny_delta_rows: u64,
     /// Reference cycles spent in the forward pass.
     pub forward_cycles: u64,
+    /// Real pushes popped without ever being materialized — the work lazy updates actually saved.
+    ///
+    /// Strictly smaller than the count of pushes never evaluated *at their own ply*: an interior
+    /// push that is never evaluated itself is still materialized the moment any descendant is,
+    /// because the descendant's incremental update reads its parent's accumulator.
+    pub deferred_pushes_skipped: u64,
 }
 
 impl UpdateCounters {
@@ -68,6 +74,7 @@ impl UpdateCounters {
         finny_refreshes: 0,
         finny_delta_rows: 0,
         forward_cycles: 0,
+        deferred_pushes_skipped: 0,
     };
 }
 

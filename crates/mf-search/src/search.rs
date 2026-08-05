@@ -134,7 +134,7 @@ impl<'network> SearchEvaluator<'network> {
     }
 
     #[inline]
-    fn evaluate(&self, position: &Position) -> i32 {
+    fn evaluate(&mut self, position: &Position) -> i32 {
         #[cfg(test)]
         if self.verify_incremental {
             let expected =
@@ -167,7 +167,7 @@ impl<'network> SearchEvaluator<'network> {
     }
 
     #[cfg(test)]
-    fn current(&self) -> &mf_nnue::AccumulatorState {
+    fn current(&mut self) -> &mf_nnue::AccumulatorState {
         self.accumulators.current()
     }
 
@@ -2715,7 +2715,7 @@ impl<'a> SearchContext<'a> {
     }
 
     #[inline]
-    fn static_eval(&self, position: &Position) -> i32 {
+    fn static_eval(&mut self, position: &Position) -> i32 {
         self.evaluator.evaluate(position)
     }
 
@@ -2830,7 +2830,7 @@ mod tests {
         let Some(network) = local_network() else {
             return;
         };
-        let evaluator = SearchEvaluator::new(network, &position);
+        let mut evaluator = SearchEvaluator::new(network, &position);
 
         assert_eq!(
             evaluator.evaluate(&position),

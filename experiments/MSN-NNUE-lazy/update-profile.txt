@@ -1,0 +1,27 @@
+   Compiling mf-nnue v0.1.0 (C:\Users\Samaritan\Projects\Manifold\crates\mf-nnue)
+   Compiling mf-search v0.1.0 (C:\Users\Samaritan\Projects\Manifold\crates\mf-search)
+    Finished `release` profile [optimized] target(s) in 5.88s
+     Running `target\release\examples\nnue_update_profile.exe 7`
+net=C:\Users\Samaritan\Projects\Manifold\crates\mf-search\../../nets/main.nnue hash=16MiB threads=1
+position     d      nodes     pushes      nulls      thr%      upd%     rbld%      fwd%     nnue%  kingR/kn   ovfR/kn  edges/pu         nps
+bench1       7       8884       8786         15     22.9%     54.4%      0.0%     22.7%     39.5%      0.00      0.00      4.78      652290
+bench2       7      15926      15202        653     21.0%     61.7%      0.0%     17.3%     38.3%      0.00      0.00      7.86      394520
+bench3       7       3121       3011         94     16.1%     61.6%      0.0%     22.3%     33.1%      0.00      0.00      1.35      671457
+bench4       7       6101       5890        178     19.6%     61.9%      0.0%     18.6%     41.1%      0.00      0.00      6.28      500168
+bench5       7       2971       2913         45     20.4%     61.3%      0.0%     18.4%     34.7%      0.00      0.00      4.19      557170
+bench6       7       8033       7503        498     21.9%     57.6%      0.0%     20.5%     35.9%      0.00      0.00      6.95      496505
+BENCH        7      45036      43305       1483     21.0%     59.9%      0.0%     19.1%     37.9%      0.00      0.00      6.16      487692
+deep-d14    14     225979     218293       5055     21.4%     56.8%      0.0%     21.8%     42.0%      0.00      0.00      6.87      518267
+deep-d13    13     303157     278242      17376     19.5%     62.3%      0.0%     18.2%     39.3%      0.00      0.00      7.41      435449
+deep-d13    13      69240      66751       1395     23.9%     56.1%      0.0%     20.0%     41.4%      0.00      0.00      8.01      516336
+TOTAL        0     643412     606591      25309     20.7%     59.7%      0.0%     19.6%     40.3%      0.00      0.00      7.19      473562
+
+totals: nodes=643412 real_pushes=606591 null_pushes=25309 forwards=443664
+rebuilds: king=0 (0.000/1000 nodes) overflow=0 (0.000/1000 nodes)
+finny: king_moves=49168 (76.418/1000 nodes) of which mirror-flips=14949 (30.4%) rows/refresh=6.46
+per real push: changed_edges=7.19 sliders_scanned=3.51
+per real push (ns, TSC 2.419 GHz): threat_discovery=186.7 accumulator_update=538.7 (of which rebuild=0.0, incremental=538.7)
+per finny-served king move (ns): 1099.9
+per forward (ns): 242.3
+unread pushes: 188236 of 631900 (29.8%) -- OVERSTATES the lazy ceiling
+deferred pushes SKIPPED: 116232 of 606591 (19.2%) -- accumulator work lazy updates avoided

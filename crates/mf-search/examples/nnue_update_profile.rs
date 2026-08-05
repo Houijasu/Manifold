@@ -254,6 +254,7 @@ impl Totals {
         self.counters.finny_refreshes += counters.finny_refreshes;
         self.counters.finny_delta_rows += counters.finny_delta_rows;
         self.counters.forward_cycles += counters.forward_cycles;
+        self.counters.deferred_pushes_skipped += counters.deferred_pushes_skipped;
     }
 
     fn row(&self) -> Row {
@@ -325,8 +326,17 @@ impl Totals {
         let pushes = counters.real_pushes + counters.null_pushes;
         let unread = pushes.saturating_sub(counters.forward_evaluations);
         println!(
-            "unread pushes: {unread} of {pushes} ({:.1}%) -- ceiling on what lazy updates can skip",
+            "unread pushes: {unread} of {pushes} ({:.1}%) -- OVERSTATES the lazy ceiling",
             unread as f64 * 100.0 / pushes as f64,
+        );
+        // The real ceiling. An unread push is only skippable if no descendant was evaluated
+        // either: the first eval below it forces its materialization anyway, because the
+        // descendant's incremental update reads its parent's accumulator.
+        println!(
+            "deferred pushes SKIPPED: {} of {} ({:.1}%) -- accumulator work lazy updates avoided",
+            counters.deferred_pushes_skipped,
+            counters.real_pushes,
+            counters.deferred_pushes_skipped as f64 * 100.0 / counters.real_pushes as f64,
         );
     }
 }

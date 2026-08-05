@@ -257,7 +257,7 @@ fn root_accumulator_stack_matches_eonego_on_10k_reference_positions() {
     let mut transformed = [0_u8; L1];
     for (index, (fen, record)) in fens.iter().zip(dump.chunks_exact(RECORD_BYTES)).enumerate() {
         let position = parse_position(fen);
-        let stack = AccumulatorStack::new(&network, &position);
+        let mut stack = AccumulatorStack::new(&network, &position);
         let actual = stack.dump_features(&position, &mut transformed);
         let expected_bucket = usize::from(record[0]);
         let expected_stm = record[1];
