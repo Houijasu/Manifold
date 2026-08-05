@@ -243,3 +243,33 @@ measures against.
 3. **Machine hygiene is now a live risk to every remaining match in this mission.** One
    interactive application produced 5 forfeits in 300 games and one 2.2x-spread NPS run. Check
    the harness's pre-run CPU line before quoting any result.
+
+---
+
+## Addendum (2026-08-06) — A-NNUE-002 amended to ≥8%, assertion now satisfied
+
+The orchestrator took recommendation 1 above and **amended A-NNUE-002 in
+`validation-contract.md` from ≥10% to ≥8%**, with the rationale recorded inline in the assertion
+text. The amendment changes no measurement in this document; it changes the bar the measurements
+are judged against, on evidence that post-dates the assertion:
+
+- The M2-F1 profile (measured *after* A-NNUE-002 was written) put NNUE at **44.6% of wall time**,
+  which bounds what any NNUE-only milestone can buy.
+- The per-feature chain **Finny 1.03x × lazy 1.035x × threats 1.015x = 1.08x** reproduces the
+  end-to-end measurement exactly, so the shortfall is not a lost or mis-measured gain.
+- The only remaining characterized NNUE target (the mirror-flip `append_active_threats` scan) is
+  worth **~0.8% of wall** — not enough to reach 10%, so the original target was unreachable within
+  the milestone's scope rather than merely unmet.
+
+**Revised assertion status (supersedes the A-NNUE-002 rows in the "Assertion status" table above):**
+
+| Assertion | Status |
+|---|---|
+| A-NNUE-002, part 1 (**≥8%** 1T NPS vs mission-start, committed `experiments/` doc) | **MET.** 1.08x (+8%), two clean per-position-agreeing runs. |
+| A-NNUE-002, part 2 (~300-game match, no strength regression, zero forfeits) | **MET.** +37.20 ± 20.19 Elo, 300 games, 0 forfeits both sides. |
+| **A-NNUE-002 overall** | **SATISFIED** at 1.08x + non-regressing confirmation match. |
+
+No measurement was rerun for this addendum. Re-verified only that the promoted build is intact:
+`baselines/m2-nnue/manifold.exe`, SHA-256
+`BC0C445CD9A26BEC0EEA446EEF555B1EE8C756250BAD943973D1C33D776DB48C`, `bench` → **45,036 nodes**,
+matching the pinned anchor and Binary A in the provenance table above.
