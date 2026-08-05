@@ -1,0 +1,634 @@
+Indexing opening suite...
+Started game 2 of 300 (mission-start vs m2-nnue)
+Started game 3 of 300 (m2-nnue vs mission-start)
+Started game 4 of 300 (mission-start vs m2-nnue)
+Started game 5 of 300 (m2-nnue vs mission-start)
+Started game 6 of 300 (mission-start vs m2-nnue)
+Started game 7 of 300 (m2-nnue vs mission-start)
+Started game 1 of 300 (m2-nnue vs mission-start)
+Started game 8 of 300 (mission-start vs m2-nnue)
+Finished game 2 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 9 of 300 (m2-nnue vs mission-start)
+Finished game 3 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 10 of 300 (mission-start vs m2-nnue)
+Finished game 5 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 11 of 300 (m2-nnue vs mission-start)
+Finished game 4 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 12 of 300 (mission-start vs m2-nnue)
+Finished game 7 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 13 of 300 (m2-nnue vs mission-start)
+Finished game 6 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 14 of 300 (mission-start vs m2-nnue)
+Finished game 8 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 15 of 300 (m2-nnue vs mission-start)
+Finished game 1 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 16 of 300 (mission-start vs m2-nnue)
+Finished game 10 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 17 of 300 (m2-nnue vs mission-start)
+Finished game 9 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 18 of 300 (mission-start vs m2-nnue)
+Finished game 13 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 19 of 300 (m2-nnue vs mission-start)
+Finished game 14 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 20 of 300 (mission-start vs m2-nnue)
+Finished game 11 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 21 of 300 (m2-nnue vs mission-start)
+Finished game 12 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 22 of 300 (mission-start vs m2-nnue)
+Finished game 15 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 23 of 300 (m2-nnue vs mission-start)
+Finished game 16 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 24 of 300 (mission-start vs m2-nnue)
+Finished game 18 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 25 of 300 (m2-nnue vs mission-start)
+Finished game 17 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 26 of 300 (mission-start vs m2-nnue)
+Finished game 19 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 27 of 300 (m2-nnue vs mission-start)
+Finished game 22 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 28 of 300 (mission-start vs m2-nnue)
+Finished game 20 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 29 of 300 (m2-nnue vs mission-start)
+Finished game 21 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 30 of 300 (mission-start vs m2-nnue)
+Finished game 23 (m2-nnue vs mission-start): 0-1 {Black mates}
+Started game 31 of 300 (m2-nnue vs mission-start)
+Finished game 25 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 32 of 300 (mission-start vs m2-nnue)
+Finished game 26 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 33 of 300 (m2-nnue vs mission-start)
+Finished game 27 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 34 of 300 (mission-start vs m2-nnue)
+Finished game 24 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 35 of 300 (m2-nnue vs mission-start)
+Finished game 28 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 36 of 300 (mission-start vs m2-nnue)
+Finished game 30 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 37 of 300 (m2-nnue vs mission-start)
+Finished game 32 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 38 of 300 (mission-start vs m2-nnue)
+Finished game 29 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 39 of 300 (m2-nnue vs mission-start)
+Finished game 33 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 40 of 300 (mission-start vs m2-nnue)
+Finished game 31 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 41 of 300 (m2-nnue vs mission-start)
+Finished game 35 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 42 of 300 (mission-start vs m2-nnue)
+Finished game 36 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 43 of 300 (m2-nnue vs mission-start)
+Finished game 38 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 44 of 300 (mission-start vs m2-nnue)
+Finished game 34 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 45 of 300 (m2-nnue vs mission-start)
+Finished game 37 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 46 of 300 (mission-start vs m2-nnue)
+Finished game 39 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 47 of 300 (m2-nnue vs mission-start)
+Finished game 40 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 48 of 300 (mission-start vs m2-nnue)
+Finished game 42 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 49 of 300 (m2-nnue vs mission-start)
+Finished game 43 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 50 of 300 (mission-start vs m2-nnue)
+Finished game 44 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 51 of 300 (m2-nnue vs mission-start)
+Finished game 41 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 52 of 300 (mission-start vs m2-nnue)
+Finished game 46 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 53 of 300 (m2-nnue vs mission-start)
+Finished game 45 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 54 of 300 (mission-start vs m2-nnue)
+Finished game 47 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 55 of 300 (m2-nnue vs mission-start)
+Finished game 48 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 56 of 300 (mission-start vs m2-nnue)
+Finished game 49 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 57 of 300 (m2-nnue vs mission-start)
+Finished game 50 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 58 of 300 (mission-start vs m2-nnue)
+Finished game 51 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 59 of 300 (m2-nnue vs mission-start)
+Finished game 53 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 60 of 300 (mission-start vs m2-nnue)
+Finished game 52 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 61 of 300 (m2-nnue vs mission-start)
+Finished game 54 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 62 of 300 (mission-start vs m2-nnue)
+Finished game 58 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 63 of 300 (m2-nnue vs mission-start)
+Finished game 56 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 64 of 300 (mission-start vs m2-nnue)
+Finished game 57 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 65 of 300 (m2-nnue vs mission-start)
+Finished game 55 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 66 of 300 (mission-start vs m2-nnue)
+Finished game 59 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 67 of 300 (m2-nnue vs mission-start)
+Finished game 60 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 68 of 300 (mission-start vs m2-nnue)
+Finished game 61 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 69 of 300 (m2-nnue vs mission-start)
+Finished game 62 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 70 of 300 (mission-start vs m2-nnue)
+Finished game 63 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 71 of 300 (m2-nnue vs mission-start)
+Finished game 65 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 72 of 300 (mission-start vs m2-nnue)
+Finished game 64 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 73 of 300 (m2-nnue vs mission-start)
+Finished game 66 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 74 of 300 (mission-start vs m2-nnue)
+Finished game 68 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 75 of 300 (m2-nnue vs mission-start)
+Finished game 72 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 76 of 300 (mission-start vs m2-nnue)
+Finished game 67 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 77 of 300 (m2-nnue vs mission-start)
+Finished game 70 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 78 of 300 (mission-start vs m2-nnue)
+Finished game 69 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 79 of 300 (m2-nnue vs mission-start)
+Finished game 71 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 80 of 300 (mission-start vs m2-nnue)
+Finished game 74 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 81 of 300 (m2-nnue vs mission-start)
+Finished game 73 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 82 of 300 (mission-start vs m2-nnue)
+Finished game 75 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 83 of 300 (m2-nnue vs mission-start)
+Finished game 76 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 84 of 300 (mission-start vs m2-nnue)
+Finished game 78 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 85 of 300 (m2-nnue vs mission-start)
+Finished game 79 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 86 of 300 (mission-start vs m2-nnue)
+Finished game 77 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 87 of 300 (m2-nnue vs mission-start)
+Finished game 81 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 88 of 300 (mission-start vs m2-nnue)
+Finished game 80 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 89 of 300 (m2-nnue vs mission-start)
+Finished game 82 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 90 of 300 (mission-start vs m2-nnue)
+Finished game 83 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 91 of 300 (m2-nnue vs mission-start)
+Finished game 86 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 92 of 300 (mission-start vs m2-nnue)
+Finished game 87 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 93 of 300 (m2-nnue vs mission-start)
+Finished game 85 (m2-nnue vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 94 of 300 (mission-start vs m2-nnue)
+Finished game 90 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 95 of 300 (m2-nnue vs mission-start)
+Finished game 91 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 96 of 300 (mission-start vs m2-nnue)
+Finished game 89 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 97 of 300 (m2-nnue vs mission-start)
+Finished game 84 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 98 of 300 (mission-start vs m2-nnue)
+Finished game 93 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 99 of 300 (m2-nnue vs mission-start)
+Finished game 92 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 100 of 300 (mission-start vs m2-nnue)
+Finished game 88 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 101 of 300 (m2-nnue vs mission-start)
+Finished game 95 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 102 of 300 (mission-start vs m2-nnue)
+Finished game 98 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 103 of 300 (m2-nnue vs mission-start)
+Finished game 94 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 104 of 300 (mission-start vs m2-nnue)
+Finished game 100 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 105 of 300 (m2-nnue vs mission-start)
+Finished game 97 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 106 of 300 (mission-start vs m2-nnue)
+Finished game 99 (m2-nnue vs mission-start): 1-0 {White mates}
+--------------------------------------------------
+Results of m2-nnue vs mission-start (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 10.64 +/- 34.76, nElo: 21.14 +/- 68.79
+LOS: 72.65 %, DrawRatio: 55.10 %, PairsRatio: 1.44
+Games: 98, Wins: 24, Losses: 21, Draws: 53, Points: 50.5 (51.53 %)
+Ptnml(0-2): [1, 8, 27, 13, 0], WL/DD Ratio: 0.69
+--------------------------------------------------
+Started game 107 of 300 (m2-nnue vs mission-start)
+Finished game 96 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 108 of 300 (mission-start vs m2-nnue)
+Finished game 101 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 109 of 300 (m2-nnue vs mission-start)
+Finished game 102 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 110 of 300 (mission-start vs m2-nnue)
+Finished game 103 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 111 of 300 (m2-nnue vs mission-start)
+Finished game 104 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 112 of 300 (mission-start vs m2-nnue)
+Finished game 107 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 113 of 300 (m2-nnue vs mission-start)
+Finished game 105 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 114 of 300 (mission-start vs m2-nnue)
+Finished game 106 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 115 of 300 (m2-nnue vs mission-start)
+Finished game 108 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 116 of 300 (mission-start vs m2-nnue)
+Finished game 109 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 117 of 300 (m2-nnue vs mission-start)
+Finished game 111 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 118 of 300 (mission-start vs m2-nnue)
+Finished game 110 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 119 of 300 (m2-nnue vs mission-start)
+Finished game 112 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 120 of 300 (mission-start vs m2-nnue)
+Finished game 116 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 121 of 300 (m2-nnue vs mission-start)
+Finished game 113 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 122 of 300 (mission-start vs m2-nnue)
+Finished game 115 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 123 of 300 (m2-nnue vs mission-start)
+Finished game 117 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 124 of 300 (mission-start vs m2-nnue)
+Finished game 114 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 125 of 300 (m2-nnue vs mission-start)
+Finished game 119 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 126 of 300 (mission-start vs m2-nnue)
+Finished game 122 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 127 of 300 (m2-nnue vs mission-start)
+Finished game 120 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 128 of 300 (mission-start vs m2-nnue)
+Finished game 121 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 129 of 300 (m2-nnue vs mission-start)
+Finished game 118 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 130 of 300 (mission-start vs m2-nnue)
+Finished game 123 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 131 of 300 (m2-nnue vs mission-start)
+Finished game 124 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 132 of 300 (mission-start vs m2-nnue)
+Finished game 127 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 133 of 300 (m2-nnue vs mission-start)
+Finished game 125 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 134 of 300 (mission-start vs m2-nnue)
+Finished game 126 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 135 of 300 (m2-nnue vs mission-start)
+Finished game 131 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 136 of 300 (mission-start vs m2-nnue)
+Finished game 128 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 137 of 300 (m2-nnue vs mission-start)
+Finished game 130 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 138 of 300 (mission-start vs m2-nnue)
+Finished game 129 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 139 of 300 (m2-nnue vs mission-start)
+Finished game 132 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 140 of 300 (mission-start vs m2-nnue)
+Finished game 133 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 141 of 300 (m2-nnue vs mission-start)
+Finished game 137 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 142 of 300 (mission-start vs m2-nnue)
+Finished game 134 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 143 of 300 (m2-nnue vs mission-start)
+Finished game 138 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 144 of 300 (mission-start vs m2-nnue)
+Finished game 135 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 145 of 300 (m2-nnue vs mission-start)
+Finished game 136 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 146 of 300 (mission-start vs m2-nnue)
+Finished game 139 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 147 of 300 (m2-nnue vs mission-start)
+Finished game 140 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 148 of 300 (mission-start vs m2-nnue)
+Finished game 144 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 149 of 300 (m2-nnue vs mission-start)
+Finished game 141 (m2-nnue vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 150 of 300 (mission-start vs m2-nnue)
+Finished game 142 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 151 of 300 (m2-nnue vs mission-start)
+Finished game 143 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 152 of 300 (mission-start vs m2-nnue)
+Finished game 146 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 153 of 300 (m2-nnue vs mission-start)
+Finished game 145 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 154 of 300 (mission-start vs m2-nnue)
+Finished game 147 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 155 of 300 (m2-nnue vs mission-start)
+Finished game 148 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 156 of 300 (mission-start vs m2-nnue)
+Finished game 152 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 157 of 300 (m2-nnue vs mission-start)
+Finished game 151 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 158 of 300 (mission-start vs m2-nnue)
+Finished game 150 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 159 of 300 (m2-nnue vs mission-start)
+Finished game 149 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 160 of 300 (mission-start vs m2-nnue)
+Finished game 154 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 161 of 300 (m2-nnue vs mission-start)
+Finished game 155 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 162 of 300 (mission-start vs m2-nnue)
+Finished game 153 (m2-nnue vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 163 of 300 (m2-nnue vs mission-start)
+Finished game 156 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 164 of 300 (mission-start vs m2-nnue)
+Finished game 158 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 165 of 300 (m2-nnue vs mission-start)
+Finished game 157 (m2-nnue vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 166 of 300 (mission-start vs m2-nnue)
+Finished game 159 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 167 of 300 (m2-nnue vs mission-start)
+Finished game 160 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 168 of 300 (mission-start vs m2-nnue)
+Finished game 161 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 169 of 300 (m2-nnue vs mission-start)
+Finished game 163 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 170 of 300 (mission-start vs m2-nnue)
+Finished game 164 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 171 of 300 (m2-nnue vs mission-start)
+Finished game 167 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 172 of 300 (mission-start vs m2-nnue)
+Finished game 166 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 173 of 300 (m2-nnue vs mission-start)
+Finished game 165 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 174 of 300 (mission-start vs m2-nnue)
+Finished game 168 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 175 of 300 (m2-nnue vs mission-start)
+Finished game 162 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 176 of 300 (mission-start vs m2-nnue)
+Finished game 169 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 177 of 300 (m2-nnue vs mission-start)
+Finished game 170 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 178 of 300 (mission-start vs m2-nnue)
+Finished game 172 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 179 of 300 (m2-nnue vs mission-start)
+Finished game 173 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 180 of 300 (mission-start vs m2-nnue)
+Finished game 171 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 181 of 300 (m2-nnue vs mission-start)
+Finished game 175 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 182 of 300 (mission-start vs m2-nnue)
+Finished game 176 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 183 of 300 (m2-nnue vs mission-start)
+Finished game 177 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 184 of 300 (mission-start vs m2-nnue)
+Finished game 178 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 185 of 300 (m2-nnue vs mission-start)
+Finished game 174 (mission-start vs m2-nnue): 1/2-1/2 {Draw by stalemate}
+Started game 186 of 300 (mission-start vs m2-nnue)
+Finished game 180 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 187 of 300 (m2-nnue vs mission-start)
+Finished game 179 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 188 of 300 (mission-start vs m2-nnue)
+Finished game 182 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 189 of 300 (m2-nnue vs mission-start)
+Finished game 181 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 190 of 300 (mission-start vs m2-nnue)
+Finished game 183 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 191 of 300 (m2-nnue vs mission-start)
+Finished game 185 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 192 of 300 (mission-start vs m2-nnue)
+Finished game 187 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 193 of 300 (m2-nnue vs mission-start)
+Finished game 189 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 194 of 300 (mission-start vs m2-nnue)
+Finished game 184 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 195 of 300 (m2-nnue vs mission-start)
+Finished game 186 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 196 of 300 (mission-start vs m2-nnue)
+Finished game 188 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 197 of 300 (m2-nnue vs mission-start)
+Finished game 194 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 198 of 300 (mission-start vs m2-nnue)
+Finished game 197 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 199 of 300 (m2-nnue vs mission-start)
+Finished game 193 (m2-nnue vs mission-start): 0-1 {Black mates}
+Started game 200 of 300 (mission-start vs m2-nnue)
+Finished game 190 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 201 of 300 (m2-nnue vs mission-start)
+Finished game 191 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 202 of 300 (mission-start vs m2-nnue)
+Finished game 195 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 203 of 300 (m2-nnue vs mission-start)
+Finished game 192 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 204 of 300 (mission-start vs m2-nnue)
+Finished game 196 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 205 of 300 (m2-nnue vs mission-start)
+Finished game 199 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 206 of 300 (mission-start vs m2-nnue)
+Finished game 198 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 207 of 300 (m2-nnue vs mission-start)
+Finished game 200 (mission-start vs m2-nnue): 1-0 {White mates}
+--------------------------------------------------
+Results of m2-nnue vs mission-start (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 27.85 +/- 24.62, nElo: 54.81 +/- 48.15
+LOS: 98.72 %, DrawRatio: 49.00 %, PairsRatio: 2.00
+Games: 200, Wins: 54, Losses: 38, Draws: 108, Points: 108.0 (54.00 %)
+Ptnml(0-2): [1, 16, 49, 34, 0], WL/DD Ratio: 0.69
+--------------------------------------------------
+Started game 208 of 300 (mission-start vs m2-nnue)
+Finished game 202 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 209 of 300 (m2-nnue vs mission-start)
+Finished game 203 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 210 of 300 (mission-start vs m2-nnue)
+Finished game 204 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 211 of 300 (m2-nnue vs mission-start)
+Finished game 207 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 212 of 300 (mission-start vs m2-nnue)
+Finished game 201 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 213 of 300 (m2-nnue vs mission-start)
+Finished game 205 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 214 of 300 (mission-start vs m2-nnue)
+Finished game 206 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 215 of 300 (m2-nnue vs mission-start)
+Finished game 208 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 216 of 300 (mission-start vs m2-nnue)
+Finished game 211 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 217 of 300 (m2-nnue vs mission-start)
+Finished game 210 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 218 of 300 (mission-start vs m2-nnue)
+Finished game 209 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 219 of 300 (m2-nnue vs mission-start)
+Finished game 215 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 220 of 300 (mission-start vs m2-nnue)
+Finished game 212 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 221 of 300 (m2-nnue vs mission-start)
+Finished game 214 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 222 of 300 (mission-start vs m2-nnue)
+Finished game 213 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 223 of 300 (m2-nnue vs mission-start)
+Finished game 216 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 224 of 300 (mission-start vs m2-nnue)
+Finished game 218 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 225 of 300 (m2-nnue vs mission-start)
+Finished game 220 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 226 of 300 (mission-start vs m2-nnue)
+Finished game 217 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 227 of 300 (m2-nnue vs mission-start)
+Finished game 221 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 228 of 300 (mission-start vs m2-nnue)
+Finished game 222 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 229 of 300 (m2-nnue vs mission-start)
+Finished game 223 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 230 of 300 (mission-start vs m2-nnue)
+Finished game 224 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 231 of 300 (m2-nnue vs mission-start)
+Finished game 219 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 232 of 300 (mission-start vs m2-nnue)
+Finished game 229 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 233 of 300 (m2-nnue vs mission-start)
+Finished game 226 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 234 of 300 (mission-start vs m2-nnue)
+Finished game 225 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 235 of 300 (m2-nnue vs mission-start)
+Finished game 227 (m2-nnue vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 236 of 300 (mission-start vs m2-nnue)
+Finished game 230 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 237 of 300 (m2-nnue vs mission-start)
+Finished game 232 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 238 of 300 (mission-start vs m2-nnue)
+Finished game 228 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 239 of 300 (m2-nnue vs mission-start)
+Finished game 231 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 240 of 300 (mission-start vs m2-nnue)
+Finished game 235 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 241 of 300 (m2-nnue vs mission-start)
+Finished game 234 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 242 of 300 (mission-start vs m2-nnue)
+Finished game 233 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 243 of 300 (m2-nnue vs mission-start)
+Finished game 236 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 244 of 300 (mission-start vs m2-nnue)
+Finished game 239 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 245 of 300 (m2-nnue vs mission-start)
+Finished game 238 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 246 of 300 (mission-start vs m2-nnue)
+Finished game 237 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 247 of 300 (m2-nnue vs mission-start)
+Finished game 240 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 248 of 300 (mission-start vs m2-nnue)
+Finished game 241 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 249 of 300 (m2-nnue vs mission-start)
+Finished game 242 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 250 of 300 (mission-start vs m2-nnue)
+Finished game 244 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 251 of 300 (m2-nnue vs mission-start)
+Finished game 243 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 252 of 300 (mission-start vs m2-nnue)
+Finished game 245 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 253 of 300 (m2-nnue vs mission-start)
+Finished game 251 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 254 of 300 (mission-start vs m2-nnue)
+Finished game 246 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 255 of 300 (m2-nnue vs mission-start)
+Finished game 249 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 256 of 300 (mission-start vs m2-nnue)
+Finished game 248 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 257 of 300 (m2-nnue vs mission-start)
+Finished game 250 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 258 of 300 (mission-start vs m2-nnue)
+Finished game 247 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 259 of 300 (m2-nnue vs mission-start)
+Finished game 252 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 260 of 300 (mission-start vs m2-nnue)
+Finished game 255 (m2-nnue vs mission-start): 0-1 {Black mates}
+Started game 261 of 300 (m2-nnue vs mission-start)
+Finished game 254 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 262 of 300 (mission-start vs m2-nnue)
+Finished game 253 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 263 of 300 (m2-nnue vs mission-start)
+Finished game 256 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 264 of 300 (mission-start vs m2-nnue)
+Finished game 258 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 265 of 300 (m2-nnue vs mission-start)
+Finished game 257 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 266 of 300 (mission-start vs m2-nnue)
+Finished game 259 (m2-nnue vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 267 of 300 (m2-nnue vs mission-start)
+Finished game 260 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 268 of 300 (mission-start vs m2-nnue)
+Finished game 263 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 269 of 300 (m2-nnue vs mission-start)
+Finished game 261 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 270 of 300 (mission-start vs m2-nnue)
+Finished game 264 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 271 of 300 (m2-nnue vs mission-start)
+Finished game 262 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 272 of 300 (mission-start vs m2-nnue)
+Finished game 266 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 273 of 300 (m2-nnue vs mission-start)
+Finished game 265 (m2-nnue vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 274 of 300 (mission-start vs m2-nnue)
+Finished game 267 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 275 of 300 (m2-nnue vs mission-start)
+Finished game 268 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 276 of 300 (mission-start vs m2-nnue)
+Finished game 273 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 277 of 300 (m2-nnue vs mission-start)
+Finished game 269 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 278 of 300 (mission-start vs m2-nnue)
+Finished game 270 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 279 of 300 (m2-nnue vs mission-start)
+Finished game 274 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 280 of 300 (mission-start vs m2-nnue)
+Finished game 272 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 281 of 300 (m2-nnue vs mission-start)
+Finished game 275 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 282 of 300 (mission-start vs m2-nnue)
+Finished game 271 (m2-nnue vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 283 of 300 (m2-nnue vs mission-start)
+Finished game 277 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 284 of 300 (mission-start vs m2-nnue)
+Finished game 276 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 285 of 300 (m2-nnue vs mission-start)
+Finished game 278 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 286 of 300 (mission-start vs m2-nnue)
+Finished game 279 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 287 of 300 (m2-nnue vs mission-start)
+Finished game 285 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 288 of 300 (mission-start vs m2-nnue)
+Finished game 282 (mission-start vs m2-nnue): 0-1 {Black mates}
+Started game 289 of 300 (m2-nnue vs mission-start)
+Finished game 280 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 290 of 300 (mission-start vs m2-nnue)
+Finished game 281 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 291 of 300 (m2-nnue vs mission-start)
+Finished game 286 (mission-start vs m2-nnue): 1/2-1/2 {Draw by stalemate}
+Started game 292 of 300 (mission-start vs m2-nnue)
+Finished game 284 (mission-start vs m2-nnue): 1-0 {White mates}
+Started game 293 of 300 (m2-nnue vs mission-start)
+Finished game 283 (m2-nnue vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 294 of 300 (mission-start vs m2-nnue)
+Finished game 288 (mission-start vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 295 of 300 (m2-nnue vs mission-start)
+Finished game 287 (m2-nnue vs mission-start): 1-0 {White mates}
+Started game 296 of 300 (mission-start vs m2-nnue)
+Finished game 291 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 297 of 300 (m2-nnue vs mission-start)
+Finished game 294 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 298 of 300 (mission-start vs m2-nnue)
+Finished game 290 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 299 of 300 (m2-nnue vs mission-start)
+Finished game 293 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 300 of 300 (mission-start vs m2-nnue)
+Finished game 289 (m2-nnue vs mission-start): 1-0 {White mates}
+Finished game 292 (mission-start vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 295 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 299 (m2-nnue vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 296 (mission-start vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Finished game 297 (m2-nnue vs mission-start): 1-0 {White mates}
+Finished game 298 (mission-start vs m2-nnue): 1-0 {White mates}
+Finished game 300 (mission-start vs m2-nnue): 1-0 {White mates}
+--------------------------------------------------
+Results of m2-nnue vs mission-start (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 37.20 +/- 20.19, nElo: 73.07 +/- 39.32
+LOS: 99.99 %, DrawRatio: 50.00 %, PairsRatio: 2.41
+Games: 300, Wins: 85, Losses: 53, Draws: 162, Points: 166.0 (55.33 %)
+Ptnml(0-2): [1, 21, 75, 51, 2], WL/DD Ratio: 0.67
+--------------------------------------------------
+Finished match
+Total Time: 00:17:01 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  m2-nnue      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  mission-start time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================
