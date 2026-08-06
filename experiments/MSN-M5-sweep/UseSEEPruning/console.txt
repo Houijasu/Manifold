@@ -1,0 +1,40 @@
+Indexing opening suite...
+Started game 1 of 10 (flipped vs default)
+Started game 3 of 10 (flipped vs default)
+Started game 4 of 10 (default vs flipped)
+Started game 5 of 10 (flipped vs default)
+Started game 6 of 10 (default vs flipped)
+Started game 7 of 10 (flipped vs default)
+Started game 8 of 10 (default vs flipped)
+Started game 2 of 10 (default vs flipped)
+Finished game 2 (default vs flipped): 0-1 {Black mates}
+Started game 9 of 10 (flipped vs default)
+Finished game 6 (default vs flipped): 1-0 {White mates}
+Started game 10 of 10 (default vs flipped)
+Finished game 4 (default vs flipped): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 8 (default vs flipped): 1-0 {White mates}
+Finished game 7 (flipped vs default): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 1 (flipped vs default): 1-0 {White mates}
+Finished game 5 (flipped vs default): 1-0 {White mates}
+Finished game 3 (flipped vs default): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 10 (default vs flipped): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 9 (flipped vs default): 1-0 {White mates}
+--------------------------------------------------
+Results of flipped vs default (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 70.44 +/- 177.57, nElo: 96.36 +/- 215.34
+LOS: 80.98 %, DrawRatio: 40.00 %, PairsRatio: 2.00
+Games: 10, Wins: 4, Losses: 2, Draws: 4, Points: 6.0 (60.00 %)
+Ptnml(0-2): [0, 1, 2, 1, 1], WL/DD Ratio: 1.00
+--------------------------------------------------
+Finished match
+Total Time: 00:00:45 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  flipped      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  default      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================

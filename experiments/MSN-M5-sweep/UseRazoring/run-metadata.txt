@@ -1,0 +1,26 @@
+Commit:      41f5677e741992a495dcfa1caae5cb816d71c6f7
+Binary A:    flipped -> C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+SHA-256 A:   4BC94E99A512E5DEEFE0AA057B7C839AE2D3E4A5557C03AA0256F64A813F5516
+Binary B:    default -> C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+SHA-256 B:   4BC94E99A512E5DEEFE0AA057B7C839AE2D3E4A5557C03AA0256F64A813F5516
+TC:          tc=8+0.08
+Seed:        20260807
+Book:        C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd  -format epd -order random -repeat -games 2
+Affinity:    enabled   Concurrency: 8   Threads: A=1 B=1   Hash: 64
+SPRT:        (none -- fixed-length match)
+Rounds:      5 (x2 games, paired openings)
+Guardrail:   both engines run Threads=1; AGENTS.md 4.451 makes -use-affinity mandatory
+Pre-run CPU: 27% (max of 5 samples, AGENTS.md 4.8)
+Purpose:     M5-F2 functional smoke: UseRazoring flipped to false vs shipped defaults (n=10, functional check only, NOT a strength measurement)
+Date:        2026-08-06T19:40:49Z
+Driver:      harness/run_match.ps1
+Command:
+C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe -engine cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe name=flipped option.Hash=64 option.Threads=1 option.UseRazoring=false -engine cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe name=default option.Hash=64 option.Threads=1 -each proto=uci tc=8+0.08 -openings file=C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd format=epd order=random -repeat -games 2 -rounds 5 -concurrency 8 -srand 20260807 -report penta=true -ratinginterval 50 -pgnout file=C:\Users\Samaritan\Projects\Manifold\experiments\MSN-M5-sweep\UseRazoring\games.pgn append=false -log file=C:\Users\Samaritan\Projects\Manifold\experiments\MSN-M5-sweep\UseRazoring\fastchess.log level=warn append=false -use-affinity
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  flipped      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  default      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================

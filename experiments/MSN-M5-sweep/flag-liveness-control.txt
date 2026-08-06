@@ -1,0 +1,4 @@
+defaults           midgame   nodes=      45,279 ( 1.00x)  bestmove a2a3    0.08s
+no-nmp             midgame   nodes=      78,660 ( 1.74x)  bestmove a2a3    0.14s
+no-lmr             midgame   nodes=     276,677 ( 6.11x)  bestmove a2a3    0.55s
+qs-checks-on       midgame   nodes=      48,781 ( 1.08x)  bestmove a2a3    0.09s
