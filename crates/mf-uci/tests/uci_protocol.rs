@@ -1,6 +1,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Output, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,14 +24,58 @@ fn watchdog(timeout: Duration) -> Duration {
     }
 }
 
+/// Serialises the one test that asserts a time BUDGET against every other engine in this file.
+///
+/// `perft.rs` uses a plain mutex for the same purpose, but a mutex held by one test would
+/// exclude nothing here: the contention is the other forty-one tests in this binary, which
+/// cargo runs in parallel and which spawn engines of their own. So the exclusion runs the other
+/// way — an ordinary engine takes a READ guard and shares the machine freely, while
+/// `movetime_and_clock_go_forms_honor_bounded_budgets` takes the WRITE guard and gets the
+/// machine to itself for the length of its session.
+///
+/// This is deliberately not a looser bound. The failing arm was the engine genuinely spending
+/// 338 ms on a budget it usually meets in ~137 ms, so the search really did overshoot under
+/// load, and reading the engine's own reported `time` field instead of a wall clock does not
+/// help — that was implemented and measured first, and still failed 2 of 15 full runs with an
+/// identical signature (405 ms vs 338 ms). The only honest options were to weaken what the test
+/// asserts or to give it the machine; this takes the second.
+static ENGINE_LOAD: RwLock<()> = RwLock::new(());
+
+/// Whether an engine shares the machine with its sibling tests or has it to itself.
+enum MachineShare {
+    #[expect(dead_code, reason = "held for its lifetime, never read")]
+    Shared(RwLockReadGuard<'static, ()>),
+    #[expect(dead_code, reason = "held for its lifetime, never read")]
+    Exclusive(RwLockWriteGuard<'static, ()>),
+}
+
 struct InteractiveUci {
     child: Child,
     stdin: ChildStdin,
     lines: Receiver<String>,
+    /// Dropped with the session, so the guard spans every search the session runs.
+    _machine: MachineShare,
 }
 
 impl InteractiveUci {
     fn spawn() -> Self {
+        Self::spawn_with(MachineShare::Shared(
+            ENGINE_LOAD
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        ))
+    }
+
+    /// Spawns an engine that has the machine to itself for as long as the session lives.
+    fn spawn_exclusive() -> Self {
+        Self::spawn_with(MachineShare::Exclusive(
+            ENGINE_LOAD
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        ))
+    }
+
+    fn spawn_with(machine: MachineShare) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_manifold"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -54,6 +99,7 @@ impl InteractiveUci {
             child,
             stdin,
             lines,
+            _machine: machine,
         }
     }
 
@@ -62,7 +108,11 @@ impl InteractiveUci {
         self.stdin.flush().expect("command should be flushed");
     }
 
-    fn receive_until(&self, timeout: Duration, predicate: impl Fn(&str) -> bool) -> Option<String> {
+    fn receive_until(
+        &self,
+        timeout: Duration,
+        mut predicate: impl FnMut(&str) -> bool,
+    ) -> Option<String> {
         let deadline = Instant::now() + timeout;
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -102,6 +152,10 @@ impl Drop for InteractiveUci {
 }
 
 fn run_uci(commands: &[&str]) -> Output {
+    // Shares the machine with the other tests but yields it to the exclusive timing test.
+    let _machine = ENGINE_LOAD
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut child = Command::new(env!("CARGO_BIN_EXE_manifold"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1223,7 +1277,12 @@ fn movetime_and_clock_go_forms_honor_bounded_budgets() {
     // alone and ~640 ms when 47 sibling tests are competing for the machine. Timing the
     // search itself keeps the assertion about time management instead of about process
     // startup under load.
-    let mut engine = InteractiveUci::spawn();
+    //
+    // It is also the ONE session in this file that takes the machine exclusively. Timing the
+    // search rather than the process removed the startup cost but not the load itself: the
+    // engine really does overshoot a 137 ms budget to 338 ms when forty siblings are searching
+    // at the same time. See `ENGINE_LOAD`.
+    let mut engine = InteractiveUci::spawn_exclusive();
     // `isready` is answered only after the network is loaded, so waiting for `readyok`
     // moves that one-off cost outside the timed region.
     engine.send("isready");
@@ -1233,17 +1292,7 @@ fn movetime_and_clock_go_forms_honor_bounded_budgets() {
             .is_some(),
         "engine should become ready"
     );
-    engine.send("position startpos");
-    let started = Instant::now();
-    engine.send("go movetime 80");
-    let movetime_bestmove = engine.receive_until(Duration::from_secs(30), |line| {
-        line.starts_with("bestmove ")
-    });
-    let movetime_elapsed = started.elapsed();
-    assert!(
-        movetime_bestmove.is_some(),
-        "go movetime 80 produced no move"
-    );
+    let movetime_elapsed = time_search(&mut engine, "go movetime 80");
     assert!(movetime_elapsed >= Duration::from_millis(40));
     assert!(
         movetime_elapsed <= Duration::from_millis(500),
@@ -1254,8 +1303,14 @@ fn movetime_and_clock_go_forms_honor_bounded_budgets() {
     // between two `movestogo` values, and spawn-to-exit noise under a parallel run is
     // several times that, so process timing can report the slower budget as the faster
     // one. Both searches are timed inside one already-warm session instead.
-    let fast_elapsed = time_clock_search(&mut engine, "movestogo 40");
-    let slow_elapsed = time_clock_search(&mut engine, "movestogo 2");
+    let fast_elapsed = time_search(
+        &mut engine,
+        "go wtime 1000 btime 1000 winc 80 binc 80 movestogo 40",
+    );
+    let slow_elapsed = time_search(
+        &mut engine,
+        "go wtime 1000 btime 1000 winc 80 binc 80 movestogo 2",
+    );
 
     engine.send("quit");
     assert!(engine.wait_for_exit(Duration::from_secs(30)));
@@ -1266,19 +1321,29 @@ fn movetime_and_clock_go_forms_honor_bounded_budgets() {
     );
 }
 
-/// Times one clock-limited search on an already-ready engine.
-fn time_clock_search(engine: &mut InteractiveUci, movestogo: &str) -> Duration {
+/// Runs one time-limited search and reports how long the ENGINE says it took.
+///
+/// The duration comes from the `time` field of the last info line rather than a wall clock
+/// around the exchange, so the search is not charged for writing `go` into a pipe, the reply
+/// travelling back, and a reader thread being scheduled to hand it over. Under load those cost
+/// 32-40 ms per arm, which is a third of the margin this test asserts.
+///
+/// It is NOT what fixed the flake — the exclusive machine guard is. This was tried alone first
+/// and still failed 2 of 15 full runs (405 ms vs 338 ms), which is how the overshoot was
+/// established as real rather than as measurement error. It is kept because reading the
+/// engine's own clock is the right instrument for an assertion about the engine's own clock.
+fn time_search(engine: &mut InteractiveUci, go: &str) -> Duration {
     engine.send("position startpos");
-    let started = Instant::now();
-    engine.send(&format!(
-        "go wtime 1000 btime 1000 winc 80 binc 80 {movestogo}"
-    ));
+    engine.send(go);
+    let mut reported = None;
     let bestmove = engine.receive_until(Duration::from_secs(30), |line| {
+        if let Some(time) = optional_field(line, "time") {
+            reported = Some(time);
+        }
         line.starts_with("bestmove ")
     });
-    let elapsed = started.elapsed();
-    assert!(bestmove.is_some(), "{movestogo} produced no move");
-    elapsed
+    assert!(bestmove.is_some(), "{go} produced no move");
+    Duration::from_millis(reported.unwrap_or_else(|| panic!("{go} reported no search time")))
 }
 
 #[test]
