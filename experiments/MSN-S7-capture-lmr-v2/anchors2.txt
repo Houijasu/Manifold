@@ -1,0 +1,6 @@
+postlmr conthist (2): 41588, 43134
+postlmr depth off (2): 41588, 42409
+postlmr without lmr (3): 80425, 80425, 80425
+threads4 bench (4): 41588, 41588, 41588, 41588
+time effort (3): 41588, 41588, 41588
+M3 signature (captureLMR off + postLMRdepth off): 45036

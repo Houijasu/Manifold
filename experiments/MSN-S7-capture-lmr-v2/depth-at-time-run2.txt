@@ -1,0 +1,6 @@
+
+=== movetime 1000ms, 24 positions, Hash=64 ===
+capture-lmr-v2 mean depth 16.92  median  17.0  min 14  max 20
+m3-search    mean depth 16.83  median  16.5  min 14  max 20
+
+capture-lmr-v2 minus m3-search: +0.08 plies mean; capture-lmr-v2 deeper in 8/24, equal 8

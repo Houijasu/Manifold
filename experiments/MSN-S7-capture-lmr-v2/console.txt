@@ -1,0 +1,634 @@
+Indexing opening suite...
+Started game 2 of 300 (m3-search vs capture-lmr-v2)
+Started game 1 of 300 (capture-lmr-v2 vs m3-search)
+Started game 5 of 300 (capture-lmr-v2 vs m3-search)
+Started game 3 of 300 (capture-lmr-v2 vs m3-search)
+Started game 6 of 300 (m3-search vs capture-lmr-v2)
+Started game 7 of 300 (capture-lmr-v2 vs m3-search)
+Started game 4 of 300 (m3-search vs capture-lmr-v2)
+Started game 8 of 300 (m3-search vs capture-lmr-v2)
+Finished game 5 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 9 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 7 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 10 of 300 (m3-search vs capture-lmr-v2)
+Finished game 3 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 11 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 8 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 12 of 300 (m3-search vs capture-lmr-v2)
+Finished game 2 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 13 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 4 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 14 of 300 (m3-search vs capture-lmr-v2)
+Finished game 1 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by fifty moves rule}
+Started game 15 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 6 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 16 of 300 (m3-search vs capture-lmr-v2)
+Finished game 9 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 17 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 10 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 18 of 300 (m3-search vs capture-lmr-v2)
+Finished game 12 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 19 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 11 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 20 of 300 (m3-search vs capture-lmr-v2)
+Finished game 14 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 21 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 13 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 22 of 300 (m3-search vs capture-lmr-v2)
+Finished game 15 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 23 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 16 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 24 of 300 (m3-search vs capture-lmr-v2)
+Finished game 17 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 25 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 19 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 26 of 300 (m3-search vs capture-lmr-v2)
+Finished game 22 (m3-search vs capture-lmr-v2): 0-1 {Black mates}
+Started game 27 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 21 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 28 of 300 (m3-search vs capture-lmr-v2)
+Finished game 18 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 29 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 20 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 30 of 300 (m3-search vs capture-lmr-v2)
+Finished game 23 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 31 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 24 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 32 of 300 (m3-search vs capture-lmr-v2)
+Finished game 25 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 33 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 26 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 34 of 300 (m3-search vs capture-lmr-v2)
+Finished game 27 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 35 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 28 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 36 of 300 (m3-search vs capture-lmr-v2)
+Finished game 29 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 37 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 30 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 38 of 300 (m3-search vs capture-lmr-v2)
+Finished game 32 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 39 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 33 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 40 of 300 (m3-search vs capture-lmr-v2)
+Finished game 34 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 41 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 31 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 42 of 300 (m3-search vs capture-lmr-v2)
+Finished game 35 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 43 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 38 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 44 of 300 (m3-search vs capture-lmr-v2)
+Finished game 37 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 45 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 36 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 46 of 300 (m3-search vs capture-lmr-v2)
+Finished game 39 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 47 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 40 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 48 of 300 (m3-search vs capture-lmr-v2)
+Finished game 44 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 49 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 41 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 50 of 300 (m3-search vs capture-lmr-v2)
+Finished game 42 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 51 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 47 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 52 of 300 (m3-search vs capture-lmr-v2)
+Finished game 43 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 53 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 45 (capture-lmr-v2 vs m3-search): 0-1 {Black mates}
+Started game 54 of 300 (m3-search vs capture-lmr-v2)
+Finished game 48 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 55 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 46 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 56 of 300 (m3-search vs capture-lmr-v2)
+Finished game 49 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 57 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 50 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 58 of 300 (m3-search vs capture-lmr-v2)
+Finished game 52 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 59 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 54 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 60 of 300 (m3-search vs capture-lmr-v2)
+Finished game 53 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 61 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 51 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 62 of 300 (m3-search vs capture-lmr-v2)
+Finished game 55 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 63 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 57 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 64 of 300 (m3-search vs capture-lmr-v2)
+Finished game 56 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 65 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 58 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 66 of 300 (m3-search vs capture-lmr-v2)
+Finished game 59 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 67 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 60 (m3-search vs capture-lmr-v2): 0-1 {Black mates}
+Started game 68 of 300 (m3-search vs capture-lmr-v2)
+Finished game 62 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 69 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 61 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 70 of 300 (m3-search vs capture-lmr-v2)
+Finished game 63 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 71 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 66 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 72 of 300 (m3-search vs capture-lmr-v2)
+Finished game 65 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 73 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 64 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 74 of 300 (m3-search vs capture-lmr-v2)
+Finished game 71 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 75 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 70 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 76 of 300 (m3-search vs capture-lmr-v2)
+Finished game 68 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 77 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 67 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 78 of 300 (m3-search vs capture-lmr-v2)
+Finished game 69 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 79 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 72 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 80 of 300 (m3-search vs capture-lmr-v2)
+Finished game 73 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 81 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 78 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 82 of 300 (m3-search vs capture-lmr-v2)
+Finished game 74 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 83 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 76 (m3-search vs capture-lmr-v2): 0-1 {Black mates}
+Started game 84 of 300 (m3-search vs capture-lmr-v2)
+Finished game 77 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 85 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 75 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 86 of 300 (m3-search vs capture-lmr-v2)
+Finished game 80 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 87 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 81 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 88 of 300 (m3-search vs capture-lmr-v2)
+Finished game 83 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 89 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 82 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 90 of 300 (m3-search vs capture-lmr-v2)
+Finished game 79 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 91 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 84 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 92 of 300 (m3-search vs capture-lmr-v2)
+Finished game 85 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 93 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 86 (m3-search vs capture-lmr-v2): 0-1 {Black mates}
+Started game 94 of 300 (m3-search vs capture-lmr-v2)
+Finished game 90 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 95 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 87 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 96 of 300 (m3-search vs capture-lmr-v2)
+Finished game 88 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 97 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 89 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 98 of 300 (m3-search vs capture-lmr-v2)
+Finished game 93 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 99 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 91 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 100 of 300 (m3-search vs capture-lmr-v2)
+Finished game 95 (capture-lmr-v2 vs m3-search): 0-1 {Black mates}
+Started game 101 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 94 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 102 of 300 (m3-search vs capture-lmr-v2)
+Finished game 96 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 103 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 92 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 104 of 300 (m3-search vs capture-lmr-v2)
+Finished game 97 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 105 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 99 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 106 of 300 (m3-search vs capture-lmr-v2)
+Finished game 98 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 107 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 101 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 108 of 300 (m3-search vs capture-lmr-v2)
+Finished game 100 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+--------------------------------------------------
+Results of capture-lmr-v2 vs m3-search (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 17.39 +/- 44.75, nElo: 26.65 +/- 68.10
+LOS: 77.84 %, DrawRatio: 44.00 %, PairsRatio: 1.33
+Games: 100, Wins: 31, Losses: 26, Draws: 43, Points: 52.5 (52.50 %)
+Ptnml(0-2): [2, 10, 22, 13, 3], WL/DD Ratio: 1.20
+--------------------------------------------------
+Started game 109 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 103 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 110 of 300 (m3-search vs capture-lmr-v2)
+Finished game 102 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 111 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 104 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 112 of 300 (m3-search vs capture-lmr-v2)
+Finished game 105 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 113 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 107 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 114 of 300 (m3-search vs capture-lmr-v2)
+Finished game 106 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 115 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 108 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 116 of 300 (m3-search vs capture-lmr-v2)
+Finished game 109 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 117 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 114 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 118 of 300 (m3-search vs capture-lmr-v2)
+Finished game 110 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 119 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 117 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 120 of 300 (m3-search vs capture-lmr-v2)
+Finished game 111 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by fifty moves rule}
+Started game 121 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 116 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 122 of 300 (m3-search vs capture-lmr-v2)
+Finished game 115 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 123 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 112 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 124 of 300 (m3-search vs capture-lmr-v2)
+Finished game 113 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by fifty moves rule}
+Started game 125 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 118 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 126 of 300 (m3-search vs capture-lmr-v2)
+Finished game 119 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 127 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 121 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 128 of 300 (m3-search vs capture-lmr-v2)
+Finished game 120 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 129 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 124 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 130 of 300 (m3-search vs capture-lmr-v2)
+Finished game 126 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 131 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 123 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 132 of 300 (m3-search vs capture-lmr-v2)
+Finished game 122 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 133 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 125 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 134 of 300 (m3-search vs capture-lmr-v2)
+Finished game 127 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 135 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 129 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 136 of 300 (m3-search vs capture-lmr-v2)
+Finished game 128 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 137 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 130 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 138 of 300 (m3-search vs capture-lmr-v2)
+Finished game 132 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 139 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 131 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 140 of 300 (m3-search vs capture-lmr-v2)
+Finished game 133 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 141 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 136 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 142 of 300 (m3-search vs capture-lmr-v2)
+Finished game 134 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 143 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 135 (capture-lmr-v2 vs m3-search): 0-1 {Black mates}
+Started game 144 of 300 (m3-search vs capture-lmr-v2)
+Finished game 138 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 145 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 139 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 146 of 300 (m3-search vs capture-lmr-v2)
+Finished game 137 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 147 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 142 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 148 of 300 (m3-search vs capture-lmr-v2)
+Finished game 146 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 149 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 143 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 150 of 300 (m3-search vs capture-lmr-v2)
+Finished game 141 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 151 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 145 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 152 of 300 (m3-search vs capture-lmr-v2)
+Finished game 140 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 153 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 144 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 154 of 300 (m3-search vs capture-lmr-v2)
+Finished game 147 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 155 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 149 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 156 of 300 (m3-search vs capture-lmr-v2)
+Finished game 148 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 157 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 152 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 158 of 300 (m3-search vs capture-lmr-v2)
+Finished game 150 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 159 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 151 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 160 of 300 (m3-search vs capture-lmr-v2)
+Finished game 154 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 161 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 155 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 162 of 300 (m3-search vs capture-lmr-v2)
+Finished game 153 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 163 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 156 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 164 of 300 (m3-search vs capture-lmr-v2)
+Finished game 159 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 165 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 158 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 166 of 300 (m3-search vs capture-lmr-v2)
+Finished game 160 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 167 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 161 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 168 of 300 (m3-search vs capture-lmr-v2)
+Finished game 163 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 169 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 157 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 170 of 300 (m3-search vs capture-lmr-v2)
+Finished game 162 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 171 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 164 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 172 of 300 (m3-search vs capture-lmr-v2)
+Finished game 165 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 173 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 169 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 174 of 300 (m3-search vs capture-lmr-v2)
+Finished game 171 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 175 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 168 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 176 of 300 (m3-search vs capture-lmr-v2)
+Finished game 172 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 177 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 170 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 178 of 300 (m3-search vs capture-lmr-v2)
+Finished game 166 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 179 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 167 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by fifty moves rule}
+Started game 180 of 300 (m3-search vs capture-lmr-v2)
+Finished game 174 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 181 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 173 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 182 of 300 (m3-search vs capture-lmr-v2)
+Finished game 177 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 183 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 176 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 184 of 300 (m3-search vs capture-lmr-v2)
+Finished game 180 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 185 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 175 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 186 of 300 (m3-search vs capture-lmr-v2)
+Finished game 181 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 187 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 178 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 188 of 300 (m3-search vs capture-lmr-v2)
+Finished game 179 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 189 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 183 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 190 of 300 (m3-search vs capture-lmr-v2)
+Finished game 182 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 191 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 185 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 192 of 300 (m3-search vs capture-lmr-v2)
+Finished game 184 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 193 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 188 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 194 of 300 (m3-search vs capture-lmr-v2)
+Finished game 186 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 195 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 187 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 196 of 300 (m3-search vs capture-lmr-v2)
+Finished game 189 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 197 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 190 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 198 of 300 (m3-search vs capture-lmr-v2)
+Finished game 191 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 199 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 192 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 200 of 300 (m3-search vs capture-lmr-v2)
+Finished game 193 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 201 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 196 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 202 of 300 (m3-search vs capture-lmr-v2)
+Finished game 195 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 203 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 194 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 204 of 300 (m3-search vs capture-lmr-v2)
+Finished game 197 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 205 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 198 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 206 of 300 (m3-search vs capture-lmr-v2)
+Finished game 199 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 207 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 201 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 208 of 300 (m3-search vs capture-lmr-v2)
+Finished game 202 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 209 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 200 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+--------------------------------------------------
+Results of capture-lmr-v2 vs m3-search (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 10.32 +/- 27.81, nElo: 17.83 +/- 47.91
+LOS: 76.72 %, DrawRatio: 47.52 %, PairsRatio: 1.21
+Games: 202, Wins: 58, Losses: 52, Draws: 92, Points: 104.0 (51.49 %)
+Ptnml(0-2): [2, 22, 48, 26, 3], WL/DD Ratio: 1.18
+--------------------------------------------------
+Started game 210 of 300 (m3-search vs capture-lmr-v2)
+Finished game 204 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 211 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 203 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 212 of 300 (m3-search vs capture-lmr-v2)
+Finished game 205 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 213 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 206 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 214 of 300 (m3-search vs capture-lmr-v2)
+Finished game 207 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 215 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 210 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 216 of 300 (m3-search vs capture-lmr-v2)
+Finished game 208 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 217 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 211 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 218 of 300 (m3-search vs capture-lmr-v2)
+Finished game 209 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 219 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 212 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 220 of 300 (m3-search vs capture-lmr-v2)
+Finished game 213 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 221 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 215 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 222 of 300 (m3-search vs capture-lmr-v2)
+Finished game 214 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 223 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 216 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 224 of 300 (m3-search vs capture-lmr-v2)
+Finished game 217 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 225 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 219 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by stalemate}
+Started game 226 of 300 (m3-search vs capture-lmr-v2)
+Finished game 224 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 227 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 220 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 228 of 300 (m3-search vs capture-lmr-v2)
+Finished game 218 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 229 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 223 (capture-lmr-v2 vs m3-search): 0-1 {Black mates}
+Started game 230 of 300 (m3-search vs capture-lmr-v2)
+Finished game 221 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 231 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 228 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 232 of 300 (m3-search vs capture-lmr-v2)
+Finished game 225 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 233 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 222 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 234 of 300 (m3-search vs capture-lmr-v2)
+Finished game 226 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 235 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 227 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 236 of 300 (m3-search vs capture-lmr-v2)
+Finished game 229 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 237 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 231 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 238 of 300 (m3-search vs capture-lmr-v2)
+Finished game 232 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 239 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 233 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 240 of 300 (m3-search vs capture-lmr-v2)
+Finished game 230 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 241 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 235 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 242 of 300 (m3-search vs capture-lmr-v2)
+Finished game 234 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 243 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 236 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 244 of 300 (m3-search vs capture-lmr-v2)
+Finished game 237 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 245 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 239 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 246 of 300 (m3-search vs capture-lmr-v2)
+Finished game 238 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 247 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 240 (m3-search vs capture-lmr-v2): 0-1 {Black mates}
+Started game 248 of 300 (m3-search vs capture-lmr-v2)
+Finished game 243 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by stalemate}
+Started game 249 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 242 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 250 of 300 (m3-search vs capture-lmr-v2)
+Finished game 241 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by fifty moves rule}
+Started game 251 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 244 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 252 of 300 (m3-search vs capture-lmr-v2)
+Finished game 245 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 253 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 246 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 254 of 300 (m3-search vs capture-lmr-v2)
+Finished game 248 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 255 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 247 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 256 of 300 (m3-search vs capture-lmr-v2)
+Finished game 249 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 257 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 251 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 258 of 300 (m3-search vs capture-lmr-v2)
+Finished game 253 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 259 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 252 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 260 of 300 (m3-search vs capture-lmr-v2)
+Finished game 250 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 261 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 255 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 262 of 300 (m3-search vs capture-lmr-v2)
+Finished game 254 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 263 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 257 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 264 of 300 (m3-search vs capture-lmr-v2)
+Finished game 256 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 265 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 259 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 266 of 300 (m3-search vs capture-lmr-v2)
+Finished game 258 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 267 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 260 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 268 of 300 (m3-search vs capture-lmr-v2)
+Finished game 261 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 269 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 262 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 270 of 300 (m3-search vs capture-lmr-v2)
+Finished game 263 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 271 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 265 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Started game 272 of 300 (m3-search vs capture-lmr-v2)
+Finished game 264 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 273 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 266 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 274 of 300 (m3-search vs capture-lmr-v2)
+Finished game 267 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 275 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 272 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 276 of 300 (m3-search vs capture-lmr-v2)
+Finished game 270 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 277 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 269 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 278 of 300 (m3-search vs capture-lmr-v2)
+Finished game 271 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 279 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 274 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 280 of 300 (m3-search vs capture-lmr-v2)
+Finished game 268 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 281 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 273 (capture-lmr-v2 vs m3-search): 0-1 {Black mates}
+Started game 282 of 300 (m3-search vs capture-lmr-v2)
+Finished game 275 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 283 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 278 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 284 of 300 (m3-search vs capture-lmr-v2)
+Finished game 276 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 285 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 277 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 286 of 300 (m3-search vs capture-lmr-v2)
+Finished game 279 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 287 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 282 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 288 of 300 (m3-search vs capture-lmr-v2)
+Finished game 281 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 289 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 280 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Started game 290 of 300 (m3-search vs capture-lmr-v2)
+Finished game 283 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 291 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 284 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 292 of 300 (m3-search vs capture-lmr-v2)
+Finished game 287 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 293 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 286 (m3-search vs capture-lmr-v2): 0-1 {Black mates}
+Started game 294 of 300 (m3-search vs capture-lmr-v2)
+Finished game 285 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 295 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 289 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Started game 296 of 300 (m3-search vs capture-lmr-v2)
+Finished game 291 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 297 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 288 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by fifty moves rule}
+Started game 298 of 300 (m3-search vs capture-lmr-v2)
+Finished game 294 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 299 of 300 (capture-lmr-v2 vs m3-search)
+Finished game 290 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Started game 300 of 300 (m3-search vs capture-lmr-v2)
+Finished game 293 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Finished game 292 (m3-search vs capture-lmr-v2): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 295 (capture-lmr-v2 vs m3-search): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 296 (m3-search vs capture-lmr-v2): 0-1 {Black mates}
+Finished game 297 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Finished game 298 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+Finished game 299 (capture-lmr-v2 vs m3-search): 1-0 {White mates}
+Finished game 300 (m3-search vs capture-lmr-v2): 1-0 {White mates}
+--------------------------------------------------
+Results of capture-lmr-v2 vs m3-search (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 11.59 +/- 22.22, nElo: 20.54 +/- 39.32
+LOS: 84.71 %, DrawRatio: 48.00 %, PairsRatio: 1.29
+Games: 300, Wins: 87, Losses: 77, Draws: 136, Points: 155.0 (51.67 %)
+Ptnml(0-2): [3, 31, 72, 41, 3], WL/DD Ratio: 1.25
+--------------------------------------------------
+Finished match
+Total Time: 00:17:00 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  capture-lmr-v2 time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  m3-search    time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================

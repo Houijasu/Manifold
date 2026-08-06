@@ -1,0 +1,11 @@
+all-on (BENCH_NODE_COUNT): 41588
+ablation (14): 3473717, 1146669, 518857, 1352320, 384733, 966716, 628953, 1730756, 3183422, 896268, 579280, 953716, 2168721, 2848247
+history toggles (4): 38858, 37593, 41436, 37032
+contHist off: 37032
+corrHist off: 38858
+correction variants (3): 41588, 45188, 40161
+history pruning (2): 41588, 40046
+pawn history (2): 41588, 43806
+LMR coupling (4): 38858, 124323, 58272, 151903
+qsearch checks (2): 41588, 44860
+capture LMR (2): 41588, 44737

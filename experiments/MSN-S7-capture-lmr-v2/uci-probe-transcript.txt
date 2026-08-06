@@ -1,0 +1,20 @@
+--- advertised defaults ---
+option name UseCaptureLMR type check default true
+option name UsePostLMRDepth type check default true
+
+--- go movetime 1000, 5 repeats per arm ---
+startpos  ON  depths [19,19,19,16,16] median 19   bestmove e2e4
+          OFF depths [16,16,16,16,16] median 16   bestmove e2e4
+          sample info ON : info depth 19 currmove e2e4 currmovenumber 1
+          sample info OFF: info depth 16 currmove e2e4 currmovenumber 1
+
+kiwipete  ON  depths [15,13,15,14,14] median 14   bestmove e2a6
+          OFF depths [12,12,13,13,14] median 13   bestmove e2a6
+          sample info ON : info depth 15 currmove e5g6 currmovenumber 44
+          sample info OFF: info depth 12 currmove e2a6 currmovenumber 1
+
+sicilian  ON  depths [15,15,15,15,16] median 15   bestmove c3d5
+          OFF depths [16,16,16,16,16] median 16   bestmove c3d5
+          sample info ON : info depth 15 seldepth 32 multipv 1 score cp 234 nodes 296340 nps 317280 hashfull 38 time 934 pv c3d5 f6d5 g5e7 d5f4 e2d1 c6e7 h2h3 g4h5 g1h1 g8h8 d3d4 h5f3 d1f3 c5d4 g2g3 f4h3 c2c3
+          sample info OFF: info depth 16 seldepth 32 multipv 1 score cp 209 nodes 542593 nps 598888 hashfull 69 time 906 pv c3d5 f6d5 g5e7 d5f4 e2d1 c6e7 h2h3 g4h5 g1h1 c5a7 g2g4 h5g6 h1h2 g8h8 f3h4 f7f6 c2c3 g6e8 d3d4 e8d7 a3a4 e5d4 c3d4 g7g5
+
