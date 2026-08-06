@@ -1,0 +1,26 @@
+Commit:      c43dcdffb87c7b352814d86b0841c5ee7f6c8b49
+Binary A:    final-8t -> C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+SHA-256 A:   2CA838E50AC6A19F8FCE25F0EF28490D9B4E9BB484D69D94AC6369F63425F1D2
+Binary B:    m3-search-8t -> C:\Users\Samaritan\Projects\Manifold\baselines\m3-search\manifold.exe
+SHA-256 B:   D080358B4762D679DDDDBF1BB6413B13462F2249DF216BFE080411210B66FB5D
+TC:          tc=8+0.08
+Seed:        20260806
+Book:        C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd  -format epd -order random -repeat -games 2
+Affinity:    disabled   Concurrency: 1   Threads: A=8 B=8   Hash: 4096
+SPRT:        (none -- fixed-length match)
+Rounds:      10 (x2 games, paired openings)
+Guardrail:   an engine runs Threads>1 (A=8 B=8); AGENTS.md 4.451 forbids -use-affinity here
+Pre-run CPU: 10% (max of 5 samples, AGENTS.md 4.8)
+Purpose:     M4-F1 8T smoke match at the largest guardrail-permitted Hash: zero forfeits + memory behaviour under 8-thread search (A-SMP-001)
+Date:        2026-08-06T12:55:23Z
+Driver:      harness/run_match.ps1
+Command:
+C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe -engine cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe name=final-8t option.Hash=4096 option.Threads=8 -engine cmd=C:\Users\Samaritan\Projects\Manifold\baselines\m3-search\manifold.exe name=m3-search-8t option.Hash=4096 option.Threads=8 -each proto=uci tc=8+0.08 -openings file=C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd format=epd order=random -repeat -games 2 -rounds 10 -concurrency 1 -srand 20260806 -report penta=true -ratinginterval 50 -pgnout file=C:\Users\Samaritan\Projects\Manifold\experiments\MSN-M4-F1-integration\smoke-8t-hash4096\games.pgn append=false -log file=C:\Users\Samaritan\Projects\Manifold\experiments\MSN-M4-F1-integration\smoke-8t-hash4096\fastchess.log level=warn append=false
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: disabled   concurrency: 1   threads: A=8 B=8
+  final-8t     time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  m3-search-8t time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================
