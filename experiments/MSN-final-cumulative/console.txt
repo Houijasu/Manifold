@@ -1,0 +1,634 @@
+Indexing opening suite...
+Started game 1 of 300 (mission-final vs mission-start)
+Started game 2 of 300 (mission-start vs mission-final)
+Started game 3 of 300 (mission-final vs mission-start)
+Started game 4 of 300 (mission-start vs mission-final)
+Started game 5 of 300 (mission-final vs mission-start)
+Started game 6 of 300 (mission-start vs mission-final)
+Started game 7 of 300 (mission-final vs mission-start)
+Started game 8 of 300 (mission-start vs mission-final)
+Finished game 3 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 9 of 300 (mission-final vs mission-start)
+Finished game 1 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 10 of 300 (mission-start vs mission-final)
+Finished game 8 (mission-start vs mission-final): 1-0 {White mates}
+Started game 11 of 300 (mission-final vs mission-start)
+Finished game 2 (mission-start vs mission-final): 1-0 {White mates}
+Started game 12 of 300 (mission-start vs mission-final)
+Finished game 6 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 13 of 300 (mission-final vs mission-start)
+Finished game 7 (mission-final vs mission-start): 1-0 {White mates}
+Started game 14 of 300 (mission-start vs mission-final)
+Finished game 4 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 15 of 300 (mission-final vs mission-start)
+Finished game 5 (mission-final vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 16 of 300 (mission-start vs mission-final)
+Finished game 10 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 17 of 300 (mission-final vs mission-start)
+Finished game 9 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 18 of 300 (mission-start vs mission-final)
+Finished game 11 (mission-final vs mission-start): 1-0 {White mates}
+Started game 19 of 300 (mission-final vs mission-start)
+Finished game 17 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 20 of 300 (mission-start vs mission-final)
+Finished game 13 (mission-final vs mission-start): 1-0 {White mates}
+Started game 21 of 300 (mission-final vs mission-start)
+Finished game 12 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 22 of 300 (mission-start vs mission-final)
+Finished game 15 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 23 of 300 (mission-final vs mission-start)
+Finished game 16 (mission-start vs mission-final): 1-0 {White mates}
+Started game 24 of 300 (mission-start vs mission-final)
+Finished game 14 (mission-start vs mission-final): 1-0 {White mates}
+Started game 25 of 300 (mission-final vs mission-start)
+Finished game 18 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 26 of 300 (mission-start vs mission-final)
+Finished game 24 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 27 of 300 (mission-final vs mission-start)
+Finished game 20 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 28 of 300 (mission-start vs mission-final)
+Finished game 22 (mission-start vs mission-final): 1-0 {White mates}
+Started game 29 of 300 (mission-final vs mission-start)
+Finished game 21 (mission-final vs mission-start): 1-0 {White mates}
+Started game 30 of 300 (mission-start vs mission-final)
+Finished game 19 (mission-final vs mission-start): 1-0 {White mates}
+Started game 31 of 300 (mission-final vs mission-start)
+Finished game 23 (mission-final vs mission-start): 1-0 {White mates}
+Started game 32 of 300 (mission-start vs mission-final)
+Finished game 26 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 33 of 300 (mission-final vs mission-start)
+Finished game 25 (mission-final vs mission-start): 1-0 {White mates}
+Started game 34 of 300 (mission-start vs mission-final)
+Finished game 27 (mission-final vs mission-start): 1-0 {White mates}
+Started game 35 of 300 (mission-final vs mission-start)
+Finished game 28 (mission-start vs mission-final): 1-0 {White mates}
+Started game 36 of 300 (mission-start vs mission-final)
+Finished game 29 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 37 of 300 (mission-final vs mission-start)
+Finished game 30 (mission-start vs mission-final): 1-0 {White mates}
+Started game 38 of 300 (mission-start vs mission-final)
+Finished game 31 (mission-final vs mission-start): 1-0 {White mates}
+Started game 39 of 300 (mission-final vs mission-start)
+Finished game 33 (mission-final vs mission-start): 1-0 {White mates}
+Started game 40 of 300 (mission-start vs mission-final)
+Finished game 35 (mission-final vs mission-start): 1-0 {White mates}
+Started game 41 of 300 (mission-final vs mission-start)
+Finished game 34 (mission-start vs mission-final): 1-0 {White mates}
+Started game 42 of 300 (mission-start vs mission-final)
+Finished game 32 (mission-start vs mission-final): 1-0 {White mates}
+Started game 43 of 300 (mission-final vs mission-start)
+Finished game 36 (mission-start vs mission-final): 1-0 {White mates}
+Started game 44 of 300 (mission-start vs mission-final)
+Finished game 37 (mission-final vs mission-start): 1-0 {White mates}
+Started game 45 of 300 (mission-final vs mission-start)
+Finished game 38 (mission-start vs mission-final): 1-0 {White mates}
+Started game 46 of 300 (mission-start vs mission-final)
+Finished game 39 (mission-final vs mission-start): 1-0 {White mates}
+Started game 47 of 300 (mission-final vs mission-start)
+Finished game 40 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 48 of 300 (mission-start vs mission-final)
+Finished game 42 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 49 of 300 (mission-final vs mission-start)
+Finished game 41 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 50 of 300 (mission-start vs mission-final)
+Finished game 43 (mission-final vs mission-start): 1-0 {White mates}
+Started game 51 of 300 (mission-final vs mission-start)
+Finished game 45 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 52 of 300 (mission-start vs mission-final)
+Finished game 44 (mission-start vs mission-final): 1-0 {White mates}
+Started game 53 of 300 (mission-final vs mission-start)
+Finished game 50 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 54 of 300 (mission-start vs mission-final)
+Finished game 49 (mission-final vs mission-start): 1-0 {White mates}
+Started game 55 of 300 (mission-final vs mission-start)
+Finished game 46 (mission-start vs mission-final): 1-0 {White mates}
+Started game 56 of 300 (mission-start vs mission-final)
+Finished game 47 (mission-final vs mission-start): 1-0 {White mates}
+Started game 57 of 300 (mission-final vs mission-start)
+Finished game 48 (mission-start vs mission-final): 1-0 {White mates}
+Started game 58 of 300 (mission-start vs mission-final)
+Finished game 51 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 59 of 300 (mission-final vs mission-start)
+Finished game 53 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 60 of 300 (mission-start vs mission-final)
+Finished game 52 (mission-start vs mission-final): 1-0 {White mates}
+Started game 61 of 300 (mission-final vs mission-start)
+Finished game 54 (mission-start vs mission-final): 1-0 {White mates}
+Started game 62 of 300 (mission-start vs mission-final)
+Finished game 56 (mission-start vs mission-final): 1-0 {White mates}
+Started game 63 of 300 (mission-final vs mission-start)
+Finished game 57 (mission-final vs mission-start): 1-0 {White mates}
+Started game 64 of 300 (mission-start vs mission-final)
+Finished game 58 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 65 of 300 (mission-final vs mission-start)
+Finished game 55 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 66 of 300 (mission-start vs mission-final)
+Finished game 59 (mission-final vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 67 of 300 (mission-final vs mission-start)
+Finished game 60 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 68 of 300 (mission-start vs mission-final)
+Finished game 62 (mission-start vs mission-final): 1-0 {White mates}
+Started game 69 of 300 (mission-final vs mission-start)
+Finished game 61 (mission-final vs mission-start): 1-0 {White mates}
+Started game 70 of 300 (mission-start vs mission-final)
+Finished game 63 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 71 of 300 (mission-final vs mission-start)
+Finished game 65 (mission-final vs mission-start): 1-0 {White mates}
+Started game 72 of 300 (mission-start vs mission-final)
+Finished game 69 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 73 of 300 (mission-final vs mission-start)
+Finished game 67 (mission-final vs mission-start): 1/2-1/2 {Draw by stalemate}
+Started game 74 of 300 (mission-start vs mission-final)
+Finished game 64 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 75 of 300 (mission-final vs mission-start)
+Finished game 66 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 76 of 300 (mission-start vs mission-final)
+Finished game 70 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 77 of 300 (mission-final vs mission-start)
+Finished game 72 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 78 of 300 (mission-start vs mission-final)
+Finished game 71 (mission-final vs mission-start): 1-0 {White mates}
+Started game 79 of 300 (mission-final vs mission-start)
+Finished game 73 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 80 of 300 (mission-start vs mission-final)
+Finished game 68 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 81 of 300 (mission-final vs mission-start)
+Finished game 77 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 82 of 300 (mission-start vs mission-final)
+Finished game 80 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 83 of 300 (mission-final vs mission-start)
+Finished game 74 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 84 of 300 (mission-start vs mission-final)
+Finished game 78 (mission-start vs mission-final): 1-0 {White mates}
+Started game 85 of 300 (mission-final vs mission-start)
+Finished game 76 (mission-start vs mission-final): 0-1 {Black mates}
+Started game 86 of 300 (mission-start vs mission-final)
+Finished game 81 (mission-final vs mission-start): 1-0 {White mates}
+Started game 87 of 300 (mission-final vs mission-start)
+Finished game 79 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 88 of 300 (mission-start vs mission-final)
+Finished game 75 (mission-final vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 89 of 300 (mission-final vs mission-start)
+Finished game 82 (mission-start vs mission-final): 1-0 {White mates}
+Started game 90 of 300 (mission-start vs mission-final)
+Finished game 88 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 91 of 300 (mission-final vs mission-start)
+Finished game 89 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 92 of 300 (mission-start vs mission-final)
+Finished game 83 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 93 of 300 (mission-final vs mission-start)
+Finished game 85 (mission-final vs mission-start): 1-0 {White mates}
+Started game 94 of 300 (mission-start vs mission-final)
+Finished game 84 (mission-start vs mission-final): 1-0 {White mates}
+Started game 95 of 300 (mission-final vs mission-start)
+Finished game 87 (mission-final vs mission-start): 1-0 {White mates}
+Started game 96 of 300 (mission-start vs mission-final)
+Finished game 86 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 97 of 300 (mission-final vs mission-start)
+Finished game 90 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 98 of 300 (mission-start vs mission-final)
+Finished game 94 (mission-start vs mission-final): 1-0 {White mates}
+Started game 99 of 300 (mission-final vs mission-start)
+Finished game 91 (mission-final vs mission-start): 1-0 {White mates}
+Started game 100 of 300 (mission-start vs mission-final)
+Finished game 93 (mission-final vs mission-start): 1-0 {White mates}
+Started game 101 of 300 (mission-final vs mission-start)
+Finished game 92 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 102 of 300 (mission-start vs mission-final)
+Finished game 95 (mission-final vs mission-start): 1-0 {White mates}
+Started game 103 of 300 (mission-final vs mission-start)
+Finished game 98 (mission-start vs mission-final): 1-0 {White mates}
+Started game 104 of 300 (mission-start vs mission-final)
+Finished game 96 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 105 of 300 (mission-final vs mission-start)
+Finished game 97 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 106 of 300 (mission-start vs mission-final)
+Finished game 100 (mission-start vs mission-final): 1-0 {White mates}
+Started game 107 of 300 (mission-final vs mission-start)
+Finished game 102 (mission-start vs mission-final): 1-0 {White mates}
+Started game 108 of 300 (mission-start vs mission-final)
+Finished game 103 (mission-final vs mission-start): 1-0 {White mates}
+Started game 109 of 300 (mission-final vs mission-start)
+Finished game 101 (mission-final vs mission-start): 0-1 {Black mates}
+Started game 110 of 300 (mission-start vs mission-final)
+Finished game 99 (mission-final vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+--------------------------------------------------
+Results of mission-final vs mission-start (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 3.41 +/- 36.07, nElo: 6.39 +/- 67.43
+LOS: 57.37 %, DrawRatio: 49.02 %, PairsRatio: 1.17
+Games: 102, Wins: 27, Losses: 26, Draws: 49, Points: 51.5 (50.49 %)
+Ptnml(0-2): [1, 11, 25, 14, 0], WL/DD Ratio: 1.08
+--------------------------------------------------
+Started game 111 of 300 (mission-final vs mission-start)
+Finished game 105 (mission-final vs mission-start): 1-0 {White mates}
+Started game 112 of 300 (mission-start vs mission-final)
+Finished game 104 (mission-start vs mission-final): 1-0 {White mates}
+Started game 113 of 300 (mission-final vs mission-start)
+Finished game 106 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 114 of 300 (mission-start vs mission-final)
+Finished game 109 (mission-final vs mission-start): 1-0 {White mates}
+Started game 115 of 300 (mission-final vs mission-start)
+Finished game 107 (mission-final vs mission-start): 1-0 {White mates}
+Started game 116 of 300 (mission-start vs mission-final)
+Finished game 108 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 117 of 300 (mission-final vs mission-start)
+Finished game 110 (mission-start vs mission-final): 1-0 {White mates}
+Started game 118 of 300 (mission-start vs mission-final)
+Finished game 112 (mission-start vs mission-final): 1-0 {White mates}
+Started game 119 of 300 (mission-final vs mission-start)
+Finished game 113 (mission-final vs mission-start): 1-0 {White mates}
+Started game 120 of 300 (mission-start vs mission-final)
+Finished game 114 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 121 of 300 (mission-final vs mission-start)
+Finished game 116 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 122 of 300 (mission-start vs mission-final)
+Finished game 111 (mission-final vs mission-start): 1-0 {White mates}
+Started game 123 of 300 (mission-final vs mission-start)
+Finished game 115 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 124 of 300 (mission-start vs mission-final)
+Finished game 119 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 125 of 300 (mission-final vs mission-start)
+Finished game 117 (mission-final vs mission-start): 1-0 {White mates}
+Started game 126 of 300 (mission-start vs mission-final)
+Finished game 118 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 127 of 300 (mission-final vs mission-start)
+Finished game 121 (mission-final vs mission-start): 1-0 {White mates}
+Started game 128 of 300 (mission-start vs mission-final)
+Finished game 122 (mission-start vs mission-final): 1-0 {White mates}
+Started game 129 of 300 (mission-final vs mission-start)
+Finished game 125 (mission-final vs mission-start): 1-0 {White mates}
+Started game 130 of 300 (mission-start vs mission-final)
+Finished game 127 (mission-final vs mission-start): 1-0 {White mates}
+Started game 131 of 300 (mission-final vs mission-start)
+Finished game 124 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 132 of 300 (mission-start vs mission-final)
+Finished game 126 (mission-start vs mission-final): 1-0 {White mates}
+Started game 133 of 300 (mission-final vs mission-start)
+Finished game 123 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 134 of 300 (mission-start vs mission-final)
+Finished game 128 (mission-start vs mission-final): 1-0 {White mates}
+Started game 135 of 300 (mission-final vs mission-start)
+Finished game 120 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 136 of 300 (mission-start vs mission-final)
+Finished game 130 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 137 of 300 (mission-final vs mission-start)
+Finished game 131 (mission-final vs mission-start): 1-0 {White mates}
+Started game 138 of 300 (mission-start vs mission-final)
+Finished game 132 (mission-start vs mission-final): 1-0 {White mates}
+Started game 139 of 300 (mission-final vs mission-start)
+Finished game 133 (mission-final vs mission-start): 1-0 {White mates}
+Started game 140 of 300 (mission-start vs mission-final)
+Finished game 134 (mission-start vs mission-final): 1-0 {White mates}
+Started game 141 of 300 (mission-final vs mission-start)
+Finished game 135 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 142 of 300 (mission-start vs mission-final)
+Finished game 136 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 143 of 300 (mission-final vs mission-start)
+Finished game 137 (mission-final vs mission-start): 1-0 {White mates}
+Started game 144 of 300 (mission-start vs mission-final)
+Finished game 129 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 145 of 300 (mission-final vs mission-start)
+Finished game 139 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 146 of 300 (mission-start vs mission-final)
+Finished game 138 (mission-start vs mission-final): 1-0 {White mates}
+Started game 147 of 300 (mission-final vs mission-start)
+Finished game 140 (mission-start vs mission-final): 1-0 {White mates}
+Started game 148 of 300 (mission-start vs mission-final)
+Finished game 141 (mission-final vs mission-start): 1-0 {White mates}
+Started game 149 of 300 (mission-final vs mission-start)
+Finished game 142 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 150 of 300 (mission-start vs mission-final)
+Finished game 144 (mission-start vs mission-final): 1-0 {White mates}
+Started game 151 of 300 (mission-final vs mission-start)
+Finished game 143 (mission-final vs mission-start): 1-0 {White mates}
+Started game 152 of 300 (mission-start vs mission-final)
+Finished game 145 (mission-final vs mission-start): 1-0 {White mates}
+Started game 153 of 300 (mission-final vs mission-start)
+Finished game 147 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 154 of 300 (mission-start vs mission-final)
+Finished game 146 (mission-start vs mission-final): 1-0 {White mates}
+Started game 155 of 300 (mission-final vs mission-start)
+Finished game 148 (mission-start vs mission-final): 1-0 {White mates}
+Started game 156 of 300 (mission-start vs mission-final)
+Finished game 149 (mission-final vs mission-start): 1-0 {White mates}
+Started game 157 of 300 (mission-final vs mission-start)
+Finished game 150 (mission-start vs mission-final): 1-0 {White mates}
+Started game 158 of 300 (mission-start vs mission-final)
+Finished game 152 (mission-start vs mission-final): 1-0 {White mates}
+Started game 159 of 300 (mission-final vs mission-start)
+Finished game 151 (mission-final vs mission-start): 1-0 {White mates}
+Started game 160 of 300 (mission-start vs mission-final)
+Finished game 153 (mission-final vs mission-start): 1-0 {White mates}
+Started game 161 of 300 (mission-final vs mission-start)
+Finished game 155 (mission-final vs mission-start): 1-0 {White mates}
+Started game 162 of 300 (mission-start vs mission-final)
+Finished game 157 (mission-final vs mission-start): 1-0 {White mates}
+Started game 163 of 300 (mission-final vs mission-start)
+Finished game 154 (mission-start vs mission-final): 1-0 {White mates}
+Started game 164 of 300 (mission-start vs mission-final)
+Finished game 156 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 165 of 300 (mission-final vs mission-start)
+Finished game 159 (mission-final vs mission-start): 1-0 {White mates}
+Started game 166 of 300 (mission-start vs mission-final)
+Finished game 160 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 167 of 300 (mission-final vs mission-start)
+Finished game 158 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 168 of 300 (mission-start vs mission-final)
+Finished game 161 (mission-final vs mission-start): 1-0 {White mates}
+Started game 169 of 300 (mission-final vs mission-start)
+Finished game 162 (mission-start vs mission-final): 1/2-1/2 {Draw by stalemate}
+Started game 170 of 300 (mission-start vs mission-final)
+Finished game 163 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 171 of 300 (mission-final vs mission-start)
+Finished game 167 (mission-final vs mission-start): 0-1 {Black mates}
+Started game 172 of 300 (mission-start vs mission-final)
+Finished game 166 (mission-start vs mission-final): 1-0 {White mates}
+Started game 173 of 300 (mission-final vs mission-start)
+Finished game 165 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 174 of 300 (mission-start vs mission-final)
+Finished game 164 (mission-start vs mission-final): 1-0 {White mates}
+Started game 175 of 300 (mission-final vs mission-start)
+Finished game 169 (mission-final vs mission-start): 1-0 {White mates}
+Started game 176 of 300 (mission-start vs mission-final)
+Finished game 168 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 177 of 300 (mission-final vs mission-start)
+Finished game 171 (mission-final vs mission-start): 1-0 {White mates}
+Started game 178 of 300 (mission-start vs mission-final)
+Finished game 175 (mission-final vs mission-start): 0-1 {Black mates}
+Started game 179 of 300 (mission-final vs mission-start)
+Finished game 170 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 180 of 300 (mission-start vs mission-final)
+Finished game 174 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 181 of 300 (mission-final vs mission-start)
+Finished game 173 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 182 of 300 (mission-start vs mission-final)
+Finished game 176 (mission-start vs mission-final): 1-0 {White mates}
+Started game 183 of 300 (mission-final vs mission-start)
+Finished game 172 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 184 of 300 (mission-start vs mission-final)
+Finished game 178 (mission-start vs mission-final): 1-0 {White mates}
+Started game 185 of 300 (mission-final vs mission-start)
+Finished game 177 (mission-final vs mission-start): 1-0 {White mates}
+Started game 186 of 300 (mission-start vs mission-final)
+Finished game 179 (mission-final vs mission-start): 1-0 {White mates}
+Started game 187 of 300 (mission-final vs mission-start)
+Finished game 183 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 188 of 300 (mission-start vs mission-final)
+Finished game 182 (mission-start vs mission-final): 1-0 {White mates}
+Started game 189 of 300 (mission-final vs mission-start)
+Finished game 180 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 190 of 300 (mission-start vs mission-final)
+Finished game 181 (mission-final vs mission-start): 1-0 {White mates}
+Started game 191 of 300 (mission-final vs mission-start)
+Finished game 184 (mission-start vs mission-final): 1-0 {White mates}
+Started game 192 of 300 (mission-start vs mission-final)
+Finished game 185 (mission-final vs mission-start): 1-0 {White mates}
+Started game 193 of 300 (mission-final vs mission-start)
+Finished game 189 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 194 of 300 (mission-start vs mission-final)
+Finished game 186 (mission-start vs mission-final): 1-0 {White mates}
+Started game 195 of 300 (mission-final vs mission-start)
+Finished game 188 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 196 of 300 (mission-start vs mission-final)
+Finished game 187 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 197 of 300 (mission-final vs mission-start)
+Finished game 190 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 198 of 300 (mission-start vs mission-final)
+Finished game 192 (mission-start vs mission-final): 1-0 {White mates}
+Started game 199 of 300 (mission-final vs mission-start)
+Finished game 191 (mission-final vs mission-start): 1-0 {White mates}
+Started game 200 of 300 (mission-start vs mission-final)
+Finished game 193 (mission-final vs mission-start): 1-0 {White mates}
+Started game 201 of 300 (mission-final vs mission-start)
+Finished game 194 (mission-start vs mission-final): 1-0 {White mates}
+Started game 202 of 300 (mission-start vs mission-final)
+Finished game 195 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 203 of 300 (mission-final vs mission-start)
+Finished game 197 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 204 of 300 (mission-start vs mission-final)
+Finished game 196 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 205 of 300 (mission-final vs mission-start)
+Finished game 198 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 206 of 300 (mission-start vs mission-final)
+Finished game 202 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 207 of 300 (mission-final vs mission-start)
+Finished game 199 (mission-final vs mission-start): 0-1 {Black mates}
+Started game 208 of 300 (mission-start vs mission-final)
+Finished game 200 (mission-start vs mission-final): 1-0 {White mates}
+--------------------------------------------------
+Results of mission-final vs mission-start (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 5.21 +/- 25.28, nElo: 9.95 +/- 48.15
+LOS: 65.72 %, DrawRatio: 54.00 %, PairsRatio: 1.30
+Games: 200, Wins: 58, Losses: 55, Draws: 87, Points: 101.5 (50.75 %)
+Ptnml(0-2): [3, 17, 54, 26, 0], WL/DD Ratio: 1.45
+--------------------------------------------------
+Started game 209 of 300 (mission-final vs mission-start)
+Finished game 201 (mission-final vs mission-start): 1-0 {White mates}
+Started game 210 of 300 (mission-start vs mission-final)
+Finished game 203 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 211 of 300 (mission-final vs mission-start)
+Finished game 205 (mission-final vs mission-start): 1-0 {White mates}
+Started game 212 of 300 (mission-start vs mission-final)
+Finished game 206 (mission-start vs mission-final): 1-0 {White mates}
+Started game 213 of 300 (mission-final vs mission-start)
+Finished game 204 (mission-start vs mission-final): 1-0 {White mates}
+Started game 214 of 300 (mission-start vs mission-final)
+Finished game 208 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 215 of 300 (mission-final vs mission-start)
+Finished game 207 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 216 of 300 (mission-start vs mission-final)
+Finished game 209 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 217 of 300 (mission-final vs mission-start)
+Finished game 210 (mission-start vs mission-final): 1-0 {White mates}
+Started game 218 of 300 (mission-start vs mission-final)
+Finished game 211 (mission-final vs mission-start): 1-0 {White mates}
+Started game 219 of 300 (mission-final vs mission-start)
+Finished game 213 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 220 of 300 (mission-start vs mission-final)
+Finished game 212 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 221 of 300 (mission-final vs mission-start)
+Finished game 215 (mission-final vs mission-start): 1-0 {White mates}
+Started game 222 of 300 (mission-start vs mission-final)
+Finished game 214 (mission-start vs mission-final): 1-0 {White mates}
+Started game 223 of 300 (mission-final vs mission-start)
+Finished game 216 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 224 of 300 (mission-start vs mission-final)
+Finished game 219 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 225 of 300 (mission-final vs mission-start)
+Finished game 220 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 226 of 300 (mission-start vs mission-final)
+Finished game 217 (mission-final vs mission-start): 1-0 {White mates}
+Started game 227 of 300 (mission-final vs mission-start)
+Finished game 218 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 228 of 300 (mission-start vs mission-final)
+Finished game 221 (mission-final vs mission-start): 1-0 {White mates}
+Started game 229 of 300 (mission-final vs mission-start)
+Finished game 223 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 230 of 300 (mission-start vs mission-final)
+Finished game 224 (mission-start vs mission-final): 1-0 {White mates}
+Started game 231 of 300 (mission-final vs mission-start)
+Finished game 222 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 232 of 300 (mission-start vs mission-final)
+Finished game 228 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 233 of 300 (mission-final vs mission-start)
+Finished game 227 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 234 of 300 (mission-start vs mission-final)
+Finished game 225 (mission-final vs mission-start): 0-1 {Black mates}
+Started game 235 of 300 (mission-final vs mission-start)
+Finished game 230 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 236 of 300 (mission-start vs mission-final)
+Finished game 229 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 237 of 300 (mission-final vs mission-start)
+Finished game 226 (mission-start vs mission-final): 1-0 {White mates}
+Started game 238 of 300 (mission-start vs mission-final)
+Finished game 233 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 239 of 300 (mission-final vs mission-start)
+Finished game 234 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 240 of 300 (mission-start vs mission-final)
+Finished game 231 (mission-final vs mission-start): 1-0 {White mates}
+Started game 241 of 300 (mission-final vs mission-start)
+Finished game 232 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 242 of 300 (mission-start vs mission-final)
+Finished game 235 (mission-final vs mission-start): 1-0 {White mates}
+Started game 243 of 300 (mission-final vs mission-start)
+Finished game 236 (mission-start vs mission-final): 1-0 {White mates}
+Started game 244 of 300 (mission-start vs mission-final)
+Finished game 237 (mission-final vs mission-start): 1-0 {White mates}
+Started game 245 of 300 (mission-final vs mission-start)
+Finished game 240 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 246 of 300 (mission-start vs mission-final)
+Finished game 238 (mission-start vs mission-final): 1-0 {White mates}
+Started game 247 of 300 (mission-final vs mission-start)
+Finished game 239 (mission-final vs mission-start): 1-0 {White mates}
+Started game 248 of 300 (mission-start vs mission-final)
+Finished game 242 (mission-start vs mission-final): 1-0 {White mates}
+Started game 249 of 300 (mission-final vs mission-start)
+Finished game 241 (mission-final vs mission-start): 1/2-1/2 {Draw by fifty moves rule}
+Started game 250 of 300 (mission-start vs mission-final)
+Finished game 243 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 251 of 300 (mission-final vs mission-start)
+Finished game 244 (mission-start vs mission-final): 1-0 {White mates}
+Started game 252 of 300 (mission-start vs mission-final)
+Finished game 247 (mission-final vs mission-start): 1-0 {White mates}
+Started game 253 of 300 (mission-final vs mission-start)
+Finished game 245 (mission-final vs mission-start): 1-0 {White mates}
+Started game 254 of 300 (mission-start vs mission-final)
+Finished game 248 (mission-start vs mission-final): 1-0 {White mates}
+Started game 255 of 300 (mission-final vs mission-start)
+Finished game 246 (mission-start vs mission-final): 1-0 {White mates}
+Started game 256 of 300 (mission-start vs mission-final)
+Finished game 252 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 257 of 300 (mission-final vs mission-start)
+Finished game 249 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 258 of 300 (mission-start vs mission-final)
+Finished game 255 (mission-final vs mission-start): 1-0 {White mates}
+Started game 259 of 300 (mission-final vs mission-start)
+Finished game 250 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 260 of 300 (mission-start vs mission-final)
+Finished game 256 (mission-start vs mission-final): 0-1 {Black mates}
+Started game 261 of 300 (mission-final vs mission-start)
+Finished game 253 (mission-final vs mission-start): 1-0 {White mates}
+Started game 262 of 300 (mission-start vs mission-final)
+Finished game 257 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 263 of 300 (mission-final vs mission-start)
+Finished game 251 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 264 of 300 (mission-start vs mission-final)
+Finished game 254 (mission-start vs mission-final): 1-0 {White mates}
+Started game 265 of 300 (mission-final vs mission-start)
+Finished game 258 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 266 of 300 (mission-start vs mission-final)
+Finished game 259 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 267 of 300 (mission-final vs mission-start)
+Finished game 260 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 268 of 300 (mission-start vs mission-final)
+Finished game 261 (mission-final vs mission-start): 1-0 {White mates}
+Started game 269 of 300 (mission-final vs mission-start)
+Finished game 262 (mission-start vs mission-final): 1-0 {White mates}
+Started game 270 of 300 (mission-start vs mission-final)
+Finished game 264 (mission-start vs mission-final): 1-0 {White mates}
+Started game 271 of 300 (mission-final vs mission-start)
+Finished game 266 (mission-start vs mission-final): 1-0 {White mates}
+Started game 272 of 300 (mission-start vs mission-final)
+Finished game 265 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 273 of 300 (mission-final vs mission-start)
+Finished game 267 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 274 of 300 (mission-start vs mission-final)
+Finished game 269 (mission-final vs mission-start): 1-0 {White mates}
+Started game 275 of 300 (mission-final vs mission-start)
+Finished game 268 (mission-start vs mission-final): 1-0 {White mates}
+Started game 276 of 300 (mission-start vs mission-final)
+Finished game 270 (mission-start vs mission-final): 1-0 {White mates}
+Started game 277 of 300 (mission-final vs mission-start)
+Finished game 271 (mission-final vs mission-start): 1-0 {White mates}
+Started game 278 of 300 (mission-start vs mission-final)
+Finished game 274 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 279 of 300 (mission-final vs mission-start)
+Finished game 275 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 280 of 300 (mission-start vs mission-final)
+Finished game 263 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 281 of 300 (mission-final vs mission-start)
+Finished game 273 (mission-final vs mission-start): 1-0 {White mates}
+Started game 282 of 300 (mission-start vs mission-final)
+Finished game 272 (mission-start vs mission-final): 1/2-1/2 {Draw by fifty moves rule}
+Started game 283 of 300 (mission-final vs mission-start)
+Finished game 276 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 284 of 300 (mission-start vs mission-final)
+Finished game 278 (mission-start vs mission-final): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 285 of 300 (mission-final vs mission-start)
+Finished game 281 (mission-final vs mission-start): 1-0 {White mates}
+Started game 286 of 300 (mission-start vs mission-final)
+Finished game 282 (mission-start vs mission-final): 1-0 {White mates}
+Started game 287 of 300 (mission-final vs mission-start)
+Finished game 279 (mission-final vs mission-start): 1-0 {White mates}
+Started game 288 of 300 (mission-start vs mission-final)
+Finished game 280 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 289 of 300 (mission-final vs mission-start)
+Finished game 277 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 290 of 300 (mission-start vs mission-final)
+Finished game 283 (mission-final vs mission-start): 1-0 {White mates}
+Started game 291 of 300 (mission-final vs mission-start)
+Finished game 284 (mission-start vs mission-final): 1-0 {White mates}
+Started game 292 of 300 (mission-start vs mission-final)
+Finished game 285 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 293 of 300 (mission-final vs mission-start)
+Finished game 286 (mission-start vs mission-final): 1-0 {White mates}
+Started game 294 of 300 (mission-start vs mission-final)
+Finished game 288 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 295 of 300 (mission-final vs mission-start)
+Finished game 287 (mission-final vs mission-start): 1-0 {White mates}
+Started game 296 of 300 (mission-start vs mission-final)
+Finished game 291 (mission-final vs mission-start): 1-0 {White mates}
+Started game 297 of 300 (mission-final vs mission-start)
+Finished game 292 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Started game 298 of 300 (mission-start vs mission-final)
+Finished game 289 (mission-final vs mission-start): 1/2-1/2 {Draw by insufficient mating material}
+Started game 299 of 300 (mission-final vs mission-start)
+Finished game 293 (mission-final vs mission-start): 1-0 {White mates}
+Started game 300 of 300 (mission-start vs mission-final)
+Finished game 290 (mission-start vs mission-final): 1-0 {White mates}
+Finished game 295 (mission-final vs mission-start): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 296 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 297 (mission-final vs mission-start): 1-0 {White mates}
+Finished game 298 (mission-start vs mission-final): 1-0 {White mates}
+Finished game 294 (mission-start vs mission-final): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 299 (mission-final vs mission-start): 1-0 {White mates}
+Finished game 300 (mission-start vs mission-final): 1-0 {White mates}
+--------------------------------------------------
+Results of mission-final vs mission-start (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 5.79 +/- 21.18, nElo: 10.76 +/- 39.32
+LOS: 70.42 %, DrawRatio: 52.00 %, PairsRatio: 1.25
+Games: 300, Wins: 85, Losses: 80, Draws: 135, Points: 152.5 (50.83 %)
+Ptnml(0-2): [4, 28, 78, 39, 1], WL/DD Ratio: 1.29
+--------------------------------------------------
+Finished match
+Total Time: 00:16:51 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  mission-final time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  mission-start time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================

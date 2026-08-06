@@ -1,0 +1,267 @@
+Indexing opening suite...
+Started game 1 of 120 (mission-final vs stockfish)
+Finished game 1 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 2 of 120 (stockfish vs mission-final)
+Finished game 2 (stockfish vs mission-final): 1-0 {White mates}
+Started game 3 of 120 (mission-final vs stockfish)
+Finished game 3 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 4 of 120 (stockfish vs mission-final)
+Finished game 4 (stockfish vs mission-final): 1-0 {White mates}
+Started game 5 of 120 (mission-final vs stockfish)
+Finished game 5 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 6 of 120 (stockfish vs mission-final)
+Finished game 6 (stockfish vs mission-final): 1-0 {White mates}
+Started game 7 of 120 (mission-final vs stockfish)
+Finished game 7 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 8 of 120 (stockfish vs mission-final)
+Finished game 8 (stockfish vs mission-final): 1-0 {White mates}
+Started game 9 of 120 (mission-final vs stockfish)
+Finished game 9 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 10 of 120 (stockfish vs mission-final)
+Finished game 10 (stockfish vs mission-final): 1-0 {White mates}
+Started game 11 of 120 (mission-final vs stockfish)
+Finished game 11 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 12 of 120 (stockfish vs mission-final)
+Finished game 12 (stockfish vs mission-final): 1-0 {White mates}
+Started game 13 of 120 (mission-final vs stockfish)
+Finished game 13 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 14 of 120 (stockfish vs mission-final)
+Finished game 14 (stockfish vs mission-final): 1-0 {White mates}
+Started game 15 of 120 (mission-final vs stockfish)
+Finished game 15 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 16 of 120 (stockfish vs mission-final)
+Finished game 16 (stockfish vs mission-final): 1-0 {White mates}
+Started game 17 of 120 (mission-final vs stockfish)
+Finished game 17 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 18 of 120 (stockfish vs mission-final)
+Finished game 18 (stockfish vs mission-final): 1-0 {White mates}
+Started game 19 of 120 (mission-final vs stockfish)
+Finished game 19 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 20 of 120 (stockfish vs mission-final)
+Finished game 20 (stockfish vs mission-final): 1-0 {White mates}
+Started game 21 of 120 (mission-final vs stockfish)
+Finished game 21 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 22 of 120 (stockfish vs mission-final)
+Finished game 22 (stockfish vs mission-final): 1-0 {White mates}
+Started game 23 of 120 (mission-final vs stockfish)
+Finished game 23 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 24 of 120 (stockfish vs mission-final)
+Finished game 24 (stockfish vs mission-final): 1-0 {White mates}
+Started game 25 of 120 (mission-final vs stockfish)
+Finished game 25 (mission-final vs stockfish): 0-1 {Black mates}
+Started game 26 of 120 (stockfish vs mission-final)
+Finished game 26 (stockfish vs mission-final): 1-0 {White mates}
+Started game 27 of 120 (mission-final vs stockfish)
+Finished game 27 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 28 of 120 (stockfish vs mission-final)
+Finished game 28 (stockfish vs mission-final): 1-0 {White mates}
+Started game 29 of 120 (mission-final vs stockfish)
+Finished game 29 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 30 of 120 (stockfish vs mission-final)
+Finished game 30 (stockfish vs mission-final): 1-0 {White mates}
+Started game 31 of 120 (mission-final vs stockfish)
+Finished game 31 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 32 of 120 (stockfish vs mission-final)
+Finished game 32 (stockfish vs mission-final): 1-0 {White mates}
+Started game 33 of 120 (mission-final vs stockfish)
+Finished game 33 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 34 of 120 (stockfish vs mission-final)
+Finished game 34 (stockfish vs mission-final): 1-0 {White mates}
+Started game 35 of 120 (mission-final vs stockfish)
+Finished game 35 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 36 of 120 (stockfish vs mission-final)
+Finished game 36 (stockfish vs mission-final): 1-0 {White mates}
+Started game 37 of 120 (mission-final vs stockfish)
+Finished game 37 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 38 of 120 (stockfish vs mission-final)
+Finished game 38 (stockfish vs mission-final): 1-0 {White mates}
+Started game 39 of 120 (mission-final vs stockfish)
+Finished game 39 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 40 of 120 (stockfish vs mission-final)
+Finished game 40 (stockfish vs mission-final): 1-0 {White mates}
+Started game 41 of 120 (mission-final vs stockfish)
+Finished game 41 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 42 of 120 (stockfish vs mission-final)
+Finished game 42 (stockfish vs mission-final): 1-0 {White mates}
+Started game 43 of 120 (mission-final vs stockfish)
+Finished game 43 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 44 of 120 (stockfish vs mission-final)
+Finished game 44 (stockfish vs mission-final): 1-0 {White mates}
+Started game 45 of 120 (mission-final vs stockfish)
+Finished game 45 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 46 of 120 (stockfish vs mission-final)
+Finished game 46 (stockfish vs mission-final): 1-0 {White mates}
+Started game 47 of 120 (mission-final vs stockfish)
+Finished game 47 (mission-final vs stockfish): 0-1 {Black mates}
+Started game 48 of 120 (stockfish vs mission-final)
+Finished game 48 (stockfish vs mission-final): 1-0 {White mates}
+Started game 49 of 120 (mission-final vs stockfish)
+Finished game 49 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 50 of 120 (stockfish vs mission-final)
+Finished game 50 (stockfish vs mission-final): 1-0 {White mates}
+Started game 51 of 120 (mission-final vs stockfish)
+Finished game 51 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 52 of 120 (stockfish vs mission-final)
+Finished game 52 (stockfish vs mission-final): 1-0 {White mates}
+Started game 53 of 120 (mission-final vs stockfish)
+Finished game 53 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 54 of 120 (stockfish vs mission-final)
+Finished game 54 (stockfish vs mission-final): 1-0 {White mates}
+Started game 55 of 120 (mission-final vs stockfish)
+Finished game 55 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 56 of 120 (stockfish vs mission-final)
+Finished game 56 (stockfish vs mission-final): 1-0 {White mates}
+Started game 57 of 120 (mission-final vs stockfish)
+Finished game 57 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 58 of 120 (stockfish vs mission-final)
+Finished game 58 (stockfish vs mission-final): 1-0 {White mates}
+Started game 59 of 120 (mission-final vs stockfish)
+Finished game 59 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 60 of 120 (stockfish vs mission-final)
+Finished game 60 (stockfish vs mission-final): 1-0 {White mates}
+Started game 61 of 120 (mission-final vs stockfish)
+Finished game 61 (mission-final vs stockfish): 0-1 {Black mates}
+Started game 62 of 120 (stockfish vs mission-final)
+Finished game 62 (stockfish vs mission-final): 1-0 {White mates}
+Started game 63 of 120 (mission-final vs stockfish)
+Finished game 63 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 64 of 120 (stockfish vs mission-final)
+Finished game 64 (stockfish vs mission-final): 1-0 {White mates}
+Started game 65 of 120 (mission-final vs stockfish)
+Finished game 65 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 66 of 120 (stockfish vs mission-final)
+Finished game 66 (stockfish vs mission-final): 1-0 {White mates}
+Started game 67 of 120 (mission-final vs stockfish)
+Finished game 67 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 68 of 120 (stockfish vs mission-final)
+Finished game 68 (stockfish vs mission-final): 1-0 {White mates}
+Started game 69 of 120 (mission-final vs stockfish)
+Finished game 69 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 70 of 120 (stockfish vs mission-final)
+Finished game 70 (stockfish vs mission-final): 1-0 {White mates}
+Started game 71 of 120 (mission-final vs stockfish)
+Finished game 71 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 72 of 120 (stockfish vs mission-final)
+Finished game 72 (stockfish vs mission-final): 1-0 {White mates}
+Started game 73 of 120 (mission-final vs stockfish)
+Finished game 73 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 74 of 120 (stockfish vs mission-final)
+Finished game 74 (stockfish vs mission-final): 1-0 {White mates}
+Started game 75 of 120 (mission-final vs stockfish)
+Finished game 75 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 76 of 120 (stockfish vs mission-final)
+Finished game 76 (stockfish vs mission-final): 1-0 {White mates}
+Started game 77 of 120 (mission-final vs stockfish)
+Finished game 77 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 78 of 120 (stockfish vs mission-final)
+Finished game 78 (stockfish vs mission-final): 1-0 {White mates}
+Started game 79 of 120 (mission-final vs stockfish)
+Finished game 79 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 80 of 120 (stockfish vs mission-final)
+Finished game 80 (stockfish vs mission-final): 1-0 {White mates}
+Started game 81 of 120 (mission-final vs stockfish)
+Finished game 81 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 82 of 120 (stockfish vs mission-final)
+Finished game 82 (stockfish vs mission-final): 1-0 {White mates}
+Started game 83 of 120 (mission-final vs stockfish)
+Finished game 83 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 84 of 120 (stockfish vs mission-final)
+Finished game 84 (stockfish vs mission-final): 1-0 {White mates}
+Started game 85 of 120 (mission-final vs stockfish)
+Finished game 85 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 86 of 120 (stockfish vs mission-final)
+Finished game 86 (stockfish vs mission-final): 1-0 {White mates}
+Started game 87 of 120 (mission-final vs stockfish)
+Finished game 87 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 88 of 120 (stockfish vs mission-final)
+Finished game 88 (stockfish vs mission-final): 1-0 {White mates}
+Started game 89 of 120 (mission-final vs stockfish)
+Finished game 89 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 90 of 120 (stockfish vs mission-final)
+Finished game 90 (stockfish vs mission-final): 1-0 {White mates}
+Started game 91 of 120 (mission-final vs stockfish)
+Finished game 91 (mission-final vs stockfish): 1-0 {White mates}
+Started game 92 of 120 (stockfish vs mission-final)
+Finished game 92 (stockfish vs mission-final): 1-0 {White mates}
+Started game 93 of 120 (mission-final vs stockfish)
+Finished game 93 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 94 of 120 (stockfish vs mission-final)
+Finished game 94 (stockfish vs mission-final): 1-0 {White mates}
+Started game 95 of 120 (mission-final vs stockfish)
+Finished game 95 (mission-final vs stockfish): 0-1 {Black mates}
+Started game 96 of 120 (stockfish vs mission-final)
+Finished game 96 (stockfish vs mission-final): 1-0 {White mates}
+Started game 97 of 120 (mission-final vs stockfish)
+Finished game 97 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 98 of 120 (stockfish vs mission-final)
+Finished game 98 (stockfish vs mission-final): 1-0 {White mates}
+Started game 99 of 120 (mission-final vs stockfish)
+Finished game 99 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 100 of 120 (stockfish vs mission-final)
+Finished game 100 (stockfish vs mission-final): 1-0 {White mates}
+--------------------------------------------------
+Results of mission-final vs stockfish (8+0.08, 8t, 64MB, UHO_4060_v4.epd):
+Elo: -205.04 +/- 20.84, nElo: -838.74 +/- 68.10
+LOS: 0.00 %, DrawRatio: 2.00 %, PairsRatio: 0.00
+Games: 100, Wins: 1, Losses: 54, Draws: 45, Points: 23.5 (23.50 %)
+Ptnml(0-2): [4, 45, 1, 0, 0], WL/DD Ratio: inf
+--------------------------------------------------
+Started game 101 of 120 (mission-final vs stockfish)
+Finished game 101 (mission-final vs stockfish): 0-1 {Black mates}
+Started game 102 of 120 (stockfish vs mission-final)
+Finished game 102 (stockfish vs mission-final): 1-0 {White mates}
+Started game 103 of 120 (mission-final vs stockfish)
+Finished game 103 (mission-final vs stockfish): 1/2-1/2 {Draw by insufficient mating material}
+Started game 104 of 120 (stockfish vs mission-final)
+Finished game 104 (stockfish vs mission-final): 1-0 {White mates}
+Started game 105 of 120 (mission-final vs stockfish)
+Finished game 105 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 106 of 120 (stockfish vs mission-final)
+Finished game 106 (stockfish vs mission-final): 1-0 {White mates}
+Started game 107 of 120 (mission-final vs stockfish)
+Finished game 107 (mission-final vs stockfish): 1/2-1/2 {Draw by fifty moves rule}
+Started game 108 of 120 (stockfish vs mission-final)
+Finished game 108 (stockfish vs mission-final): 1-0 {White mates}
+Started game 109 of 120 (mission-final vs stockfish)
+Finished game 109 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 110 of 120 (stockfish vs mission-final)
+Finished game 110 (stockfish vs mission-final): 1-0 {White mates}
+Started game 111 of 120 (mission-final vs stockfish)
+Finished game 111 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 112 of 120 (stockfish vs mission-final)
+Finished game 112 (stockfish vs mission-final): 1-0 {White mates}
+Started game 113 of 120 (mission-final vs stockfish)
+Finished game 113 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 114 of 120 (stockfish vs mission-final)
+Finished game 114 (stockfish vs mission-final): 1-0 {White mates}
+Started game 115 of 120 (mission-final vs stockfish)
+Finished game 115 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 116 of 120 (stockfish vs mission-final)
+Finished game 116 (stockfish vs mission-final): 1-0 {White mates}
+Started game 117 of 120 (mission-final vs stockfish)
+Finished game 117 (mission-final vs stockfish): 0-1 {Black mates}
+Started game 118 of 120 (stockfish vs mission-final)
+Finished game 118 (stockfish vs mission-final): 1-0 {White mates}
+Started game 119 of 120 (mission-final vs stockfish)
+Finished game 119 (mission-final vs stockfish): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 120 of 120 (stockfish vs mission-final)
+Finished game 120 (stockfish vs mission-final): 1-0 {White mates}
+--------------------------------------------------
+Results of mission-final vs stockfish (8+0.08, 8t, 64MB, UHO_4060_v4.epd):
+Elo: -210.72 +/- 20.65, nElo: -803.48 +/- 62.16
+LOS: 0.00 %, DrawRatio: 1.67 %, PairsRatio: 0.00
+Games: 120, Wins: 1, Losses: 66, Draws: 53, Points: 27.5 (22.92 %)
+Ptnml(0-2): [6, 53, 1, 0, 0], WL/DD Ratio: inf
+--------------------------------------------------
+Finished match
+Total Time: 00:51:31 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: disabled   concurrency: 1   threads: A=8 B=8
+  mission-final time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  stockfish    time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================
