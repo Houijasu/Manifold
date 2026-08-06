@@ -139,6 +139,10 @@ fn selectivity_options_default_to_enabled() {
             use_see_pruning: true,
             use_qsearch_tt: true,
             use_qsearch_delta_pruning: true,
+            // Quiet checks in quiescence ship DISABLED: measured at -12.75 +/- 23.01
+            // Elo over 300 games and 0.12 plies SHALLOWER at equal time. See the
+            // comment on `SearchOptions::default` in `search.rs`.
+            use_qsearch_checks: false,
             use_singular_ext: true,
             use_check_ext: true,
             use_multicut: true,
@@ -255,6 +259,11 @@ fn mate_in_n_found() {
                 // Delta pruning DROPS captures, so it is off for the same reason every
                 // other pruning toggle is: a mate search must be exact.
                 use_qsearch_delta_pruning: false,
+                // Quiet checks ADD moves to the qsearch and never drop one, so they
+                // cannot hide a forced mate either way. Set to the SHIPPED default so
+                // this test exercises the search that actually plays games -- finding
+                // every mate here without the widening is the stronger statement.
+                use_qsearch_checks: false,
                 use_singular_ext: false,
                 use_check_ext: true,
                 use_multicut: false,
@@ -674,6 +683,99 @@ fn a_requested_depth_above_the_ceiling_is_clamped_to_it() {
         result.depth <= MAX_SEARCH_PLY as u32,
         "go depth 4000 reported depth {}, above the {MAX_SEARCH_PLY}-ply ceiling",
         result.depth
+    );
+}
+
+/// A mate delivered by a QUIET move must be visible from the first quiescence ply.
+///
+/// White to move has only two legal moves (both pawn pushes); after either, Black mates
+/// with `Rd1#`, which captures nothing and promotes nothing. A capture-only quiescence
+/// therefore returns the standing pat and reports a merely losing position, which is
+/// exactly the class of tactic this feature exists to recover: the search returns a
+/// score for a position it has not actually resolved.
+///
+/// Both arms below are the same build at the same depth with only `UseQSearchChecks`
+/// moved, so the mate is attributable to the widening and to nothing else.
+///
+/// The technique ships OFF (it lost 0.12 plies of depth for -12.75 +/- 23.01 Elo), so
+/// the DEFAULT arm here is the blind one. This test is what keeps the disabled feature
+/// honest: it records exactly what the shipped search gives up, in executable form, so
+/// that "quiet checks are off" stays a measured trade rather than a forgotten one.
+#[test]
+fn a_quiet_mating_check_is_found_only_when_the_qsearch_widening_is_enabled() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::from_fen("3r3k/8/8/8/8/6q1/P7/7K w - - 0 1", false)
+        .expect("quiet-mate FEN should parse");
+    assert_eq!(
+        generate_legal_moves(&position).len(),
+        2,
+        "the test position must force White into a pawn push"
+    );
+
+    let with_checks_table = TranspositionTable::new(4).expect("test TT should allocate");
+    let with_checks = search(
+        &position,
+        &with_checks_table,
+        limits(1),
+        SearchOptions {
+            use_qsearch_checks: true,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+
+    let without_checks_table = TranspositionTable::new(4).expect("test TT should allocate");
+    let without_checks = search_default(&position, &without_checks_table, limits(1), network);
+
+    assert!(
+        mate_moves(with_checks.score).is_some_and(|distance| distance < 0),
+        "quiet checks must expose the forced mate at depth 1: score {}",
+        with_checks.score
+    );
+    assert!(
+        mate_moves(without_checks.score).is_none(),
+        "a capture-only quiescence cannot see a quiet mate; if it can, this test no \
+         longer isolates the widening: score {}",
+        without_checks.score
+    );
+}
+
+/// The toggle must reach the search and change the tree it builds.
+///
+/// Node counts, not scores: a widening that quietly failed to widen would still return
+/// the same score on most positions, so the score is not the observable that proves the
+/// option is wired.
+#[test]
+fn the_qsearch_checks_toggle_changes_the_searched_tree() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::from_fen(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        false,
+    )
+    .expect("test FEN should parse");
+
+    let enabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let enabled = search(
+        &position,
+        &enabled_table,
+        limits(6),
+        SearchOptions {
+            use_qsearch_checks: true,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+
+    let disabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let disabled = search_default(&position, &disabled_table, limits(6), network);
+
+    assert_ne!(
+        enabled.nodes, disabled.nodes,
+        "UseQSearchChecks must reach the quiescence move list"
     );
 }
 

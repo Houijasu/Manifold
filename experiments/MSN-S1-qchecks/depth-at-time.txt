@@ -1,0 +1,6 @@
+
+=== movetime 1000ms, 24 positions, Hash=64 ===
+qchecks      mean depth 15.96  median  16.0  min 14  max 19
+m2-nnue      mean depth 16.08  median  16.0  min 14  max 19
+
+qchecks minus m2-nnue: -0.12 plies mean; qchecks deeper in 7/24, equal 7

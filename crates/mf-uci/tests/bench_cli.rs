@@ -37,8 +37,25 @@ use std::time::{Duration, Instant};
 /// they guard are unchanged, but the numbers they guard them with are not. Their
 /// commentary is kept because it records WHY each control exists, which is the part
 /// that outlives any particular signature.
+///
+/// M3-F1 added quiet checks in quiescence and left this anchor exactly where M7 put it,
+/// because the technique SHIPS OFF: enabling it costs +12.3% bench nodes
+/// (`45_036` -> `50_569`) and 0.12 plies of depth at equal time, and it measured
+/// -12.75 +/- 23.01 Elo over 300 games. The enabled signature is pinned in
+/// `qsearch_checks_ships_disabled_and_is_wired_through_to_the_search`, not here.
+///
+/// This constant NOT moving is itself an assertion. A feature that ships disabled must
+/// leave the shipped signature bit-for-bit unchanged, so if adding one ever moves this
+/// number, the toggle is not gating everything it claims to gate.
 const BENCH_NODE_COUNT: u64 = 45_036;
 const BENCH_NODES: &str = "Nodes searched: 45036";
+
+/// The all-on signature with `UseQSearchChecks=true`.
+///
+/// Pinned so the disabled technique stays measurable without a rebuild, and so a change
+/// to the quiet-check generator is still caught by the suite even though nothing in the
+/// shipped search reaches it.
+const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 50_569;
 
 /// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
 const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 47_144;
@@ -538,6 +555,53 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     assert_eq!(nodes, [BENCH_NODE_COUNT, 47_970, 49_331]);
 }
 
+/// `UseQSearchChecks` ships OFF, and this test records WHY in an executable form.
+///
+/// M3-F1 implemented quiet checks at the first quiescence ply -- the largest search
+/// feature the audit found missing -- and measured it single-variable against the M2
+/// kept build over 300 games at 8+0.08, Threads=1, `-use-affinity -concurrency 8`, with
+/// zero forfeits on both sides:
+///
+///   * enabled: **-12.75 +/- 23.01 Elo**, Ptnml [5,38,74,29,4], LOS 13.8%
+///
+/// The error bar covers zero, so the honest reading is "not shown to help" rather than
+/// "shown to hurt". It ships off because the feature's stated criterion was a positive
+/// point estimate, and a technique with no demonstrated gain has no claim on being the
+/// default.
+///
+/// The mechanism was measured rather than assumed. At `movetime 1000` over 24 book
+/// positions the widening reaches **0.12 plies LESS depth** (15.96 vs 16.08, deeper in
+/// only 7 of 24) while costing +12.3% bench nodes. A quiet check resolves no material,
+/// so the qsearch grows without the standing pat converging any faster, and the time
+/// comes out of the iterative deepening that actually finds moves. Full write-up in
+/// `experiments/MSN-S1-qchecks/results.md`.
+///
+/// This is deliberately the SAME shape as the pawn-history and history-pruning tests
+/// above: pin that the toggle ships off, and that enabling it still reaches the search.
+/// The enabled anchor is exact rather than a bare inequality so the disabled technique
+/// stays measurable -- a change to the quiet-check generator is caught here even though
+/// nothing in the shipped search reaches it.
+#[test]
+fn qsearch_checks_ships_disabled_and_is_wired_through_to_the_search() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseQSearchChecks value true\n\
+         bench\n\
+         quit\n",
+        "UCI qsearch checks session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS],
+        "quiet checks must be OFF in the shipped default and must reach the search when on"
+    );
+}
+
 /// Turning history off must reproduce the pinned NNUE all-off signatures bit-for-bit.
 ///
 /// This is the proof that M4-F1 moved the shipped bench signature by adding history
@@ -682,7 +746,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
     assert!(output.status.success());
 
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
-    for name in ["UsePawnHistory", "UseHistoryPruning"] {
+    for name in ["UsePawnHistory", "UseHistoryPruning", "UseQSearchChecks"] {
         assert!(
             stdout
                 .lines()

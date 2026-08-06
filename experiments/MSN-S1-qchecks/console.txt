@@ -1,0 +1,641 @@
+Indexing opening suite...
+Started game 6 of 300 (m2-nnue vs qchecks)
+Started game 5 of 300 (qchecks vs m2-nnue)
+Started game 4 of 300 (m2-nnue vs qchecks)
+Started game 2 of 300 (m2-nnue vs qchecks)
+Started game 1 of 300 (qchecks vs m2-nnue)
+Started game 3 of 300 (qchecks vs m2-nnue)
+Started game 7 of 300 (qchecks vs m2-nnue)
+Started game 8 of 300 (m2-nnue vs qchecks)
+Finished game 3 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 9 of 300 (qchecks vs m2-nnue)
+Finished game 6 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 10 of 300 (m2-nnue vs qchecks)
+Finished game 4 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 11 of 300 (qchecks vs m2-nnue)
+Finished game 5 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 12 of 300 (m2-nnue vs qchecks)
+Finished game 7 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 13 of 300 (qchecks vs m2-nnue)
+Finished game 8 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 14 of 300 (m2-nnue vs qchecks)
+Finished game 10 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 15 of 300 (qchecks vs m2-nnue)
+Finished game 1 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 16 of 300 (m2-nnue vs qchecks)
+Finished game 2 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 17 of 300 (qchecks vs m2-nnue)
+Finished game 9 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 18 of 300 (m2-nnue vs qchecks)
+Finished game 16 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 19 of 300 (qchecks vs m2-nnue)
+Finished game 15 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 20 of 300 (m2-nnue vs qchecks)
+Finished game 13 (qchecks vs m2-nnue): 0-1 {Black mates}
+Started game 21 of 300 (qchecks vs m2-nnue)
+Finished game 12 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 22 of 300 (m2-nnue vs qchecks)
+Finished game 14 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 23 of 300 (qchecks vs m2-nnue)
+Finished game 11 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 24 of 300 (m2-nnue vs qchecks)
+Finished game 17 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 25 of 300 (qchecks vs m2-nnue)
+Finished game 18 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 26 of 300 (m2-nnue vs qchecks)
+Finished game 19 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 27 of 300 (qchecks vs m2-nnue)
+Finished game 21 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 28 of 300 (m2-nnue vs qchecks)
+Finished game 23 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 29 of 300 (qchecks vs m2-nnue)
+Finished game 25 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 30 of 300 (m2-nnue vs qchecks)
+Finished game 24 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 31 of 300 (qchecks vs m2-nnue)
+Finished game 20 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 32 of 300 (m2-nnue vs qchecks)
+Finished game 22 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 33 of 300 (qchecks vs m2-nnue)
+Finished game 26 (m2-nnue vs qchecks): 0-1 {Black mates}
+Started game 34 of 300 (m2-nnue vs qchecks)
+Finished game 27 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 35 of 300 (qchecks vs m2-nnue)
+Finished game 31 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 36 of 300 (m2-nnue vs qchecks)
+Finished game 30 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 37 of 300 (qchecks vs m2-nnue)
+Finished game 28 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 38 of 300 (m2-nnue vs qchecks)
+Finished game 32 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 39 of 300 (qchecks vs m2-nnue)
+Finished game 33 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 40 of 300 (m2-nnue vs qchecks)
+Finished game 34 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 41 of 300 (qchecks vs m2-nnue)
+Finished game 35 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 42 of 300 (m2-nnue vs qchecks)
+Finished game 36 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 43 of 300 (qchecks vs m2-nnue)
+Finished game 29 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 44 of 300 (m2-nnue vs qchecks)
+Finished game 38 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 45 of 300 (qchecks vs m2-nnue)
+Finished game 37 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 46 of 300 (m2-nnue vs qchecks)
+Finished game 39 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 47 of 300 (qchecks vs m2-nnue)
+Finished game 40 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 48 of 300 (m2-nnue vs qchecks)
+Finished game 42 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 49 of 300 (qchecks vs m2-nnue)
+Finished game 41 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 50 of 300 (m2-nnue vs qchecks)
+Finished game 43 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 51 of 300 (qchecks vs m2-nnue)
+Finished game 47 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 52 of 300 (m2-nnue vs qchecks)
+Finished game 44 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 53 of 300 (qchecks vs m2-nnue)
+Finished game 46 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 54 of 300 (m2-nnue vs qchecks)
+Finished game 45 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 55 of 300 (qchecks vs m2-nnue)
+Finished game 48 (m2-nnue vs qchecks): 0-1 {Black mates}
+Started game 56 of 300 (m2-nnue vs qchecks)
+Finished game 50 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 57 of 300 (qchecks vs m2-nnue)
+Finished game 49 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 58 of 300 (m2-nnue vs qchecks)
+Finished game 54 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 59 of 300 (qchecks vs m2-nnue)
+Finished game 51 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 60 of 300 (m2-nnue vs qchecks)
+Finished game 52 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 61 of 300 (qchecks vs m2-nnue)
+Finished game 55 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 62 of 300 (m2-nnue vs qchecks)
+Finished game 56 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 63 of 300 (qchecks vs m2-nnue)
+Finished game 57 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 64 of 300 (m2-nnue vs qchecks)
+Finished game 58 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 65 of 300 (qchecks vs m2-nnue)
+Finished game 53 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 66 of 300 (m2-nnue vs qchecks)
+Finished game 59 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 67 of 300 (qchecks vs m2-nnue)
+Finished game 63 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 68 of 300 (m2-nnue vs qchecks)
+Finished game 62 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 69 of 300 (qchecks vs m2-nnue)
+Finished game 60 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 70 of 300 (m2-nnue vs qchecks)
+Finished game 64 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 71 of 300 (qchecks vs m2-nnue)
+Finished game 66 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 72 of 300 (m2-nnue vs qchecks)
+Finished game 61 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 73 of 300 (qchecks vs m2-nnue)
+Finished game 65 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 74 of 300 (m2-nnue vs qchecks)
+Finished game 69 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 75 of 300 (qchecks vs m2-nnue)
+Finished game 67 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 76 of 300 (m2-nnue vs qchecks)
+Finished game 70 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 77 of 300 (qchecks vs m2-nnue)
+Finished game 71 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 78 of 300 (m2-nnue vs qchecks)
+Finished game 72 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 79 of 300 (qchecks vs m2-nnue)
+Finished game 74 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 80 of 300 (m2-nnue vs qchecks)
+Finished game 73 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 81 of 300 (qchecks vs m2-nnue)
+Finished game 68 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 82 of 300 (m2-nnue vs qchecks)
+Finished game 76 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 83 of 300 (qchecks vs m2-nnue)
+Finished game 80 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 84 of 300 (m2-nnue vs qchecks)
+Finished game 75 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 85 of 300 (qchecks vs m2-nnue)
+Finished game 78 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 86 of 300 (m2-nnue vs qchecks)
+Finished game 81 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 87 of 300 (qchecks vs m2-nnue)
+Finished game 83 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 88 of 300 (m2-nnue vs qchecks)
+Finished game 77 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 89 of 300 (qchecks vs m2-nnue)
+Finished game 79 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 90 of 300 (m2-nnue vs qchecks)
+Finished game 82 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 91 of 300 (qchecks vs m2-nnue)
+Finished game 84 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 92 of 300 (m2-nnue vs qchecks)
+Finished game 85 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 93 of 300 (qchecks vs m2-nnue)
+Finished game 86 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 94 of 300 (m2-nnue vs qchecks)
+Finished game 88 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 95 of 300 (qchecks vs m2-nnue)
+Finished game 87 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 96 of 300 (m2-nnue vs qchecks)
+Finished game 91 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 97 of 300 (qchecks vs m2-nnue)
+Finished game 92 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 98 of 300 (m2-nnue vs qchecks)
+Finished game 90 (m2-nnue vs qchecks): 0-1 {Black mates}
+Started game 99 of 300 (qchecks vs m2-nnue)
+Finished game 89 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 100 of 300 (m2-nnue vs qchecks)
+Finished game 94 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 101 of 300 (qchecks vs m2-nnue)
+Finished game 96 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 102 of 300 (m2-nnue vs qchecks)
+Finished game 95 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 103 of 300 (qchecks vs m2-nnue)
+Finished game 93 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 104 of 300 (m2-nnue vs qchecks)
+Finished game 101 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 105 of 300 (qchecks vs m2-nnue)
+Finished game 100 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 106 of 300 (m2-nnue vs qchecks)
+Finished game 99 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+--------------------------------------------------
+Results of qchecks vs m2-nnue (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -14.19 +/- 40.57, nElo: -24.19 +/- 68.79
+LOS: 24.53 %, DrawRatio: 48.98 %, PairsRatio: 0.67
+Games: 98, Wins: 25, Losses: 29, Draws: 44, Points: 47.0 (47.96 %)
+Ptnml(0-2): [1, 14, 24, 8, 2], WL/DD Ratio: 1.18
+--------------------------------------------------
+Started game 107 of 300 (qchecks vs m2-nnue)
+Finished game 97 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 108 of 300 (m2-nnue vs qchecks)
+Finished game 98 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 109 of 300 (qchecks vs m2-nnue)
+Finished game 104 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 110 of 300 (m2-nnue vs qchecks)
+Finished game 103 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 111 of 300 (qchecks vs m2-nnue)
+Finished game 102 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 112 of 300 (m2-nnue vs qchecks)
+Finished game 105 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 113 of 300 (qchecks vs m2-nnue)
+Finished game 110 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 114 of 300 (m2-nnue vs qchecks)
+Finished game 107 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 115 of 300 (qchecks vs m2-nnue)
+Finished game 106 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 116 of 300 (m2-nnue vs qchecks)
+Finished game 108 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 117 of 300 (qchecks vs m2-nnue)
+Finished game 109 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 118 of 300 (m2-nnue vs qchecks)
+Finished game 113 (qchecks vs m2-nnue): 0-1 {Black mates}
+Started game 119 of 300 (qchecks vs m2-nnue)
+Finished game 111 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 120 of 300 (m2-nnue vs qchecks)
+Finished game 114 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 121 of 300 (qchecks vs m2-nnue)
+Finished game 112 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 122 of 300 (m2-nnue vs qchecks)
+Finished game 115 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 123 of 300 (qchecks vs m2-nnue)
+Finished game 116 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 124 of 300 (m2-nnue vs qchecks)
+Finished game 117 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 125 of 300 (qchecks vs m2-nnue)
+Finished game 118 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 126 of 300 (m2-nnue vs qchecks)
+Finished game 119 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 127 of 300 (qchecks vs m2-nnue)
+Finished game 121 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 128 of 300 (m2-nnue vs qchecks)
+Finished game 122 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 129 of 300 (qchecks vs m2-nnue)
+Finished game 123 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 130 of 300 (m2-nnue vs qchecks)
+Finished game 120 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 131 of 300 (qchecks vs m2-nnue)
+Finished game 125 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 132 of 300 (m2-nnue vs qchecks)
+Finished game 124 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 133 of 300 (qchecks vs m2-nnue)
+Finished game 126 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 134 of 300 (m2-nnue vs qchecks)
+Finished game 128 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 135 of 300 (qchecks vs m2-nnue)
+Finished game 127 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 136 of 300 (m2-nnue vs qchecks)
+Finished game 133 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 137 of 300 (qchecks vs m2-nnue)
+Finished game 131 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 138 of 300 (m2-nnue vs qchecks)
+Finished game 132 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 139 of 300 (qchecks vs m2-nnue)
+Finished game 130 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 140 of 300 (m2-nnue vs qchecks)
+Finished game 129 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 141 of 300 (qchecks vs m2-nnue)
+Finished game 134 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 142 of 300 (m2-nnue vs qchecks)
+Finished game 135 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 143 of 300 (qchecks vs m2-nnue)
+Finished game 136 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 144 of 300 (m2-nnue vs qchecks)
+Finished game 137 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 145 of 300 (qchecks vs m2-nnue)
+Finished game 138 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 146 of 300 (m2-nnue vs qchecks)
+Finished game 139 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 147 of 300 (qchecks vs m2-nnue)
+Finished game 140 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 148 of 300 (m2-nnue vs qchecks)
+Finished game 142 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 149 of 300 (qchecks vs m2-nnue)
+Finished game 143 (qchecks vs m2-nnue): 0-1 {Black mates}
+Started game 150 of 300 (m2-nnue vs qchecks)
+Finished game 144 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 151 of 300 (qchecks vs m2-nnue)
+Finished game 145 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 152 of 300 (m2-nnue vs qchecks)
+Finished game 148 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 153 of 300 (qchecks vs m2-nnue)
+Finished game 147 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 154 of 300 (m2-nnue vs qchecks)
+Finished game 141 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 155 of 300 (qchecks vs m2-nnue)
+Finished game 146 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 156 of 300 (m2-nnue vs qchecks)
+Finished game 149 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 157 of 300 (qchecks vs m2-nnue)
+Finished game 150 (m2-nnue vs qchecks): 0-1 {Black mates}
+Started game 158 of 300 (m2-nnue vs qchecks)
+Finished game 152 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 159 of 300 (qchecks vs m2-nnue)
+Finished game 151 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 160 of 300 (m2-nnue vs qchecks)
+Finished game 155 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 161 of 300 (qchecks vs m2-nnue)
+Finished game 154 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 162 of 300 (m2-nnue vs qchecks)
+Finished game 153 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 163 of 300 (qchecks vs m2-nnue)
+Finished game 157 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 164 of 300 (m2-nnue vs qchecks)
+Finished game 156 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 165 of 300 (qchecks vs m2-nnue)
+Finished game 158 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 166 of 300 (m2-nnue vs qchecks)
+Finished game 163 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 167 of 300 (qchecks vs m2-nnue)
+Finished game 159 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 168 of 300 (m2-nnue vs qchecks)
+Finished game 161 (qchecks vs m2-nnue): 0-1 {Black mates}
+Started game 169 of 300 (qchecks vs m2-nnue)
+Finished game 162 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 170 of 300 (m2-nnue vs qchecks)
+Finished game 160 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 171 of 300 (qchecks vs m2-nnue)
+Finished game 164 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 172 of 300 (m2-nnue vs qchecks)
+Finished game 165 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 173 of 300 (qchecks vs m2-nnue)
+Finished game 166 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 174 of 300 (m2-nnue vs qchecks)
+Finished game 167 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 175 of 300 (qchecks vs m2-nnue)
+Finished game 173 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 176 of 300 (m2-nnue vs qchecks)
+Finished game 168 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 177 of 300 (qchecks vs m2-nnue)
+Finished game 171 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 178 of 300 (m2-nnue vs qchecks)
+Finished game 170 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 179 of 300 (qchecks vs m2-nnue)
+Finished game 172 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 180 of 300 (m2-nnue vs qchecks)
+Finished game 174 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 181 of 300 (qchecks vs m2-nnue)
+Finished game 169 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 182 of 300 (m2-nnue vs qchecks)
+Finished game 175 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 183 of 300 (qchecks vs m2-nnue)
+Finished game 177 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 184 of 300 (m2-nnue vs qchecks)
+Finished game 178 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 185 of 300 (qchecks vs m2-nnue)
+Finished game 176 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 186 of 300 (m2-nnue vs qchecks)
+Finished game 179 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 187 of 300 (qchecks vs m2-nnue)
+Finished game 180 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 188 of 300 (m2-nnue vs qchecks)
+Finished game 182 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 189 of 300 (qchecks vs m2-nnue)
+Finished game 184 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 190 of 300 (m2-nnue vs qchecks)
+Finished game 186 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 191 of 300 (qchecks vs m2-nnue)
+Finished game 183 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 192 of 300 (m2-nnue vs qchecks)
+Finished game 181 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 193 of 300 (qchecks vs m2-nnue)
+Finished game 189 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 194 of 300 (m2-nnue vs qchecks)
+Finished game 187 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 195 of 300 (qchecks vs m2-nnue)
+Finished game 188 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 196 of 300 (m2-nnue vs qchecks)
+Finished game 185 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 197 of 300 (qchecks vs m2-nnue)
+Finished game 191 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 198 of 300 (m2-nnue vs qchecks)
+Finished game 190 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 199 of 300 (qchecks vs m2-nnue)
+Finished game 196 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 200 of 300 (m2-nnue vs qchecks)
+Finished game 193 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 201 of 300 (qchecks vs m2-nnue)
+Finished game 194 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 202 of 300 (m2-nnue vs qchecks)
+Finished game 195 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 203 of 300 (qchecks vs m2-nnue)
+Finished game 192 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 204 of 300 (m2-nnue vs qchecks)
+Finished game 197 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 205 of 300 (qchecks vs m2-nnue)
+Finished game 200 (m2-nnue vs qchecks): 0-1 {Black mates}
+Started game 206 of 300 (m2-nnue vs qchecks)
+Finished game 201 (qchecks vs m2-nnue): 0-1 {Black mates}
+Started game 207 of 300 (qchecks vs m2-nnue)
+Finished game 199 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+--------------------------------------------------
+Results of qchecks vs m2-nnue (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -15.80 +/- 28.94, nElo: -26.53 +/- 48.39
+LOS: 14.13 %, DrawRatio: 46.46 %, PairsRatio: 0.71
+Games: 198, Wins: 51, Losses: 60, Draws: 87, Points: 94.5 (47.73 %)
+Ptnml(0-2): [3, 28, 46, 19, 3], WL/DD Ratio: 1.30
+--------------------------------------------------
+Started game 208 of 300 (m2-nnue vs qchecks)
+Finished game 202 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 209 of 300 (qchecks vs m2-nnue)
+Finished game 198 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 210 of 300 (m2-nnue vs qchecks)
+Finished game 203 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 211 of 300 (qchecks vs m2-nnue)
+Finished game 204 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 212 of 300 (m2-nnue vs qchecks)
+Finished game 205 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 213 of 300 (qchecks vs m2-nnue)
+Finished game 209 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 214 of 300 (m2-nnue vs qchecks)
+Finished game 207 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 215 of 300 (qchecks vs m2-nnue)
+Finished game 210 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 216 of 300 (m2-nnue vs qchecks)
+Finished game 206 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 217 of 300 (qchecks vs m2-nnue)
+Finished game 212 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 218 of 300 (m2-nnue vs qchecks)
+Finished game 213 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 219 of 300 (qchecks vs m2-nnue)
+Finished game 211 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 220 of 300 (m2-nnue vs qchecks)
+Finished game 208 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 221 of 300 (qchecks vs m2-nnue)
+Finished game 214 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 222 of 300 (m2-nnue vs qchecks)
+Finished game 217 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 223 of 300 (qchecks vs m2-nnue)
+Finished game 215 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 224 of 300 (m2-nnue vs qchecks)
+Finished game 216 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 225 of 300 (qchecks vs m2-nnue)
+Finished game 220 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 226 of 300 (m2-nnue vs qchecks)
+Finished game 221 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 227 of 300 (qchecks vs m2-nnue)
+Finished game 219 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 228 of 300 (m2-nnue vs qchecks)
+Finished game 218 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 229 of 300 (qchecks vs m2-nnue)
+Finished game 222 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 230 of 300 (m2-nnue vs qchecks)
+Finished game 226 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 231 of 300 (qchecks vs m2-nnue)
+Finished game 223 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 232 of 300 (m2-nnue vs qchecks)
+Finished game 224 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 233 of 300 (qchecks vs m2-nnue)
+Finished game 227 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 234 of 300 (m2-nnue vs qchecks)
+Finished game 225 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 235 of 300 (qchecks vs m2-nnue)
+Finished game 229 (qchecks vs m2-nnue): 0-1 {Black mates}
+Started game 236 of 300 (m2-nnue vs qchecks)
+Finished game 228 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 237 of 300 (qchecks vs m2-nnue)
+Finished game 230 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 238 of 300 (m2-nnue vs qchecks)
+Finished game 231 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 239 of 300 (qchecks vs m2-nnue)
+Finished game 235 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 240 of 300 (m2-nnue vs qchecks)
+Finished game 233 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 241 of 300 (qchecks vs m2-nnue)
+Finished game 232 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 242 of 300 (m2-nnue vs qchecks)
+Finished game 234 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 243 of 300 (qchecks vs m2-nnue)
+Finished game 236 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 244 of 300 (m2-nnue vs qchecks)
+Finished game 238 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 245 of 300 (qchecks vs m2-nnue)
+Finished game 239 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 246 of 300 (m2-nnue vs qchecks)
+Finished game 237 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 247 of 300 (qchecks vs m2-nnue)
+Finished game 242 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 248 of 300 (m2-nnue vs qchecks)
+Finished game 241 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 249 of 300 (qchecks vs m2-nnue)
+Finished game 240 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 250 of 300 (m2-nnue vs qchecks)
+Finished game 243 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 251 of 300 (qchecks vs m2-nnue)
+Finished game 244 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+Started game 252 of 300 (m2-nnue vs qchecks)
+Finished game 245 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 253 of 300 (qchecks vs m2-nnue)
+Finished game 247 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 254 of 300 (m2-nnue vs qchecks)
+Finished game 248 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 255 of 300 (qchecks vs m2-nnue)
+Finished game 252 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 256 of 300 (m2-nnue vs qchecks)
+Finished game 246 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 257 of 300 (qchecks vs m2-nnue)
+Finished game 249 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 258 of 300 (m2-nnue vs qchecks)
+Finished game 251 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 259 of 300 (qchecks vs m2-nnue)
+Finished game 253 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 260 of 300 (m2-nnue vs qchecks)
+Finished game 250 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 261 of 300 (qchecks vs m2-nnue)
+Finished game 258 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 262 of 300 (m2-nnue vs qchecks)
+Finished game 254 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 263 of 300 (qchecks vs m2-nnue)
+Finished game 257 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 264 of 300 (m2-nnue vs qchecks)
+Finished game 255 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 265 of 300 (qchecks vs m2-nnue)
+Finished game 256 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 266 of 300 (m2-nnue vs qchecks)
+Finished game 259 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 267 of 300 (qchecks vs m2-nnue)
+Finished game 260 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 268 of 300 (m2-nnue vs qchecks)
+Finished game 263 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 269 of 300 (qchecks vs m2-nnue)
+Finished game 261 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 270 of 300 (m2-nnue vs qchecks)
+Finished game 262 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 271 of 300 (qchecks vs m2-nnue)
+Finished game 266 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 272 of 300 (m2-nnue vs qchecks)
+Finished game 264 (m2-nnue vs qchecks): 0-1 {Black mates}
+Started game 273 of 300 (qchecks vs m2-nnue)
+Finished game 267 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 274 of 300 (m2-nnue vs qchecks)
+Finished game 265 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 275 of 300 (qchecks vs m2-nnue)
+Finished game 268 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 276 of 300 (m2-nnue vs qchecks)
+Finished game 270 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 277 of 300 (qchecks vs m2-nnue)
+Finished game 273 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 278 of 300 (m2-nnue vs qchecks)
+Finished game 269 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 279 of 300 (qchecks vs m2-nnue)
+Finished game 275 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 280 of 300 (m2-nnue vs qchecks)
+Finished game 271 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 281 of 300 (qchecks vs m2-nnue)
+Finished game 274 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 282 of 300 (m2-nnue vs qchecks)
+Finished game 278 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 283 of 300 (qchecks vs m2-nnue)
+Finished game 272 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 284 of 300 (m2-nnue vs qchecks)
+Finished game 279 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 285 of 300 (qchecks vs m2-nnue)
+Finished game 277 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 286 of 300 (m2-nnue vs qchecks)
+Finished game 276 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 287 of 300 (qchecks vs m2-nnue)
+Finished game 281 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 288 of 300 (m2-nnue vs qchecks)
+Finished game 280 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 289 of 300 (qchecks vs m2-nnue)
+Finished game 284 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 290 of 300 (m2-nnue vs qchecks)
+Finished game 282 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 291 of 300 (qchecks vs m2-nnue)
+Finished game 286 (m2-nnue vs qchecks): 1-0 {White mates}
+Started game 292 of 300 (m2-nnue vs qchecks)
+Finished game 283 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Started game 293 of 300 (qchecks vs m2-nnue)
+Finished game 285 (qchecks vs m2-nnue): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 294 of 300 (m2-nnue vs qchecks)
+Finished game 290 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 295 of 300 (qchecks vs m2-nnue)
+Finished game 291 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 296 of 300 (m2-nnue vs qchecks)
+Finished game 287 (qchecks vs m2-nnue): 1/2-1/2 {Draw by fifty moves rule}
+Started game 297 of 300 (qchecks vs m2-nnue)
+Finished game 288 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Started game 298 of 300 (m2-nnue vs qchecks)
+Finished game 289 (qchecks vs m2-nnue): 0-1 {Black mates}
+Started game 299 of 300 (qchecks vs m2-nnue)
+Finished game 293 (qchecks vs m2-nnue): 1-0 {White mates}
+Started game 300 of 300 (m2-nnue vs qchecks)
+Finished game 292 (m2-nnue vs qchecks): 1-0 {White mates}
+Finished game 294 (m2-nnue vs qchecks): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 295 (qchecks vs m2-nnue): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 297 (qchecks vs m2-nnue): 1-0 {White mates}
+Finished game 300 (m2-nnue vs qchecks): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 298 (m2-nnue vs qchecks): 1-0 {White mates}
+Finished game 299 (qchecks vs m2-nnue): 1-0 {White mates}
+--------------------------------------------------
+Results of qchecks vs m2-nnue (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -12.83 +/- 23.17, nElo: -21.90 +/- 39.45
+LOS: 13.83 %, DrawRatio: 48.99 %, PairsRatio: 0.77
+Games: 298, Wins: 77, Losses: 88, Draws: 133, Points: 143.5 (48.15 %)
+Ptnml(0-2): [5, 38, 73, 29, 4], WL/DD Ratio: 1.21
+--------------------------------------------------
+Finished game 296 (m2-nnue vs qchecks): 1/2-1/2 {Draw by fifty moves rule}
+--------------------------------------------------
+Results of qchecks vs m2-nnue (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -12.75 +/- 23.01, nElo: -21.83 +/- 39.32
+LOS: 13.83 %, DrawRatio: 49.33 %, PairsRatio: 0.77
+Games: 300, Wins: 77, Losses: 88, Draws: 135, Points: 144.5 (48.17 %)
+Ptnml(0-2): [5, 38, 74, 29, 4], WL/DD Ratio: 1.18
+--------------------------------------------------
+Finished match
+Total Time: 00:17:25 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  qchecks      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  m2-nnue      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================

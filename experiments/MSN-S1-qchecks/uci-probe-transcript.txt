@@ -1,0 +1,51 @@
+===== quiet mate at depth 1, checks ON =====
+option name UseQSearchChecks type check default true
+uciok
+info depth 1 seldepth 2 multipv 1 score mate -1 nodes 5 nps 5000 hashfull 1 time 0 pv a2a4 d8d1
+bestmove a2a4
+===== quiet mate at depth 1, checks OFF =====
+option name UseQSearchChecks type check default true
+uciok
+info depth 1 seldepth 1 multipv 1 score cp -1007 nodes 2 nps 2000 hashfull 1 time 0 pv a2a4
+bestmove a2a4
+===== middlegame movetime 3000, checks ON =====
+option name UseQSearchChecks type check default true
+uciok
+info depth 1 seldepth 5 multipv 1 score cp -115 nodes 78 nps 78000 hashfull 1 time 0 pv e2a6 b4c3 d2c3 e6d5
+info depth 2 seldepth 8 multipv 1 score cp -115 nodes 307 nps 307000 hashfull 1 time 1 pv e2a6 b4c3 d2c3 e6d5
+info depth 3 seldepth 7 multipv 1 score cp -115 nodes 745 nps 248333 hashfull 1 time 3 pv e2a6 b4c3 d2c3 e6d5
+info depth 4 seldepth 11 multipv 1 score cp -115 nodes 1509 nps 377250 hashfull 1 time 4 pv e2a6 b4c3 d2c3 e6d5
+info depth 5 seldepth 16 multipv 1 score cp -164 nodes 5104 nps 464000 hashfull 2 time 11 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2
+info depth 6 seldepth 15 multipv 1 score cp -164 nodes 8972 nps 448600 hashfull 3 time 20 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2
+info depth 7 seldepth 20 multipv 1 score cp -171 nodes 16651 nps 438184 hashfull 9 time 38 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2 f3g2
+info depth 8 seldepth 22 multipv 1 score cp -164 nodes 20167 nps 448155 hashfull 10 time 45 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2
+info depth 9 seldepth 32 multipv 1 score cp -177 nodes 90009 nps 445589 hashfull 49 time 202 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e4d5 d7d6
+info depth 10 seldepth 25 multipv 1 score cp -161 nodes 101994 nps 449312 hashfull 53 time 227 pv e2a6 h3g2 h1g1 b4c3 d2c3 e6d5 e5g4 f6g4 c3g7 h8h4 f3g2
+info depth 11 seldepth 27 multipv 1 score cp -143 nodes 134213 nps 453422 hashfull 72 time 296 pv e2a6 h3g2 h1g1 e6d5 c3d5 e7e5 d2f4 e5b2 d5c7 e8f8 f4d6 f8g8
+info depth 12 seldepth 38 multipv 1 score cp -230 nodes 559320 nps 479280 hashfull 302 time 1167 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e4d5 d7d6 e1c1 d6e5 d5d6 c7d6 c3b4 a8d8 g2c6 e7d7 c6d6 f6d5 d6c5
+info depth 13 seldepth 36 multipv 1 score cp -202 nodes 588254 nps 481780 hashfull 316 time 1221 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 e5c6 d7c6 c3g7 h8h5 f2f4 e8d7
+info depth 14 seldepth 37 multipv 1 score cp -173 nodes 631331 nps 484521 hashfull 337 time 1303 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 e5c6 d7c6 c3g7 h8h5 f2f4 f7f6 a6e2 e8c8 e2h5 g6h5
+info depth 15 seldepth 42 multipv 1 score cp -186 nodes 1061833 nps 480250 hashfull 549 time 2211 pv d5e6 e7e6 e2a6 h3g2 f3g2 e6e5 c3b5 a8b8 d2e3 e8f8 e1g1 c7c6 f2f4 e5e4 e3c5 f8g8 b5d6 e4d5 g2d5 f6d5
+info depth 16 seldepth 38 multipv 1 score cp -175 nodes 1399879 nps 482550 hashfull 692 time 2901 pv d5e6 e7e6 e2a6 h3g2 f3g2 e6e5 c3e2 e5b2 a1d1 b2c2 e4e5 c2e4 g2e4 f6e4 d2b4 c7c6 a6d3 e4g5
+bestmove d5e6
+===== middlegame movetime 3000, checks OFF =====
+option name UseQSearchChecks type check default true
+uciok
+info depth 1 seldepth 5 multipv 1 score cp -115 nodes 78 nps 78000 hashfull 1 time 0 pv e2a6 b4c3 d2c3 e6d5
+info depth 2 seldepth 8 multipv 1 score cp -115 nodes 302 nps 302000 hashfull 1 time 1 pv e2a6 b4c3 d2c3 e6d5
+info depth 3 seldepth 7 multipv 1 score cp -115 nodes 733 nps 366500 hashfull 1 time 2 pv e2a6 b4c3 d2c3 e6d5
+info depth 4 seldepth 11 multipv 1 score cp -115 nodes 1474 nps 368500 hashfull 1 time 4 pv e2a6 b4c3 d2c3 e6d5
+info depth 5 seldepth 16 multipv 1 score cp -164 nodes 5007 nps 455181 hashfull 2 time 11 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2
+info depth 6 seldepth 14 multipv 1 score cp -164 nodes 8752 nps 460631 hashfull 3 time 19 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2
+info depth 7 seldepth 20 multipv 1 score cp -171 nodes 15926 nps 455028 hashfull 8 time 35 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2 f3g2
+info depth 8 seldepth 25 multipv 1 score cp -167 nodes 30670 nps 444492 hashfull 16 time 69 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2 f3g2 h8h4 c3f6 g7f6
+info depth 9 seldepth 21 multipv 1 score cp -181 nodes 55649 nps 463741 hashfull 28 time 120 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2 f3g2
+info depth 10 seldepth 29 multipv 1 score cp -201 nodes 107279 nps 472594 hashfull 53 time 227 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4
+info depth 11 seldepth 23 multipv 1 score cp -170 nodes 116727 nps 478389 hashfull 57 time 244 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2 h1g1 f6g4 c3g7 h8h4 f3g2
+info depth 12 seldepth 26 multipv 1 score cp -142 nodes 141659 nps 478577 hashfull 68 time 296 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5
+info depth 13 seldepth 32 multipv 1 score cp -147 nodes 303157 nps 495354 hashfull 153 time 612 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 f4e5
+info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467092 nps 501709 hashfull 228 time 931 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+info depth 15 seldepth 34 multipv 1 score cp -164 nodes 541472 nps 506048 hashfull 267 time 1070 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 g7e5 c3e5 f7f6 e5d4 e8f7 a1e1 c7c5 d4c3 e7e6 a6d3
+info depth 16 seldepth 38 multipv 1 score cp -154 nodes 1033294 nps 504291 hashfull 514 time 2049 pv d5e6 a6e2 c3e2 e7e6 d2f4 b6c4 e5c4 h3g2 h1g1 e6c4 e4e5 f6d5 f4g3 c7c6 f3d3 c4d3 c2d3
+info depth 17 seldepth 40 multipv 1 score cp -176 nodes 1406675 nps 503282 hashfull 659 time 2795 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 h8h5 e1e5 h5e5 f4e5 e7e5 g2f2 e5g5 g1h1 f7f5 f2c5 e8f7 c5c7
+bestmove e2a6

@@ -91,10 +91,18 @@ const QSEARCH_SEE_THRESHOLD: i32 = 0;
 const QSEARCH_DELTA_MARGIN: i32 = 196;
 /// TT depth domain for a qsearch node that searched only captures.
 const QSEARCH_CAPTURES_TT_DEPTH: i32 = -2;
-/// TT depth domain for a qsearch node that searched every move because it was in check.
+/// TT depth domain for a qsearch node that searched more than the captures.
 ///
-/// Strictly more informative than the captures domain, so a checks entry satisfies a
-/// captures probe but not the reverse.
+/// Two node kinds live here: one that was IN check and therefore searched every
+/// evasion, and one at the first qsearch ply that searched the captures plus the quiet
+/// moves giving check. Both are strictly more informative than a captures-only search,
+/// so a checks entry satisfies a captures probe but not the reverse.
+///
+/// The two never collide, because whether a node is in check is a property of the
+/// POSITION and the TT is keyed on the position: one board can never be probed as both
+/// kinds. What the domain actually separates is the same non-checked board visited
+/// once at the first qsearch ply, where quiet checks widen it, and again deeper in the
+/// qsearch, where they do not.
 const QSEARCH_CHECKS_TT_DEPTH: i32 = -1;
 const _: () = assert!(
     QSEARCH_CAPTURES_TT_DEPTH < QSEARCH_CHECKS_TT_DEPTH && QSEARCH_CHECKS_TT_DEPTH < 0,
@@ -203,6 +211,11 @@ pub struct SearchOptions {
     pub use_see_pruning: bool,
     pub use_qsearch_tt: bool,
     pub use_qsearch_delta_pruning: bool,
+    /// Search quiet moves that give check at the first quiescence ply.
+    ///
+    /// Implemented, maintained, and toggleable, but ships **OFF** -- see the comment on
+    /// [`SearchOptions::default`].
+    pub use_qsearch_checks: bool,
     pub use_singular_ext: bool,
     pub use_check_ext: bool,
     pub use_multicut: bool,
@@ -237,6 +250,34 @@ impl Default for SearchOptions {
             use_see_pruning: true,
             use_qsearch_tt: true,
             use_qsearch_delta_pruning: true,
+            // Quiet checks in quiescence are implemented, maintained, and toggleable,
+            // but ship OFF. Measured single-variable against the M2 kept build over 300
+            // games at 8+0.08, Threads=1, `-use-affinity -concurrency 8`, zero forfeits
+            // both sides:
+            //
+            //   * enabled : -12.75 +/- 23.01 Elo, Ptnml [5,38,74,29,4], LOS 13.8%
+            //
+            // That is a negative point estimate whose error bar still covers zero, so
+            // the honest reading is "not shown to help", not "shown to hurt". It ships
+            // off because the feature's own criterion was a positive point estimate and
+            // because a technique with no demonstrated gain should not be the default.
+            //
+            // The mechanism is measured, not guessed. At `movetime 1000` over 24 book
+            // positions the widening reaches **0.12 plies LESS depth** on average
+            // (15.96 vs 16.08; deeper in only 7 of 24), and it costs +12.3% bench nodes
+            // (45_036 -> 50_569). Every quiet check is a node that resolves no material,
+            // so the qsearch grows without the standing pat converging faster, and the
+            // extra time comes straight out of the iterative deepening that actually
+            // finds moves. The tactics it does buy are real -- `search_invariants`
+            // pins a quiet mate that a capture-only qsearch scores as merely losing --
+            // but at this TC they are rarer than the ply they cost.
+            //
+            // Two things would change the picture and are the conditions for revisiting
+            // it: a targeted gives-check generator in mf-core (the current
+            // implementation filters a full pseudo-legal generation through
+            // `move_gives_check` plus SEE, which is the honest first cut but not the
+            // cheap one), and a longer TC, where a lost tenth of a ply buys back less.
+            use_qsearch_checks: false,
             use_singular_ext: true,
             use_check_ext: true,
             use_multicut: true,
@@ -931,7 +972,9 @@ fn pvs(
         }
     }
     if depth <= 0 {
-        return quiescence(position, alpha, beta, ply, pv_node, false, context, pv);
+        return quiescence(
+            position, alpha, beta, ply, pv_node, false, true, context, pv,
+        );
     }
 
     let key = tt_key(position, depth);
@@ -997,7 +1040,9 @@ fn pvs(
             && eval_pruning_rule50_safe(position, depth)
             && static_eval < alpha - razoring_margin(depth)
         {
-            return quiescence(position, alpha, beta, ply, pv_node, false, context, pv);
+            return quiescence(
+                position, alpha, beta, ply, pv_node, false, true, context, pv,
+            );
         }
 
         if context.options.use_rfp
@@ -1120,6 +1165,13 @@ fn pvs(
                     -probcut_beta + 1,
                     ply + 1,
                     false,
+                    true,
+                    // ProbCut's verification is an entry into quiescence FROM the
+                    // interior search, so it is a first qsearch ply like any other.
+                    // Exempting it would make the value ProbCut thresholds against
+                    // come from a narrower search than the one the same board gets
+                    // when the main search reaches it, and ProbCut's whole premise is
+                    // that its shallow value predicts the deeper one.
                     true,
                     context,
                     &mut probcut_pv,
@@ -1565,6 +1617,12 @@ fn quiescence(
     ply: usize,
     pv_node: bool,
     count_node: bool,
+    // True only at the ply the main search dropped into quiescence at, where quiet
+    // checks widen the move list. Every recursive qsearch call passes `false`: the
+    // widening is one ply deep because a quiet check costs a node without resolving any
+    // material, so applying it at every qsearch ply grows the tree geometrically for
+    // tactics the first ply has already had its chance to see.
+    first_qsearch_ply: bool,
     context: &mut SearchContext<'_>,
     pv: &mut Vec<Move>,
 ) -> Option<i32> {
@@ -1590,11 +1648,19 @@ fn quiescence(
     }
 
     let in_check = is_in_check(position, position.side_to_move());
+    let searches_quiet_checks =
+        context.options.use_qsearch_checks && first_qsearch_ply && !in_check;
     // Qsearch nodes carry their own TT depth domain. An in-check node searches EVERY
     // move, so its score is a full-width bound and must never be read by a node that
     // only searched captures; the two domains are stored under different depths and a
     // cutoff requires the stored depth to be at least as informative as this node's.
-    let qsearch_depth = if in_check {
+    //
+    // A first-ply node that widened with quiet checks joins the checks domain for the
+    // same reason: it searched strictly more than the captures, so its bound is
+    // legitimate evidence for a captures-only probe, while a captures-only entry must
+    // never satisfy IT -- taking that cutoff would silently discard the widening this
+    // feature exists to perform.
+    let qsearch_depth = if in_check || searches_quiet_checks {
         QSEARCH_CHECKS_TT_DEPTH
     } else {
         QSEARCH_CAPTURES_TT_DEPTH
@@ -1684,6 +1750,7 @@ fn quiescence(
             position,
             tt_move,
             qsearch_see_threshold(context.options.use_see_pruning),
+            searches_quiet_checks,
             ordering,
         )
     };
@@ -1723,6 +1790,7 @@ fn quiescence(
             ply + 1,
             pv_node && searched == 0,
             true,
+            false,
             context,
             &mut child_pv,
         )
@@ -2106,7 +2174,7 @@ fn has_other_non_pawn_material(position: &Position, color: Color, mv: Move) -> b
 }
 
 #[inline]
-fn move_gives_check(position: &Position, mv: Move) -> bool {
+pub(crate) fn move_gives_check(position: &Position, mv: Move) -> bool {
     let moved = position
         .piece_at(mv.from())
         .expect("candidate move must have a moving piece");

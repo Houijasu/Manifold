@@ -322,10 +322,47 @@ impl Iterator for MovePicker {
     }
 }
 
+/// Static exchange value a quiet check must promise before qsearch will search it.
+///
+/// This gate belongs to the quiet-check generator, NOT to `UseSEEPruning`. Its job is
+/// to stop the first qsearch ply from expanding every spite check on the board, which
+/// is a property of the widening rather than of the capture SEE gate. Wiring it to
+/// `qsearch_see_threshold` would make `UseSEEPruning=false` generate every quiet check
+/// including the ones that simply hang the checking piece, so an ablation of an
+/// unrelated toggle would change this feature's node explosion instead of measuring
+/// its own technique.
+const QUIET_CHECK_SEE_THRESHOLD: i32 = 0;
+
+/// Quiet moves that give check and survive the SEE gate, in ordering-history order.
+///
+/// Castling is excluded: `static_exchange_evaluation` refuses castling by assertion
+/// (it is not an exchange), and a castling check is not the tactic a first-ply
+/// widening exists to find.
+fn quiet_checks(position: &Position, ordering: OrderingContext<'_>) -> Vec<Move> {
+    let mut checks: Vec<_> = generate_pseudo_legal_moves(position)
+        .iter()
+        .copied()
+        .filter(|mv| {
+            !mv.flag().is_capture() && mv.flag().promotion().is_none() && !mv.flag().is_castling()
+        })
+        // `move_gives_check` before the SEE call on purpose: it rejects the large
+        // majority of quiets for a handful of attack-table lookups, while SEE walks a
+        // whole recapture sequence.
+        .filter(|&mv| crate::search::move_gives_check(position, mv))
+        .filter(|&mv| static_exchange_evaluation(position, mv) >= QUIET_CHECK_SEE_THRESHOLD)
+        .collect();
+    let color = position.side_to_move();
+    checks.sort_by_cached_key(|&mv| {
+        core::cmp::Reverse(ordering.ordering_history(position, color, mv))
+    });
+    checks
+}
+
 pub(crate) fn quiescence_moves(
     position: &Position,
     tt_move: Option<Move>,
     see_threshold: i32,
+    include_quiet_checks: bool,
     ordering: OrderingContext<'_>,
 ) -> Vec<Move> {
     let pseudo_legal = generate_pseudo_legal_moves(position);
@@ -355,6 +392,18 @@ pub(crate) fn quiescence_moves(
     // the SEE and the table read run O(n log n) times per qsearch node instead of O(n),
     // and qsearch is the majority of nodes (mission AGENTS.md 4.54 trap 1).
     moves.sort_by_cached_key(|&mv| core::cmp::Reverse(capture_score(position, mv, ordering)));
+    // Quiet checks are appended AFTER every capture rather than interleaved with them.
+    // A capture resolves material immediately and a quiet check does not, so a check
+    // must never displace a capture that could raise the standing pat first: qsearch
+    // cuts off on the first move that reaches beta, and searching the cheap resolving
+    // move first is what keeps the widening affordable.
+    if include_quiet_checks {
+        moves.extend(
+            quiet_checks(position, ordering)
+                .into_iter()
+                .filter(|mv| Some(*mv) != tt_move),
+        );
+    }
     if let Some(tt_move) = tt_move {
         moves.insert(0, tt_move);
     }
@@ -426,6 +475,181 @@ fn quiet_score(
 
 #[cfg(test)]
 mod tests {
+    use mf_core::{Position, generate_legal_moves, generate_pseudo_legal_moves, is_in_check};
+
+    use super::*;
+    use crate::history::{CONTINUATION_PLIES, SharedHistory};
+    use crate::search::move_gives_check;
+
+    /// Ordering context with every history table live but empty, so the generator
+    /// tests exercise the shipped code path without a warmed table biasing the order.
+    fn empty_ordering<'a>(history: &'a SharedHistory, position: &Position) -> OrderingContext<'a> {
+        OrderingContext {
+            history,
+            pawn_key: position.zobrist().pawn(),
+            continuation: [None; CONTINUATION_PLIES.len()],
+            use_butterfly_history: true,
+            use_capture_history: true,
+            use_pawn_history: false,
+            use_continuation_history: true,
+        }
+    }
+
+    /// Positions carrying quiet checks of every kind the generator must handle:
+    /// direct, discovered, knight, and a promotion-free pawn push, plus a random walk
+    /// so the equivalence below is not tested only on hand-picked boards.
+    fn generator_positions() -> Vec<Position> {
+        let mut positions: Vec<_> = [
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            "4k3/8/8/8/8/8/4B3/4R1K1 w - - 0 1",
+            "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+            "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+            "4k3/8/8/3N4/8/8/8/4K3 w - - 0 1",
+        ]
+        .into_iter()
+        .map(|fen| Position::from_fen(fen, false).expect("test FEN should parse"))
+        .collect();
+
+        let mut walk = Position::startpos();
+        for sample in 0..48 {
+            positions.push(walk.clone());
+            let moves = generate_legal_moves(&walk);
+            if moves.is_empty() {
+                walk = Position::startpos();
+            } else {
+                walk.make_move(moves[(sample * 13 + 5) % moves.len()]);
+            }
+        }
+        positions
+    }
+
+    /// The generator must be exactly "filter every quiet through `move_gives_check`
+    /// and the SEE gate" -- no move it misses, no move it invents.
+    ///
+    /// This is the assertion that keeps the generator honest if it is ever replaced by
+    /// a targeted check-move generator instead of a filtered full quiet generation. A
+    /// faster generator that silently loses discovered checks would pass every
+    /// node-count anchor in the repo, because losing moves only makes the tree smaller.
+    #[test]
+    fn quiet_check_generation_matches_filtering_every_quiet_through_gives_check() {
+        let history = SharedHistory::new(1);
+        for position in generator_positions() {
+            if is_in_check(&position, position.side_to_move()) {
+                continue;
+            }
+            let ordering = empty_ordering(&history, &position);
+            let generated = quiet_checks(&position, ordering);
+
+            let expected: Vec<_> = generate_pseudo_legal_moves(&position)
+                .iter()
+                .copied()
+                .filter(|mv| {
+                    !mv.flag().is_capture()
+                        && mv.flag().promotion().is_none()
+                        && !mv.flag().is_castling()
+                        && move_gives_check(&position, *mv)
+                        && static_exchange_evaluation(&position, *mv) >= QUIET_CHECK_SEE_THRESHOLD
+                })
+                .collect();
+
+            let mut generated: Vec<_> = generated.iter().map(|mv| mv.raw()).collect();
+            let mut expected: Vec<_> = expected.iter().map(|mv| mv.raw()).collect();
+            generated.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(generated, expected, "{position:?}");
+        }
+    }
+
+    /// Every generated move must actually give check once played, and must not be a
+    /// capture, a promotion, or castling.
+    #[test]
+    fn every_generated_quiet_check_gives_check_and_is_quiet() {
+        let history = SharedHistory::new(1);
+        let mut checked_any = false;
+        for position in generator_positions() {
+            if is_in_check(&position, position.side_to_move()) {
+                continue;
+            }
+            let ordering = empty_ordering(&history, &position);
+            for mv in quiet_checks(&position, ordering) {
+                assert!(!mv.flag().is_capture(), "{position:?} {mv:?}");
+                assert!(mv.flag().promotion().is_none(), "{position:?} {mv:?}");
+                assert!(!mv.flag().is_castling(), "{position:?} {mv:?}");
+                // Pseudo-legal moves that leave the mover in check are filtered by the
+                // qsearch loop itself, so only the legal ones can be asserted here.
+                let mover = position.side_to_move();
+                let mut after = position.clone();
+                let undo = after.make_move(mv);
+                if is_in_check(&after, mover) {
+                    after.unmake_move(mv, undo);
+                    continue;
+                }
+                assert!(
+                    is_in_check(&after, after.side_to_move()),
+                    "generated move does not give check: {position:?} {mv:?}"
+                );
+                checked_any = true;
+            }
+        }
+        assert!(
+            checked_any,
+            "the corpus must contain at least one legal quiet check"
+        );
+    }
+
+    /// A quiet check that simply hangs the checking piece must not be generated.
+    ///
+    /// Without the SEE gate the first qsearch ply expands every spite check on the
+    /// board, which is the node explosion this feature has to avoid paying for.
+    #[test]
+    fn a_quiet_check_that_hangs_the_checking_piece_is_gated_out_by_see() {
+        // The white queen can check on e6, where the f7 pawn takes it for free.
+        let position = Position::from_fen("4k3/5p2/8/8/8/1Q6/8/4K3 w - - 0 1", false)
+            .expect("test FEN should parse");
+        let history = SharedHistory::new(1);
+        let hanging = generate_legal_moves(&position)
+            .iter()
+            .copied()
+            .find(|mv| {
+                !mv.flag().is_capture()
+                    && move_gives_check(&position, *mv)
+                    && static_exchange_evaluation(&position, *mv) < 0
+            })
+            .expect("test position should offer a losing quiet check");
+
+        assert!(!quiet_checks(&position, empty_ordering(&history, &position)).contains(&hanging));
+    }
+
+    /// The widened list must be the unwidened list plus quiet checks, in that order.
+    ///
+    /// Captures first is the property under test: qsearch cuts off on the first move
+    /// that reaches beta, and a quiet check resolves no material, so letting one
+    /// displace a capture would make the widening cost nodes it does not have to.
+    #[test]
+    fn quiet_checks_are_appended_after_every_capture_and_change_nothing_else() {
+        let history = SharedHistory::new(1);
+        for position in generator_positions() {
+            if is_in_check(&position, position.side_to_move()) {
+                continue;
+            }
+            let ordering = empty_ordering(&history, &position);
+            let captures = quiescence_moves(&position, None, 0, false, ordering);
+            let widened = quiescence_moves(&position, None, 0, true, ordering);
+
+            assert_eq!(
+                widened[..captures.len()],
+                captures[..],
+                "widening must not reorder or drop a capture: {position:?}"
+            );
+            assert_eq!(
+                widened[captures.len()..].to_vec(),
+                quiet_checks(&position, ordering),
+                "{position:?}"
+            );
+        }
+    }
+
     /// No sort site in this module may re-evaluate its key per comparison.
     ///
     /// This is a SOURCE-level guard on purpose. The defect it catches is invisible to
@@ -464,8 +688,9 @@ mod tests {
         let cached = ["sort_by", "_cached_key("].concat();
         assert_eq!(
             source.lines().filter(|line| line.contains(&cached)).count(),
-            4,
-            "the four sort sites are three in MovePicker::new and one in quiescence_moves"
+            5,
+            "the five sort sites are three in MovePicker::new, one in quiescence_moves, \
+             and one in quiet_checks"
         );
     }
 }
