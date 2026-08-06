@@ -116,6 +116,38 @@ $Concurrency = $requiredConcurr
 Write-Host "[guardrail] affinity=$useAffinity concurrency=$Concurrency -- $affinityReason" -ForegroundColor Cyan
 
 # ---------------------------------------------------------------------------
+# RULE 3 -- memory pre-flight. Same refusal pattern as RULE 1, for the same reason.
+#
+# M1-F2 established that a match whose engines do not fit in free physical memory PAGES,
+# and that the symptom of paging is engines losing on time -- the exact signal RULE 2
+# reserves for distinguishing a broken harness config from a genuine engine defect. Such a
+# run is inadmissible whatever it prints, so the driver refuses to produce the number.
+#
+# The process count is the whole point: fastchess runs `-concurrency` GAMES at once and each
+# game holds TWO engine processes, so a 1T match at the mandated concurrency 8 has SIXTEEN
+# engines alive, each with its own Hash. That is why a Hash that looks harmless in isolation
+# pages a 1T match (M1-F2 measured 4096 needing 65.7 GB against ~19.7 GB free). To exercise a
+# large Hash, run at Threads>=2, which selects concurrency 1 and therefore two processes.
+# ---------------------------------------------------------------------------
+$engineProcesses = 2 * $Concurrency
+$requiredMib     = $engineProcesses * $Hash
+$freeMib         = [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024)
+$budgetMib       = [int]($freeMib * 0.70)
+
+Write-Host ("[guardrail] memory: {0} engine processes x Hash {1} MiB = {2} MiB required; free {3} MiB, budget {4} MiB (70%)" `
+            -f $engineProcesses, $Hash, $requiredMib, $freeMib, $budgetMib) -ForegroundColor Cyan
+
+if ($requiredMib -gt $budgetMib) {
+    Fail ("Refusing to run: this match needs $requiredMib MiB of Hash " +
+          "($engineProcesses engine processes = 2 x concurrency $Concurrency, each at Hash $Hash MiB) " +
+          "but only $budgetMib MiB is budgetable (70% of $freeMib MiB free physical memory). " +
+          'It would page, and paging shows up as engines losing on time -- which is the one signal ' +
+          'AGENTS.md 4.451 reserves for a real defect, so the result would be uninterpretable ' +
+          "either way. Lower -Hash to at most $([Math]::Floor($budgetMib / $engineProcesses)) MiB, " +
+          'or run the large Hash at -AThreads 2 -BThreads 2 (concurrency 1 = 2 processes).') 2
+}
+
+# ---------------------------------------------------------------------------
 # Resolve paths and build the command line.
 # ---------------------------------------------------------------------------
 if (-not (Test-Path $fc))    { Fail "fastchess not found at $fc" 2 }
