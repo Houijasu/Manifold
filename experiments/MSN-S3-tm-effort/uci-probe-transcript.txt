@@ -1,0 +1,18 @@
+name         go            effort  wall_ms  depth      nodes  bestmove
+------------ ------------- ------- -------- ------ ---------- --------
+startpos     clock 8+0.08  True         372     14     225979  d2d4
+startpos     clock 8+0.08  False        376     14     225979  d2d4
+startpos     depth 12      True         161     12      99674  e2e4
+startpos     depth 12      False        162     12      99674  e2e4
+kiwipete     clock 8+0.08  True         295     12     141659  e2a6
+kiwipete     clock 8+0.08  False        291     12     141659  e2a6
+kiwipete     depth 12      True         301     12     141659  e2a6
+kiwipete     depth 12      False        296     12     141659  e2a6
+endgame      clock 8+0.08  True         339     13     360616  b4f4
+endgame      clock 8+0.08  False        322     13     360616  b4f4
+endgame      depth 12      True          38     12      38768  b4f4
+endgame      depth 12      False         37     12      38768  b4f4
+tactical     clock 8+0.08  True         495     14     298131  b5a7
+tactical     clock 8+0.08  False        489     14     298131  b5a7
+tactical     depth 12      True          94     12      55728  b5a7
+tactical     depth 12      False         94     12      55728  b5a7

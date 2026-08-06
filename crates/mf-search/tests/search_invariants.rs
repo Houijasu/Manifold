@@ -170,6 +170,11 @@ fn selectivity_options_default_to_enabled() {
             // 3.3x MORE nodes at depth 14 while looking cheaper on bench. See the
             // comment on `SearchOptions::default` in `search.rs`.
             use_correction_sources: [true, true, false, false, true],
+            // The best-move node-share time term also ships DISABLED: it measured
+            // -17.39 +/- 18.99 Elo at 8+0.08 and -34.86 +/- 44.35 at 30+0.3, because
+            // the share it measures is r = -0.348 correlated with the stability count
+            // it multiplies. See the comment on `SearchOptions::default` in `search.rs`.
+            use_time_effort: false,
         }
     );
 }
@@ -292,6 +297,9 @@ fn mate_in_n_found() {
                 // keeps this test exercising the shipped eval path.
                 use_correction_history: true,
                 use_correction_sources: SearchOptions::default().use_correction_sources,
+                // Inert here either way: this is a fixed-depth search with no soft
+                // limit to scale. Set to the SHIPPED default like every other toggle.
+                use_time_effort: false,
             },
             network,
         );
@@ -907,6 +915,145 @@ fn disabling_lmr_disables_capture_lmr_as_well() {
         with_capture.nodes, without_capture.nodes,
         "UseCaptureLMR must be inert while UseLMR is off"
     );
+}
+
+/// The effort term must be invisible to every search that is not on a clock.
+///
+/// It scales the SOFT TIME LIMIT, so a `go depth`, a `go nodes`, and `bench` have
+/// nothing for it to act on. That claim is worth an executable test rather than a
+/// comment, because the term is computed unconditionally at the end of every iteration
+/// -- it is only its CONSUMER that is time-gated. If that computation ever grew a side
+/// effect on the tree, the shipped bench signature would move and the two consecutive
+/// M3 features that ship OFF would stop being comparable to anything.
+///
+/// Trees are compared node-for-node rather than by best move: a bestmove match is
+/// satisfiable by two different searches that happen to agree, while an identical node
+/// count at several depths is not.
+#[test]
+fn the_time_effort_term_cannot_reach_a_fixed_depth_or_fixed_node_search() {
+    let Some(network) = network() else {
+        return;
+    };
+    const POSITIONS: [&str; 3] = [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+    ];
+
+    for fen in POSITIONS {
+        let position = Position::from_fen(fen, false).expect("test FEN should parse");
+        for limits in [
+            SearchLimits {
+                depth: Some(8),
+                ..SearchLimits::default()
+            },
+            SearchLimits {
+                nodes: Some(60_000),
+                ..SearchLimits::default()
+            },
+        ] {
+            let enabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+            let enabled = search(
+                &position,
+                &enabled_table,
+                limits,
+                SearchOptions {
+                    use_time_effort: true,
+                    ..SearchOptions::default()
+                },
+                network,
+            );
+
+            let disabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+            let disabled = search(
+                &position,
+                &disabled_table,
+                limits,
+                SearchOptions {
+                    use_time_effort: false,
+                    ..SearchOptions::default()
+                },
+                network,
+            );
+
+            assert_eq!(
+                enabled.nodes, disabled.nodes,
+                "the effort term changed an untimed search on {fen} ({limits:?})"
+            );
+            assert_eq!(
+                enabled.depth, disabled.depth,
+                "the effort term changed the depth reached on {fen} ({limits:?})"
+            );
+            assert_eq!(
+                enabled
+                    .best_move
+                    .map(|mv| format_uci_move(&position, mv, false)),
+                disabled
+                    .best_move
+                    .map(|mv| format_uci_move(&position, mv, false)),
+                "the effort term changed the move played on {fen} ({limits:?})"
+            );
+        }
+    }
+}
+
+/// The effort term may move the soft limit; it may never move the HARD one.
+///
+/// The hard limit is the promise the engine does not forfeit on, and the whole reason
+/// the soft/hard split exists (M7-F2 lost three games on time before it). A second
+/// multiplicative factor on the soft side is exactly the change that could quietly
+/// stretch the real bound, so the property is asserted against a live timed search
+/// rather than argued from the composition rule alone.
+#[test]
+fn the_effort_term_leaves_the_hard_limit_of_a_timed_search_intact() {
+    let Some(network) = network() else {
+        return;
+    };
+    // Black has just captured on d4 and White must recapture; every other move hangs a
+    // queen, so the rivals are refuted on the first null-window scout.
+    let position = Position::from_fen(
+        "r1bqkb1r/pppp1ppp/2n2n2/4p3/3PP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 0 4",
+        false,
+    )
+    .expect("test FEN should parse");
+    let timed = SearchLimits {
+        soft_time: Some(std::time::Duration::from_millis(400)),
+        hard_time: Some(std::time::Duration::from_millis(4_000)),
+        ..SearchLimits::default()
+    };
+
+    let enabled_table = TranspositionTable::new(32).expect("test TT should allocate");
+    let enabled = search(
+        &position,
+        &enabled_table,
+        timed,
+        SearchOptions {
+            use_time_effort: true,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+    let disabled_table = TranspositionTable::new(32).expect("test TT should allocate");
+    let disabled = search(
+        &position,
+        &disabled_table,
+        timed,
+        SearchOptions {
+            use_time_effort: false,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+
+    // Both must respect the hard limit, which is the promise that matters.
+    for result in [&enabled, &disabled] {
+        assert!(
+            result.elapsed <= std::time::Duration::from_millis(5_000),
+            "a timed search overran its hard limit: {:?}",
+            result.elapsed
+        );
+        assert!(result.best_move.is_some(), "a timed search must answer");
+    }
 }
 
 #[test]

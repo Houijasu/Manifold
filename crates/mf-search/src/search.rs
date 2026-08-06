@@ -125,6 +125,23 @@ const TIME_FALLING_STEP_PERCENT: u32 = 20;
 /// Ceiling on the soft-limit scale. The hard limit is the real bound; this only stops
 /// the scale itself from compounding without limit.
 const TIME_SCALE_MAX_PERCENT: u32 = 180;
+/// Lower anchor of the best-move effort ramp, in per-mille of the search's nodes.
+///
+/// Below this the best move is not yet dominating its own tree, so the position is
+/// still being worked out and the extra time buys something.
+const TIME_EFFORT_LOW_PERMILLE: u32 = 500;
+/// Upper anchor of the best-move effort ramp, in per-mille of the search's nodes.
+///
+/// Above this nothing else at the root is competitive and further thinking mostly
+/// re-confirms a decision already made.
+const TIME_EFFORT_HIGH_PERMILLE: u32 = 900;
+/// Effort factor applied at or below [`TIME_EFFORT_LOW_PERMILLE`], in percent.
+const TIME_EFFORT_LOW_PERCENT: u32 = 110;
+/// Effort factor applied at or above [`TIME_EFFORT_HIGH_PERMILLE`], in percent.
+const TIME_EFFORT_HIGH_PERCENT: u32 = 90;
+/// Neutral effort factor: used before any root move has accumulated a subtree, and
+/// whenever the effort term is disabled.
+const TIME_EFFORT_NEUTRAL_PERCENT: u32 = 100;
 const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
 const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
 
@@ -238,6 +255,11 @@ pub struct SearchOptions {
     /// the reference engine. A single master toggle would measure the family, not the
     /// members.
     pub use_correction_sources: [bool; CORRECTION_SOURCES + 1],
+    /// Scale the soft time limit by the fraction of the tree the best root move owns.
+    ///
+    /// Affects TIME-MANAGED searches only: with no `soft_time` there is nothing to
+    /// scale, so `go depth`, `go nodes`, `go infinite` and `bench` are untouched.
+    pub use_time_effort: bool,
 }
 
 impl Default for SearchOptions {
@@ -387,6 +409,47 @@ impl Default for SearchOptions {
                 sources[CORRECTION_MATERIAL] = false;
                 sources
             },
+            // The best root move's share of the tree, folded into the soft limit
+            // multiplicatively with the stability governor.
+            //
+            // Implemented, maintained, and toggleable, but ships **OFF**. Measured
+            // single-variable against the M2 kept build, Threads=1, zero forfeits on
+            // both sides at both time controls:
+            //
+            //   * 8+0.08, 300 games: -17.39 +/- 18.99 Elo, Ptnml [1,40,82,27,0]
+            //   * 30+0.3,  60 games: -34.86 +/- 44.35 Elo, Ptnml [0,11,14,5,0]
+            //
+            // The longer control was run because 8+0.08 is short for a time-management
+            // change and the reference's own gain for this term is an LTC result. It
+            // agreed in direction, which is what turns a marginal STC result into a
+            // decision.
+            //
+            // The mechanism is REDUNDANCY, and it is measurable rather than guessed.
+            // Over 299 iterations at depth >= 4 on 24 book positions, the correlation
+            // between the stability count and the effort factor is r = -0.348: a high
+            // node share and a settled root move are largely the SAME iterations. The
+            // term therefore does not add a signal, it re-applies one the stability
+            // governor already carries -- and that governor is tuned (+51 Elo in
+            // M7-F2-v2), so multiplying a second uncalibrated discount onto it
+            // overshoots. At stability 6, which is 38% of all iterations, the two
+            // compound to 76.4% of the nominal budget where the tuned governor asked
+            // for 80.4%. That 4.9% overshoot lands exactly on the settled positions
+            // where the saved time was supposed to be BANKED for later moves.
+            //
+            // Note what the aggregate hides: the mean scale moves only -0.5% overall,
+            // so a "does it change the time spent" check would have called this
+            // harmless. The damage is in the conditional distribution, not the mean.
+            //
+            // Conditions for revisiting: fold the node share INTO the stability
+            // governor as one term of a single calibrated formula (the reference
+            // engine's five factors are jointly tuned, not stacked independently), or
+            // re-derive the ramp anchors against the stability count they will
+            // multiply. Effort was measured to fall at or below the low anchor on
+            // 25.3% of iterations, on the ramp for 45.0%, and at or above the high
+            // anchor for 29.7%, so the signal itself has range -- it is the
+            // COMPOSITION that is wrong. Full write-up in
+            // `experiments/MSN-S3-tm-effort/results.md`.
+            use_time_effort: false,
         }
     }
 }
@@ -674,7 +737,15 @@ where
             stability = 0;
         }
         previous_best_move = best_move;
-        context.set_time_scale(time_scale_percent(stability, score - previous_score));
+        // Composed multiplicatively with stability because the two measure different
+        // things: stability asks whether the answer keeps CHANGING, effort asks whether
+        // the alternatives are still being taken seriously. A move can be stable for
+        // six iterations while a rival keeps costing a third of the tree.
+        let effort_percent = context.best_move_effort_percent(best_move);
+        context.set_time_scale(scaled_time_percent(
+            time_scale_percent(stability, score - previous_score),
+            effort_percent,
+        ));
         previous_score = score;
         context.publish_nodes();
         let elapsed = context.elapsed();
@@ -817,6 +888,11 @@ fn root_search(
     context: &mut SearchContext<'_>,
 ) -> Option<(i32, Vec<Move>)> {
     let mut position = position.clone();
+    // Effort is accounted per root search rather than per iteration, so an aspiration
+    // re-search replaces the previous distribution instead of adding to it: the last
+    // root search is the one whose result the iteration reports, and a failed window's
+    // truncated subtrees describe a tree that was thrown away.
+    context.begin_root_effort();
     let key = tt_key(&position, depth as i32);
     context.transposition_table.prefetch(key);
     let original_alpha = alpha;
@@ -865,6 +941,7 @@ fn root_search(
         // Reported after the legality filters above, so `currmovenumber` counts the moves
         // actually searched. Numbering is 1-based per the UCI spec, hence `searched + 1`.
         context.report_root_move(depth, mv, searched + 1);
+        let nodes_before_move = context.nodes;
         context.push_position(&position, 1, mv, continuation, &undo);
         let mut child_pv = Vec::new();
         let score = if searched == 0 {
@@ -924,6 +1001,7 @@ fn root_search(
         };
         context.pop_position(1);
         position.unmake_move(mv, undo);
+        context.record_root_effort(mv, context.nodes.saturating_sub(nodes_before_move));
         let score = score?;
         searched += 1;
 
@@ -1944,6 +2022,47 @@ fn time_scale_percent(stability: u32, score_change: i32) -> u32 {
         .min(TIME_SCALE_MAX_PERCENT)
 }
 
+/// Percentage to scale the soft time limit by, from the best root move's share of the
+/// tree the finished iteration searched.
+///
+/// The signal is a claim about the ALTERNATIVES, not about the best move. A low share
+/// means the other root moves are still expensive to refute -- they keep failing high
+/// on the null window and forcing full re-searches -- so the position has not decided
+/// itself yet and another iteration is worth paying for. A high share means every rival
+/// is being dismissed cheaply on a TT bound, and further thinking mostly re-confirms a
+/// decision already made.
+///
+/// Linear between the two anchors rather than a step, per the reference engine's own
+/// evolution of this term (hard stop -> multiplicative factor -> continuous
+/// interpolation). Fractions are carried in PER-MILLE and the arithmetic is integer, so
+/// the result is bit-reproducible on every target -- a float here would make the time
+/// manager, and therefore the games, platform-dependent.
+fn time_effort_percent(best_move_nodes: u64, total_nodes: u64) -> u32 {
+    // No root move has finished a subtree yet: nothing has been measured, so claim
+    // nothing. Reachable at depth 1 of a search stopped inside its first root move.
+    if total_nodes == 0 {
+        return TIME_EFFORT_NEUTRAL_PERCENT;
+    }
+    let permille = (best_move_nodes.min(total_nodes) * 1000 / total_nodes) as u32;
+    if permille <= TIME_EFFORT_LOW_PERMILLE {
+        return TIME_EFFORT_LOW_PERCENT;
+    }
+    if permille >= TIME_EFFORT_HIGH_PERMILLE {
+        return TIME_EFFORT_HIGH_PERCENT;
+    }
+    let span = TIME_EFFORT_HIGH_PERMILLE - TIME_EFFORT_LOW_PERMILLE;
+    let drop = TIME_EFFORT_LOW_PERCENT - TIME_EFFORT_HIGH_PERCENT;
+    TIME_EFFORT_LOW_PERCENT - (permille - TIME_EFFORT_LOW_PERMILLE) * drop / span
+}
+
+/// Composes the stability and effort factors, both in percent.
+///
+/// Multiplicative, and clamped by the same ceiling the stability factor alone obeys, so
+/// adding a second factor cannot raise the maximum a soft limit can be stretched to.
+fn scaled_time_percent(stability_percent: u32, effort_percent: u32) -> u32 {
+    (stability_percent * effort_percent / 100).min(TIME_SCALE_MAX_PERCENT)
+}
+
 /// Encodes a search depth into the biased `u8` the TT entry carries.
 #[inline]
 fn tt_stored_depth(depth: i32) -> u8 {
@@ -2740,6 +2859,14 @@ struct SearchContext<'a> {
     soft_time_reached: bool,
     /// Percentage the soft limit is scaled by, updated between iterations.
     time_scale_percent: u32,
+    /// Nodes spent under each root move during the CURRENT root search, and their sum.
+    ///
+    /// A flat vector rather than a map: a root move list is at most 218 entries and is
+    /// walked once per iteration, so a linear scan is cheaper than hashing. Reset at
+    /// the start of every root search, so an aspiration re-search replaces the previous
+    /// distribution rather than adding to it.
+    root_effort: Vec<(Move, u64)>,
+    root_effort_total: u64,
     generation: u8,
     /// Sink for `currmove` progress, set only for the worker that owns the clock.
     ///
@@ -2787,6 +2914,8 @@ impl<'a> SearchContext<'a> {
             stopped: false,
             soft_time_reached: false,
             time_scale_percent: 100,
+            root_effort: Vec::new(),
+            root_effort_total: 0,
             generation,
             root_move_reporter: None,
         }
@@ -2872,6 +3001,45 @@ impl<'a> SearchContext<'a> {
     /// Sets the percentage the soft limit is scaled by before the next iteration.
     fn set_time_scale(&mut self, percent: u32) {
         self.time_scale_percent = percent;
+    }
+
+    /// Discards the previous root search's per-move node distribution.
+    fn begin_root_effort(&mut self) {
+        self.root_effort.clear();
+        self.root_effort_total = 0;
+    }
+
+    /// Credits `nodes` to `mv`'s subtree in the current root search.
+    fn record_root_effort(&mut self, mv: Move, nodes: u64) {
+        self.root_effort_total = self.root_effort_total.saturating_add(nodes);
+        if let Some(entry) = self.root_effort.iter_mut().find(|(move_, _)| *move_ == mv) {
+            entry.1 = entry.1.saturating_add(nodes);
+        } else {
+            self.root_effort.push((mv, nodes));
+        }
+    }
+
+    /// The effort factor for the move the finished iteration chose.
+    ///
+    /// Reads THIS worker's own counts, never the aggregated pool total. Only worker 0
+    /// owns the clock, and only worker 0's root loop filled `root_effort`; the helpers
+    /// search their own trees with their own root move orders, so summing the pool
+    /// would divide one worker's subtree by every worker's nodes and drive the
+    /// fraction toward zero as threads are added. Reading worker 0 alone makes the
+    /// factor thread-count invariant by construction.
+    fn best_move_effort_percent(&self, best_move: Option<Move>) -> u32 {
+        if !self.options.use_time_effort {
+            return TIME_EFFORT_NEUTRAL_PERCENT;
+        }
+        let Some(best_move) = best_move else {
+            return TIME_EFFORT_NEUTRAL_PERCENT;
+        };
+        let best_nodes = self
+            .root_effort
+            .iter()
+            .find(|(move_, _)| *move_ == best_move)
+            .map_or(0, |(_, nodes)| *nodes);
+        time_effort_percent(best_nodes, self.root_effort_total)
     }
 
     /// The soft limit actually in force, after stability scaling.
@@ -4038,6 +4206,113 @@ mod tests {
         assert_eq!(time_scale_percent(6, -100), 80 + 40);
         assert_eq!(time_scale_percent(6, 100), 80);
         assert!(time_scale_percent(0, -100_000) <= TIME_SCALE_MAX_PERCENT);
+    }
+
+    #[test]
+    fn the_effort_factor_extends_time_while_the_rivals_are_still_expensive() {
+        // A best move owning half the tree or less leaves the other root moves costing
+        // the other half: they are still being taken seriously, so keep thinking.
+        assert_eq!(time_effort_percent(500, 1000), 110);
+        assert_eq!(time_effort_percent(100, 1000), 110);
+        assert_eq!(time_effort_percent(0, 1000), 110);
+        // Owning nearly the whole tree means every rival is dismissed on a TT bound.
+        assert_eq!(time_effort_percent(900, 1000), 90);
+        assert_eq!(time_effort_percent(1000, 1000), 90);
+        // Between the anchors the factor interpolates rather than stepping.
+        assert_eq!(time_effort_percent(700, 1000), 100);
+        assert_eq!(time_effort_percent(600, 1000), 105);
+        assert_eq!(time_effort_percent(800, 1000), 95);
+        // Monotone non-increasing across the whole domain, which is the property the
+        // ramp exists to have -- more effort on the best move never buys MORE time.
+        let mut previous = 0;
+        for permille in 0..=1000u64 {
+            let percent = time_effort_percent(permille, 1000);
+            assert!(
+                previous == 0 || percent <= previous,
+                "effort factor rose at {permille} per mille"
+            );
+            previous = percent;
+        }
+        // A search that has not finished a root subtree has measured nothing.
+        assert_eq!(time_effort_percent(0, 0), 100);
+        // Absurd inputs cannot divide by zero or overflow the ramp.
+        assert_eq!(time_effort_percent(u64::MAX, 1), 90);
+    }
+
+    #[test]
+    fn the_effort_factor_composes_with_stability_without_raising_the_ceiling() {
+        // Neutral effort leaves the stability factor exactly as it was.
+        assert_eq!(scaled_time_percent(110, 100), 110);
+        // A dominant best move shaves the stability budget; a contested one extends it.
+        assert_eq!(scaled_time_percent(80, 90), 72);
+        assert_eq!(scaled_time_percent(110, 110), 121);
+        // The composed factor obeys the SAME ceiling the stability factor alone does,
+        // so adding a second term cannot stretch the soft limit further than before.
+        assert_eq!(
+            scaled_time_percent(TIME_SCALE_MAX_PERCENT, TIME_EFFORT_LOW_PERCENT),
+            TIME_SCALE_MAX_PERCENT
+        );
+    }
+
+    #[test]
+    fn the_effort_factor_is_neutral_before_anything_is_measured_and_when_disabled() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position = Position::startpos();
+        let stop = AtomicBool::new(false);
+        let counters = [AtomicU64::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new(1);
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits::default(),
+            None,
+            &stop,
+            &position,
+            &history,
+            &shared_history,
+            // Explicitly ENABLED: the technique ships off after measuring -17.39 Elo,
+            // and this test is about the factor's arithmetic, not its default.
+            SearchOptions {
+                use_time_effort: true,
+                ..SearchOptions::default()
+            },
+            0,
+            0,
+            &counters,
+            network,
+        );
+
+        let moves = generate_legal_moves(&position);
+        let (best, rival) = (moves[0], moves[1]);
+
+        // No root move searched yet, and no best move yet: nothing to claim.
+        assert_eq!(context.best_move_effort_percent(Some(best)), 100);
+        assert_eq!(context.best_move_effort_percent(None), 100);
+
+        context.begin_root_effort();
+        context.record_root_effort(best, 900);
+        context.record_root_effort(rival, 100);
+        assert_eq!(context.best_move_effort_percent(Some(best)), 90);
+        assert_eq!(context.best_move_effort_percent(Some(rival)), 110);
+
+        // Repeated credits to the same move accumulate rather than overwrite: the root
+        // loop pays for a scout and its verification re-search separately.
+        context.record_root_effort(rival, 800);
+        assert_eq!(context.best_move_effort_percent(Some(best)), 110);
+
+        // A new root search -- an aspiration re-search, say -- starts the accounting
+        // over, because the tree the failed window built was thrown away.
+        context.begin_root_effort();
+        assert_eq!(context.best_move_effort_percent(Some(best)), 100);
+
+        // The toggle silences the term completely.
+        context.options.use_time_effort = false;
+        context.begin_root_effort();
+        context.record_root_effort(best, 1000);
+        assert_eq!(context.best_move_effort_percent(Some(best)), 100);
     }
 
     #[test]

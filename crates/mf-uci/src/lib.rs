@@ -57,6 +57,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseCorrHistMajor type check default false",
     "option name UseCorrHistMaterial type check default false",
     "option name UseCorrHistCont type check default true",
+    "option name UseTimeEffort type check default false",
     "option name EvalFile type string default <empty>",
 ];
 
@@ -827,6 +828,10 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UseCaptureLMR") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_capture_lmr = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseTimeEffort") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_time_effort = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseSingularExt") {
         if let Some(enabled) = parse_check_option(&value) {

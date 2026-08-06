@@ -669,6 +669,50 @@ fn capture_lmr_ships_disabled_and_is_wired_through_to_the_search() {
     );
 }
 
+/// `UseTimeEffort` must be INVISIBLE to bench in BOTH toggle positions.
+///
+/// M3-F3 scales the soft time limit by the best root move's share of the tree. Bench is
+/// a fixed-DEPTH search with no soft limit, so the term has nothing to act on there.
+/// This is the reason this test asserts EQUALITY where every other toggle test asserts
+/// a difference: an ablation anchor proves a toggle reaches the search, while this one
+/// proves it cannot.
+///
+/// It therefore also stands in for the enabled-signature anchors that
+/// `UseQSearchChecks` and `UseCaptureLMR` carry. Those two features ship off and pin a
+/// DIFFERENT number when enabled; this one ships off (-17.39 +/- 18.99 Elo at 8+0.08,
+/// -34.86 +/- 44.35 at 30+0.3) and pins the SAME number, because it does not touch the
+/// tree at all -- only the clock.
+///
+/// The per-root-move node accounting the term needs IS performed on every search,
+/// bench included -- only its consumer is time-gated. If that accounting ever acquired
+/// a side effect on the tree (a move-ordering read, a different TT store, an extra
+/// node visit), this is where it surfaces, and the M3 chain of "a feature that ships
+/// disabled leaves the signature bit-for-bit unchanged" would break silently without
+/// it. `crates/mf-search/tests/search_invariants.rs` makes the same assertion at the
+/// library level against fixed-node searches too.
+#[test]
+fn the_time_effort_term_cannot_move_the_fixed_depth_bench_signature() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseTimeEffort value true\n\
+         bench\n\
+         setoption name UseTimeEffort value false\n\
+         bench\n\
+         quit\n",
+        "UCI time effort session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT, BENCH_NODE_COUNT],
+        "the time-effort term must not reach a fixed-depth search in either position"
+    );
+}
+
 /// Turning history off must reproduce the pinned NNUE all-off signatures bit-for-bit.
 ///
 /// This is the proof that M4-F1 moved the shipped bench signature by adding history
@@ -818,6 +862,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseHistoryPruning",
         "UseQSearchChecks",
         "UseCaptureLMR",
+        "UseTimeEffort",
     ] {
         assert!(
             stdout
