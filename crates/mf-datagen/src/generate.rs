@@ -148,7 +148,7 @@ where
             handles.push(scope.spawn(move || -> Result<(), String> {
                 let transposition_table = TranspositionTable::new(WORKER_HASH_MIB)
                     .map_err(|error| format!("unable to allocate datagen Hash: {error}"))?;
-                let history = SharedHistory::new(1);
+                let history = SharedHistory::new();
                 loop {
                     let index = next_game.fetch_add(1, Ordering::Relaxed);
                     if index >= config.games {

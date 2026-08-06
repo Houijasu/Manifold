@@ -533,7 +533,7 @@ mod tests {
     /// node-count anchor in the repo, because losing moves only makes the tree smaller.
     #[test]
     fn quiet_check_generation_matches_filtering_every_quiet_through_gives_check() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         for position in generator_positions() {
             if is_in_check(&position, position.side_to_move()) {
                 continue;
@@ -565,7 +565,7 @@ mod tests {
     /// capture, a promotion, or castling.
     #[test]
     fn every_generated_quiet_check_gives_check_and_is_quiet() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let mut checked_any = false;
         for position in generator_positions() {
             if is_in_check(&position, position.side_to_move()) {
@@ -607,7 +607,7 @@ mod tests {
         // The white queen can check on e6, where the f7 pawn takes it for free.
         let position = Position::from_fen("4k3/5p2/8/8/8/1Q6/8/4K3 w - - 0 1", false)
             .expect("test FEN should parse");
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let hanging = generate_legal_moves(&position)
             .iter()
             .copied()
@@ -628,7 +628,7 @@ mod tests {
     /// displace a capture would make the widening cost nodes it does not have to.
     #[test]
     fn quiet_checks_are_appended_after_every_capture_and_change_nothing_else() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         for position in generator_positions() {
             if is_in_check(&position, position.side_to_move()) {
                 continue;

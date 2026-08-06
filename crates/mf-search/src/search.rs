@@ -574,7 +574,7 @@ where
     F: FnMut(&IterationInfo),
 {
     let node_counters = [AtomicU64::new(0)];
-    let shared_history = SharedHistory::new(1);
+    let shared_history = SharedHistory::new();
     search_worker_with_history_callback_options(
         position,
         history,
@@ -3300,7 +3300,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
@@ -3375,7 +3375,7 @@ mod tests {
             let stop = AtomicBool::new(false);
             let counters = [AtomicU64::new(0)];
             let history = [position.repetition_key()];
-            let shared_history = SharedHistory::new(1);
+            let shared_history = SharedHistory::new();
             let mut context = SearchContext::new(
                 &table,
                 SearchLimits {
@@ -3490,7 +3490,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
 
         let result = search_worker_with_history_callback_options(
             &position,
@@ -3519,7 +3519,7 @@ mod tests {
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
 
         for limit in [1_023, 1_024, 1_025] {
             let counters = [AtomicU64::new(0)];
@@ -3561,7 +3561,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(1_000), AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
 
         let result = search_worker_with_history_callback_options(
             &position,
@@ -3591,7 +3591,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0), AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
 
         let result = search_worker_with_history_callback_options(
             &position,
@@ -3624,7 +3624,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0), AtomicU64::new(37)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
         let mut reported_nodes = None;
 
         let result = search_worker_with_history_callback_options(
@@ -3654,7 +3654,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
 
         search_worker_with_history_callback_options(
             &position,
@@ -3919,7 +3919,7 @@ mod tests {
         .unwrap();
         let key = position.repetition_key();
         let history = [key; 6];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
@@ -4263,7 +4263,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let mut context = SearchContext::new(
             &table,
@@ -4324,7 +4324,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let mut context = SearchContext::new(
             &table,
@@ -4421,7 +4421,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
@@ -4471,7 +4471,7 @@ mod tests {
         let stop = AtomicBool::new(false);
         let counters = [AtomicU64::new(0)];
         let history = [position.repetition_key()];
-        let shared_history = SharedHistory::new(1);
+        let shared_history = SharedHistory::new();
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),

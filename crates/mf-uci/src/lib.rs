@@ -724,7 +724,7 @@ fn write_bench<W: Write>(
     // points in the WRONG direction on M4-F2 (mission AGENTS.md 4.54). Match play
     // allocates once per game; this now matches it. The node signature is unchanged
     // because a cleared table is bit-identical to a fresh one.
-    let shared_history = SharedHistory::new(1);
+    let shared_history = SharedHistory::new();
 
     // Only the searches are timed. The per-position table resets are setup, not search
     // work, and leaving them inside the measurement is what made bench NPS unusable.

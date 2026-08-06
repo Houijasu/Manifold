@@ -941,20 +941,27 @@ mod Threads {
         assert_eq!(search_info_lines(&first).len(), 5);
     }
 
+    /// Fixed-depth search output must not depend on `Threads` when the helpers never
+    /// leave their park.
+    ///
+    /// The kiwipete depth-10 case is the one that matters. Every hash-keyed shared
+    /// table must size its bucket count INDEPENDENTLY of the thread count: when the
+    /// mask differs between 1 and 8 threads, a corrhist collision that happens at the
+    /// small size and not at the large one changes the residual applied to a static
+    /// eval, which changes the tree. That is deterministic — table sizing, not a race
+    /// — and it made this position diverge on the M2 baseline binary while the shallow
+    /// startpos case still passed. A shallow anchor alone cannot see the defect.
     #[test]
     fn fixed_depth_output_is_identical_at_every_thread_count() {
-        let commands = |threads: usize| {
-            [
-                format!("setoption name Threads value {threads}"),
-                "position startpos moves e2e4 e7e5 g1f3".to_string(),
-                "go depth 8".to_string(),
-                "quit".to_string(),
-            ]
-        };
         // The `info string threads set to N` acknowledgement necessarily differs;
         // everything the search itself reports must not.
-        let run = |threads: usize| {
-            let owned = commands(threads);
+        let run = |threads: usize, position: &str, depth: usize| {
+            let owned = [
+                format!("setoption name Threads value {threads}"),
+                format!("position {position}"),
+                format!("go depth {depth}"),
+                "quit".to_string(),
+            ];
             let borrowed: Vec<&str> = owned.iter().map(String::as_str).collect();
             let output = run_uci(&borrowed);
             assert!(output.status.success());
@@ -969,16 +976,28 @@ mod Threads {
             (lines, bestmove)
         };
 
-        let (expected_lines, expected_bestmove) = run(1);
-        assert_eq!(expected_lines.len(), 8);
+        let cases = [
+            ("startpos moves e2e4 e7e5 g1f3", 8usize),
+            (
+                "fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+                10usize,
+            ),
+        ];
 
-        for threads in [2, 8] {
-            let (lines, bestmove) = run(threads);
-            assert_eq!(
-                lines, expected_lines,
-                "go depth output must not depend on Threads (helpers must stay parked)"
-            );
-            assert_eq!(bestmove, expected_bestmove);
+        for (position, depth) in cases {
+            let (expected_lines, expected_bestmove) = run(1, position, depth);
+            assert_eq!(expected_lines.len(), depth);
+
+            for threads in [2, 8] {
+                let (lines, bestmove) = run(threads, position, depth);
+                assert_eq!(
+                    lines, expected_lines,
+                    "go depth {depth} output on `{position}` must not depend on Threads \
+                     (helpers must stay parked and every shared table must be sized \
+                     independently of the thread count)"
+                );
+                assert_eq!(bestmove, expected_bestmove);
+            }
         }
     }
 

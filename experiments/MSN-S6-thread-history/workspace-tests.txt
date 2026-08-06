@@ -1,0 +1,896 @@
+   Compiling mf-search v0.1.0 (C:\Users\Samaritan\Projects\Manifold\crates\mf-search)
+   Compiling mf-datagen v0.1.0 (C:\Users\Samaritan\Projects\Manifold\crates\mf-datagen)
+   Compiling mf-uci v0.1.0 (C:\Users\Samaritan\Projects\Manifold\crates\mf-uci)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.20s
+     Running unittests src\lib.rs (target\debug\deps\mf_core-d60767cf6a85d845.exe)
+
+running 8 tests
+test sliding::tests::pext_matches_software_extraction ... ok
+test position::tests::king_square_tracks_both_kings_across_make_unmake ... ok
+test see::tests::greedy_see_prioritizes_a_legal_king_capture_that_ends_the_exchange ... ok
+test position::tests::undo_accessors_report_quiet_and_capture_data ... ok
+test position::tests::undo_captured_reports_en_passant_capture_square ... ok
+test see::tests::greedy_see_matches_exhaustive_with_multiple_legal_recaptures ... ok
+test sliding::tests::compiler_backend_avoids_llvm_21_pext_corruption ... ok
+test see::tests::greedy_see_matches_exhaustive_oracle_on_random_reachable_positions ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.55s
+
+     Running tests\bitboard.rs (target\debug\deps\bitboard-15bdc9b0ed9ee83a.exe)
+
+running 4 tests
+test bitboard_mutation_and_queries_track_membership ... ok
+test bitboard_bitwise_operations_match_u64 ... ok
+test bitboard_iteration_consumes_squares_low_to_high ... ok
+test square_round_trips_valid_indices ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\castling_notation.rs (target\debug\deps\castling_notation-a451e2a5f8f2328f.exe)
+
+running 4 tests
+test chess960_castling_keeps_the_king_takes_rook_spelling ... ok
+test standard_castling_keeps_the_king_to_file_spelling ... ok
+test a_castle_is_never_spelled_as_another_legal_move ... ok
+test every_castling_spelling_round_trips_in_both_dialects ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\draw_rules.rs (target\debug\deps\draw_rules-bf8e5899e20e1ad7.exe)
+
+running 2 tests
+test repetition_key_ignores_only_en_passant_targets_without_a_legal_capture ... ok
+test insufficient_material_distinguishes_dead_positions_from_mating_material ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\fen.rs (target\debug\deps\fen-e19525f0d7b2196c.exe)
+
+running 3 tests
+test a_board_a_promotion_could_push_past_the_material_key_is_rejected_at_parse_time ... ok
+test an_en_passant_target_no_pawn_could_capture_is_dropped_rather_than_rejected ... ok
+test a_piece_count_the_material_key_cannot_index_is_rejected_rather_than_panicked_on ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\fen_dialects.rs (target\debug\deps\fen_dialects-4943bac2936854c0.exe)
+
+running 4 tests
+test zeroed_counters_normalize_to_the_game_start ... ok
+test accepts_the_castling_dialects_guis_emit ... ok
+test shredder_castling_names_the_same_rooks_as_the_classic_spelling ... ok
+test a_genuinely_malformed_castling_field_is_still_rejected ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\fen_differential.rs (target\debug\deps\fen_differential-5c1da5e4e218edcd.exe)
+
+running 2 tests
+test standard_positions_survive_a_fen_roundtrip ... ok
+test chess960_positions_survive_a_fen_roundtrip ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests\material_values.rs (target\debug\deps\material_values-3b40bcf471b2833e.exe)
+
+running 1 test
+test canonical_material_values_match_engine_centipawn_scale ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\move_encoding.rs (target\debug\deps\move_encoding-a08e5f5585016fcc.exe)
+
+running 3 tests
+test chess960_castling_encodes_king_to_rook_origin ... ok
+test move_flags_preserve_special_move_semantics ... ok
+test move_is_exactly_sixteen_bits_and_round_trips_every_field ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\notation.rs (target\debug\deps\notation-81c11d5f5949f844.exe)
+
+running 5 tests
+test chess960_kq_rights_select_outermost_rooks ... ok
+test promotion_and_castling_notation_are_case_insensitive ... ok
+test a_chess960_king_move_is_not_shadowed_by_the_other_castling_dialect ... ok
+test chess960_castling_notation_round_trips_through_rook_origins ... ok
+test standard_castling_notation_round_trips_through_king_destinations ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\perft.rs (target\debug\deps\perft-1767f79496547c0f.exe)
+
+running 8 tests
+test cpw_suite_is_exact ... ok
+test chess960_rook_file_castling_is_exact ... ok
+test chess960_castling_through_attacked_rook_origin_is_illegal ... ok
+test en_passant_pin_edges_are_exact ... ok
+test kiwipete_anchor_is_exact ... ok
+test startpos_anchor_is_exact ... ok
+test promotions_are_exact ... ok
+test orthodox_castling_is_exact ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+     Running tests\perft_differential.rs (target\debug\deps\perft_differential-33560022cc4a69d7.exe)
+
+running 1 test
+test random_reachable_positions_match_cozy_chess ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.99s
+
+     Running tests\perft_ethereal.rs (target\debug\deps\perft_ethereal-19acbd4bcf2483f3.exe)
+
+running 1 test
+test ethereal_standard_suite_is_exact ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+     Running tests\perft_fischer.rs (target\debug\deps\perft_fischer-71a419da691dbab3.exe)
+
+running 1 test
+test ethereal_chess960_suite_is_exact ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.66s
+
+     Running tests\perft_fischer_2.rs (target\debug\deps\perft_fischer_2-5e4021153274a64e.exe)
+
+running 1 test
+test ethereal_chess960_suite_positions_241_through_480_are_exact ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.30s
+
+     Running tests\perft_fischer_3.rs (target\debug\deps\perft_fischer_3-18b446a2afc04af3.exe)
+
+running 1 test
+test ethereal_chess960_suite_positions_481_through_720_are_exact ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.59s
+
+     Running tests\perft_fischer_4.rs (target\debug\deps\perft_fischer_4-9023ac479cd9c6cb.exe)
+
+running 1 test
+test ethereal_chess960_suite_positions_721_through_960_are_exact ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.50s
+
+     Running tests\position_make_unmake.rs (target\debug\deps\position_make_unmake-900ee2535639c866.exe)
+
+running 6 tests
+test castling_rook_rejects_inconsistent_side_metadata - should panic ... ok
+test make_unmake_restores_every_special_move_bit_for_bit ... ok
+test null_move_round_trip_restores_reversible_state_and_hashes ... ok
+test castling_rights_follow_king_rook_moves_and_rook_captures ... ok
+test startpos_has_canonical_state_and_hashes ... ok
+test orthodox_and_chess960_castling_round_trip_overlapping_destinations ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\see.rs (target\debug\deps\see-c5003a2d7d1fe1bd.exe)
+
+running 1 test
+test see_matches_hand_computed_exchange_sequences ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\sliding_attacks.rs (target\debug\deps\sliding_attacks-68d7779b1b81c2d9.exe)
+
+running 4 tests
+test process_wide_attack_functions_use_selected_backend ... ok
+test magic_backend_matches_independent_oracle_exhaustively ... ok
+test selected_backend_matches_independent_oracle_exhaustively ... ok
+test pext_backend_matches_independent_oracle_exhaustively ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\zobrist.rs (target\debug\deps\zobrist-39b6271ed8ba7172.exe)
+
+running 3 tests
+test main_key_includes_side_en_passant_and_chess960_rook_origins ... ok
+test specialized_keys_track_only_their_intended_features ... ok
+test incremental_zobrist_matches_recomputation_over_200k_random_legal_plies ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.35s
+
+     Running unittests src\lib.rs (target\debug\deps\mf_datagen-2b88c6c8e61a78ad.exe)
+
+running 55 tests
+test filter::tests::a_position_whose_best_move_is_a_promotion_is_rejected ... ok
+test filter::tests::castling_is_kept_because_the_canonical_filter_keeps_it ... ok
+test filter::tests::a_position_whose_best_move_is_en_passant_is_rejected ... ok
+test filter::tests::a_position_with_no_best_move_is_rejected ... ok
+test filter::tests::a_position_whose_best_move_is_a_capture_is_rejected ... ok
+test filter::tests::a_mate_score_is_rejected_as_a_mate_rather_than_as_an_out_of_bounds_score ... ok
+test jsonl::tests::castling_written_as_king_takes_rook_is_accepted_and_kept ... ok
+test jsonl::tests::a_strided_restart_selects_the_same_lines_an_uninterrupted_run_would ... ok
+test filter::tests::every_rejection_reason_has_a_stable_report_label ... ok
+test jsonl::tests::a_line_with_no_evals_or_no_fen_parses_to_nothing_rather_than_panicking ... ok
+test jsonl::tests::a_progress_marker_round_trips ... ok
+test jsonl::tests::a_converted_record_is_byte_identical_to_encoding_the_position_directly ... ok
+test jsonl::tests::a_brace_inside_a_quoted_value_does_not_open_an_object_level ... ok
+test filter::tests::a_position_where_the_side_to_move_is_in_check_is_rejected ... ok
+test jsonl::tests::equal_depths_are_broken_by_knodes_and_then_by_file_order ... ok
+test filter::tests::a_quiet_position_with_a_quiet_best_move_is_kept ... ok
+test jsonl::tests::a_sample_stride_takes_every_nth_line_across_the_whole_file ... ok
+test jsonl::tests::mate_announcements_saturate_to_a_signed_centipawn_value_and_are_flagged ... ok
+test jsonl::tests::malformed_lines_are_counted_by_reason_rather_than_aborting_the_run ... ok
+test filter::tests::a_score_beyond_the_bound_is_rejected_and_the_bound_itself_is_kept ... ok
+test jsonl::tests::skipping_lines_resumes_exactly_where_a_previous_run_stopped ... ok
+test jsonl::tests::the_default_mate_saturation_matches_the_default_score_bound ... ok
+test jsonl::tests::the_four_field_source_fen_is_completed_with_the_canonical_clocks ... ok
+test jsonl::tests::a_real_source_line_yields_its_fen_and_deepest_eval ... ok
+test jsonl::tests::the_position_filters_still_apply_to_downloaded_data ... ok
+test jsonl::tests::every_record_carries_the_neutral_draw_placeholder ... ok
+test jsonl::tests::a_position_whose_best_move_is_tactical_is_dropped_using_the_pv_first_move ... ok
+test jsonl::tests::the_deepest_eval_wins_regardless_of_its_position_in_the_array ... ok
+test jsonl::tests::the_mate_saturation_is_clamped_to_the_score_bound_so_mates_are_not_all_rejected ... ok
+test jsonl::tests::white_relative_scores_are_negated_for_black_to_move ... ok
+test record::tests::a_record_reconstructs_the_material_of_its_position ... ok
+test record::tests::a_record_serializes_to_exactly_thirty_two_bytes ... ok
+test record::tests::a_black_to_move_record_is_vertically_mirrored_so_it_reads_as_white_to_move ... ok
+test record::tests::a_white_to_move_record_keeps_absolute_squares ... ok
+test record::tests::bytes_round_trip_through_the_record ... ok
+test record::tests::outcomes_map_onto_the_side_to_move ... ok
+test record::tests::a_well_formed_record_reports_no_structural_errors ... ok
+test record::tests::structural_validation_catches_the_defects_bullet_checks_for ... ok
+test record::tests::the_side_to_move_is_always_encoded_as_the_non_opponent_colour ... ok
+test rng::tests::a_seed_reproduces_its_entire_stream ... ok
+test rng::tests::below_stays_inside_its_bound_and_rejects_zero ... ok
+test rng::tests::distinct_seeds_produce_distinct_streams ... ok
+test rng::tests::per_index_streams_are_independent_of_one_another ... ok
+test validate::tests::a_file_whose_length_is_not_a_multiple_of_the_record_size_is_rejected ... ok
+test validate::tests::an_in_check_record_is_reported_as_a_filter_violation ... ok
+test validate::tests::structural_defects_are_counted_rather_than_panicked_on ... ok
+test validate::tests::duplicate_positions_are_detected ... ok
+test validate::tests::a_well_formed_file_validates_clean ... ok
+test generate::tests::the_filter_actually_rejects_positions_during_a_real_run ... ok
+test generate::tests::results_are_labelled_and_counted_consistently ... ok
+test generate::tests::every_emitted_record_survives_the_filter_and_is_structurally_valid ... ok
+test generate::tests::no_game_emits_the_same_board_twice ... ok
+test generate::tests::output_is_independent_of_the_thread_count ... ok
+test generate::tests::a_different_seed_produces_different_output ... ok
+test generate::tests::a_fixed_seed_reproduces_byte_identical_output ... ok
+
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.93s
+
+     Running tests\bulletformat_round_trip.rs (target\debug\deps\bulletformat_round_trip-d3b9697a07e8a5ba.exe)
+
+running 4 tests
+test bulletformat_decodes_our_records_to_the_same_pieces_scores_and_results ... ok
+test our_encoder_produces_byte_identical_records_to_bulletformat ... ok
+test a_converted_lichess_file_loads_through_bulletformats_data_loader_unchanged ... ok
+test a_generated_file_loads_through_bulletformats_data_loader_with_a_matching_count ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.33s
+
+     Running unittests src\lib.rs (target\debug\deps\mf_lab-7aa70fa14d2d3691.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\mf_nnue-8ccb4adf212dcb9b.exe)
+
+running 60 tests
+test eval::tests::concatenated_activation_uses_only_fc0_outputs_zero_through_thirty ... ok
+test network::tests::row_returns_none_when_range_arithmetic_overflows ... ok
+test accumulator::tests::network_path_resolution_marks_only_environment_paths_as_explicit ... ok
+test network::tests::sparse_fc0_layout_is_chunk_major_with_all_outputs_contiguous ... ok
+test accumulator::tests::stack_frames_keep_compact_metadata_and_cache_line_alignment ... ok
+test eval::tests::output_formula_truncates_negative_operands_toward_zero ... ok
+test eval::tests::feature_transform_clamps_multiplies_and_orders_stm_first ... ok
+test finny::tests::entries_cover_every_king_square_for_both_perspectives ... ok
+test format::tests::compressed_byte_count_is_consumed_but_not_enforced ... ok
+test format::tests::each_i16_array_detects_compressed_or_raw_encoding ... ok
+test format::tests::each_i8_array_detects_compressed_or_raw_encoding ... ok
+test format::tests::signed_leb128_decodes_negative_values_with_sign_extension ... ok
+test format::tests::signed_leb128_decodes_positive_values ... ok
+test network::tests::rejects_description_length_larger_than_remaining_input ... ok
+test network::tests::rejects_wrong_version ... ok
+test accumulator::tests::reusable_update_scratch_keeps_threat_indices_narrow ... ok
+test network::tests::row_returns_only_complete_in_bounds_rows ... ok
+test finny::tests::the_table_stays_small_enough_to_hold_one_per_search_thread ... ok
+test format::tests::each_i32_array_detects_compressed_or_raw_encoding ... ok
+test network::tests::rejects_truncated_header ... ok
+test network::tests::rejects_negative_description_length ... ok
+test simd::tests::dense_feature_transform_matches_scalar_edges_and_chunk_mask ... ok
+test simd::tests::dense_affine_backends_match_scalar_with_negative_weights_and_max_activations ... ok
+test simd::tests::explicit_modes_reject_every_unsupported_choice_safely ... ok
+test simd::tests::four_way_horizontal_reduction_wraps_like_scalar ... ok
+test simd::tests::production_mode_is_always_executable ... ok
+test simd::tests::production_overrides_control_automatic_selection ... ok
+test simd::tests::sparse_fc0_matches_dense_for_zero_heavy_and_dense_inputs ... ok
+test simd::tests::update_backends_match_scalar_with_wrapping_extremes ... ok
+test threats::tests::changed_threat_buffer_overflow_sets_flag_without_partial_append ... ok
+test threats::tests::changed_threat_buffer_reset_reuses_storage_without_stale_entries ... ok
+test threats::tests::dirty_threat_pack_unpack_and_sign_are_byte_exact ... ok
+test threats::tests::changed_edges_cover_defences_same_type_rules_and_king_targets ... ok
+test threats::tests::changed_edges_cover_standard_and_chess960_castling_relocations ... ok
+test threats::tests::changed_edges_cover_quiets_captures_en_passant_and_promotions ... ok
+test threats::tests::changed_edges_cover_pawn_blocks_and_discovered_slider_contacts ... ok
+test provision::tests::duplicate_default_candidate_paths_are_represented_once ... ok
+test threats::tests::empty_squares_never_terminate_a_physical_threat_edge ... ok
+test threats::tests::move_local_discovery_matches_full_physical_diff_on_random_walk ... ok
+test threats::tests::move_local_discovery_matches_full_physical_diff_across_open_and_chess960_walks ... ok
+test provision::tests::explicit_invalid_file_fails_without_checking_defaults ... ok
+test provision::tests::explicit_missing_path_fails_without_checking_defaults ... ok
+test provision::tests::invalid_existing_executable_candidate_does_not_fall_through ... ok
+test provision::tests::embedded_source_loads_and_reports_itself ... ok
+test provision::tests::absent_candidates_fall_back_to_the_embedded_network_or_fail_loudly ... ok
+test accumulator::tests::chess960_castling_keeps_incremental_state_equal_to_a_full_rebuild ... ok
+test accumulator::tests::stack_evaluation_uses_its_stored_forward_mode ... ok
+test accumulator::tests::dirty_threat_overflow_falls_back_to_an_exact_full_rebuild ... ok
+test accumulator::tests::castling_keeps_incremental_state_equal_to_a_full_rebuild ... ok
+test accumulator::tests::fused_accumulator_update_matches_full_rebuilds ... ok
+test finny::tests::refreshing_the_same_key_from_an_unrelated_position_stays_exact ... ok
+test accumulator::tests::king_walks_keep_incremental_state_equal_to_a_full_rebuild ... ok
+test accumulator::tests::real_position_accumulators_are_narrowed_i32_oracles ... ok
+test accumulator::tests::real_push_retains_the_child_for_the_next_incremental_update ... ok
+test finny::tests::a_cold_refresh_reproduces_the_halfka_only_accumulator ... ok
+test finny::tests::a_warm_refresh_applies_only_the_difference_and_still_matches_the_oracle ... ok
+test provision::tests::working_directory_candidate_is_used_when_executable_candidate_is_absent ... ok
+test provision::tests::a_network_above_the_executable_is_found_from_a_foreign_working_directory ... ok
+test provision::tests::executable_relative_candidate_wins_over_working_directory_candidate ... ok
+test provision::tests::the_executable_directory_still_wins_over_an_ancestor ... ok
+
+test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests\accumulator_stack.rs (target\debug\deps\accumulator_stack-6bd2ebc86d547d08.exe)
+
+running 9 tests
+test depth_errors_are_reported_without_indexing_out_of_bounds ... ok
+test root_state_dump_and_evaluation_match_from_scratch ... ok
+test null_push_copies_state_and_pop_restores_depth ... ok
+test real_push_uses_only_the_already_updated_child_position ... ok
+test stored_threat_lists_survive_pop_and_multiple_sibling_branches ... ok
+test captures_en_passant_promotions_and_castling_match_from_scratch ... ok
+test real_push_after_null_uses_copied_frame_metadata ... ok
+test deterministic_legal_walk_matches_from_scratch_and_unwinds_exactly ... ok
+test ten_thousand_position_standard_and_chess960_walk_matches_full_rebuilds ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.76s
+
+     Running tests\accumulator_stack_allocation.rs (target\debug\deps\accumulator_stack_allocation-3af56f70f7b60dc0.exe)
+
+running 1 test
+test real_push_null_push_and_pop_do_not_allocate_after_creation_and_lut_warmup ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests\eonego_parity.rs (target\debug\deps\eonego_parity-ca4dfb04fc1fafb5.exe)
+
+running 5 tests
+test manifold_matches_eonego_on_10k_reference_positions ... ignored, large local 10k-position parity gate
+test network_path_resolution_marks_only_environment_paths_as_explicit ... ok
+test root_accumulator_stack_matches_eonego_on_10k_reference_positions ... ok
+test existing_invalid_network_is_rejected_by_loader - should panic ... ok
+test eonego_ref_fixture_has_expected_schema ... ok
+
+test result: ok. 4 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests\evaluation.rs (target\debug\deps\evaluation-1b4aac18b994e63d.exe)
+
+running 2 tests
+test eonego_golden_internal_evaluations_match ... ok
+test startpos_color_mirror_and_dump_metadata_are_consistent ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests\evaluation_allocation.rs (target\debug\deps\evaluation_allocation-d3861ef16556a013.exe)
+
+running 2 tests
+test supplied_state_forward_modes_do_not_allocate_after_network_load ... ok
+test scalar_evaluation_and_dump_do_not_allocate_after_network_load ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests\feature_encoders.rs (target\debug\deps\feature_encoders-19c4e242c879d75f.exe)
+
+running 12 tests
+test halfka_indices_match_exact_tables_and_stay_in_range ... ok
+test full_threats_never_uses_kings_as_attackers ... ok
+test full_threats_same_type_dedup_matches_the_reference_in_both_directions ... ok
+test full_threats_luts_match_an_independent_eonego_reference ... ok
+test full_threats_ignores_chess960_castling_rights ... ok
+test full_threats_includes_own_piece_defence ... ok
+test full_threats_emits_pawn_blocks_only_for_pawns ... ok
+test full_threats_matches_a_direct_position_enumeration ... ok
+test full_threats_known_values_use_the_opposite_file_orientation ... ok
+test halfka_color_and_perspective_symmetry_is_exact ... ok
+test halfka_known_values_match_eonego ... ok
+test full_threats_indices_and_active_counts_are_bounded_on_reachable_positions ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\lazy_updates.rs (target\debug\deps\lazy_updates-4c1a3c774a49db36.exe)
+
+running 6 tests
+test a_deferred_king_move_materializes_through_both_mirror_tiers ... ok
+test a_sibling_searched_after_an_unread_pop_still_matches_a_full_rebuild ... ok
+test a_chain_of_unevaluated_pushes_materializes_correctly_at_the_first_evaluation ... ok
+test null_moves_interleaved_with_deferred_real_moves_keep_parity ... ok
+test evaluating_at_every_ply_of_a_deferred_chain_matches_a_full_rebuild ... ok
+test a_randomized_deferred_walk_matches_full_rebuilds_in_standard_and_chess960 ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests\load_main.rs (target\debug\deps\load_main-69bc2114a276fb2d.exe)
+
+running 1 test
+test local_eonego_full_threats_net_loads_strictly_and_is_aligned ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests\simd_backend.rs (target\debug\deps\simd_backend-99e90d16c4386d38.exe)
+
+running 5 tests
+test explicit_backend_selection_reports_unsupported_backends_safely ... ok
+test all_forward_modes_match_scalar_for_supplied_state_eval_and_dump ... ok
+test scalar_defaults_and_production_constructors_match_explicit_backends ... ok
+test supported_backends_match_scalar_for_normal_and_incremental_special_moves ... ok
+test stack_forward_modes_match_scalar_after_incremental_special_moves ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests\threat_allocation.rs (target\debug\deps\threat_allocation-13342a4d894b9cd2.exe)
+
+running 1 test
+test first_active_threat_enumeration_does_not_allocate ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\mf_search-cbf838569aa1b455.exe)
+
+running 99 tests
+test history::tests::continuation_history_uses_the_reference_ply_set_and_weights ... ok
+test history::tests::killers_rotate_without_duplicates ... ok
+test history::tests::continuation_correction_history_looks_back_two_and_four_plies ... ok
+test history::tests::correction_history_is_sized_by_its_bucket_count_and_stays_inside_l2 ... ok
+test history::tests::correction_history_uses_the_reference_blend_weights ... ok
+test history::tests::correction_history_saturates_at_the_reference_limit ... ok
+test history::tests::pawn_history_is_keyed_on_the_pawn_structure ... ok
+test move_ordering::tests::no_sort_site_re_evaluates_its_key_per_comparison ... ok
+test history::tests::butterfly_history_is_color_and_square_specific ... ok
+test history::tests::continuation_correction_history_is_a_separate_table_from_ordering_continuation ... ok
+test history::tests::butterfly_history_uses_bounded_gravity_updates ... ok
+test repetition::tests::irreversible_move_clock_limits_supplied_game_history ... ok
+test history::tests::correction_history_is_keyed_on_the_position_hash_and_the_side_to_move ... ok
+test repetition::tests::cuckoo_table_contains_all_reversible_non_pawn_move_deltas ... ok
+test history::tests::continuation_history_saturates_at_its_own_bound ... ok
+test repetition::tests::upcoming_repetition_detects_a_cycle_available_inside_the_search_tree ... ok
+test history::tests::captured_kind_reports_the_real_victim ... ok
+test history::tests::continuation_correction_history_is_indexed_by_plane_and_entry_independently ... ok
+test history::tests::capture_history_separates_victims_and_saturates ... ok
+test history::tests::continuation_history_is_keyed_on_the_previous_move ... ok
+test repetition::tests::null_move_is_a_hard_boundary_for_repetition_state ... ok
+test search::tests::aggregate_nodes_sum_published_worker_counts ... ok
+test search::tests::aspiration_window_widens_with_the_magnitude_of_the_previous_score ... ok
+test search::tests::draw_scores_are_fuzzed_by_node_parity ... ok
+test search::tests::capture_reduction_scales_with_depth_move_count_and_capture_history ... ok
+test repetition::tests::signed_repetition_distance_distinguishes_twofold_and_threefold_cycles ... ok
+test search::tests::frontier_futility_margin_grows_with_effective_depth ... ok
+test search::tests::eval_pruning_requires_rule_fifty_headroom_for_the_remaining_depth ... ok
+test history::tests::pawn_history_penalties_are_weaker_than_bonuses ... ok
+test search::tests::capture_reduction_falls_as_the_victim_gets_more_valuable ... ok
+test history::tests::concurrent_correction_updates_stay_inside_the_saturation_bound ... ok
+test search::tests::helpers_receive_distinct_bounded_aspiration_deltas ... ok
+test history::tests::concurrent_updates_stay_inside_the_saturation_bound ... ok
+test search::tests::deep_tt_cutoff_requires_one_ply_child_consistency ... ok
+test move_ordering::tests::a_quiet_check_that_hangs_the_checking_piece_is_gated_out_by_see ... ok
+test history::tests::every_hash_keyed_table_indexes_a_key_the_same_way_regardless_of_pool_width ... ok
+test move_ordering::tests::every_generated_quiet_check_gives_check_and_is_quiet ... ok
+test history::tests::concurrent_continuation_updates_stay_inside_the_saturation_bound ... ok
+test search::tests::check_detection_handles_en_passant_discovered_checks ... ok
+test search::tests::iir_reduces_every_deep_node_that_has_no_tt_move_to_order_by ... ok
+test search::tests::incremental_nnue_matches_full_rebuild_at_every_search_evaluation ... ignored, slow incremental NNUE verification at every search evaluation
+test search::tests::improving_uses_the_same_side_static_evaluation_from_two_plies_ago ... ok
+test history::tests::correction_history_applies_the_reference_per_source_update_weights ... ok
+test search::tests::iterative_deepening_is_bounded_by_the_ply_ceiling ... ok
+test history::tests::continuation_history_is_fixed_size_and_cache_line_aligned ... ok
+test search::tests::lmp_movecount_table_is_indexed_by_depth_and_improving ... ok
+test search::tests::lmr_base_table_and_adjustments_move_reduction_in_the_expected_direction ... ok
+test search::tests::losing_mate_score_disables_lmp_and_futility_pruning ... ok
+test search::tests::null_move_reduction_scales_with_depth_and_eval_surplus ... ok
+test search::tests::null_move_verification_blocks_nested_nulls_across_the_reduced_subtree ... ok
+test search::tests::null_move_verification_starts_at_high_depth_and_does_not_nest ... ok
+test search::tests::probcut_margin_and_depth_follow_the_reference_formulas ... ok
+test search::tests::probcut_does_not_adjust_or_return_decisive_scores ... ok
+test search::tests::qsearch_delta_pruning_margin_admits_only_captures_that_can_reach_alpha ... ok
+test search::tests::razoring_margin_uses_the_required_quadratic_formula ... ok
+test search::tests::reverse_futility_margin_is_linear_in_depth_with_improving_and_tt_pv_adjustments ... ok
+test search::tests::see_pruning_uses_separate_main_search_and_qsearch_thresholds ... ok
+test search::tests::shuffling_detection_matches_the_four_ply_retrace_pattern ... ok
+test search::tests::singular_extensions_support_single_double_negative_and_check_extensions ... ok
+test search::tests::the_capture_reduction_is_the_quiet_formula_with_a_capture_stat_score ... ok
+test search::tests::the_effort_factor_composes_with_stability_without_raising_the_ceiling ... ok
+test search::tests::the_effort_factor_extends_time_while_the_rivals_are_still_expensive ... ok
+test search::tests::the_tt_move_checks_and_queen_promotions_are_exempt_from_capture_reduction ... ok
+test search::tests::time_scaling_spends_more_while_the_root_move_moves_and_saves_once_it_settles ... ok
+test search::tests::tt_depth_encoding_round_trips_and_orders_the_two_qsearch_domains_below_interior_depths ... ok
+test search::tests::tt_key_canonicalizes_legally_irrelevant_en_passant_targets ... ok
+test search::tests::tt_values_adjust_mate_and_tablebase_distance_and_respect_rule_fifty ... ok
+test search::tests::tt_key_uses_coarse_rule_fifty_shards_independent_of_depth ... ok
+test search::tests::worker_zero_preserves_the_original_aspiration_delta ... ok
+test vote::tests::decisive_result_overrides_the_ordinary_vote_winner ... ok
+test vote::tests::depth_zero_workers_do_not_vote ... ok
+test vote::tests::equal_vote_totals_prefer_the_longer_pv ... ok
+test vote::tests::equal_votes_and_pv_lengths_prefer_the_lower_worker_index ... ok
+test vote::tests::larger_absolute_decisive_score_selects_the_shortest_conversion ... ok
+test vote::tests::no_move_results_are_ineligible_and_empty_voting_falls_back_to_worker_zero ... ok
+test search::tests::tt_cutoffs_are_blocked_by_high_rule_fifty_and_zeroing_moves ... ok
+test vote::tests::workers_choosing_the_same_move_combine_their_votes ... ok
+test move_ordering::tests::quiet_check_generation_matches_filtering_every_quiet_through_gives_check ... ok
+test move_ordering::tests::quiet_checks_are_appended_after_every_capture_and_change_nothing_else ... ok
+test search::tests::quiet_check_detection_matches_make_move_for_direct_discovered_and_castling_checks ... ok
+test search::tests::search_evaluator_capacity_exactly_matches_search_ply_limit ... ok
+test search::tests::search_evaluator_tracks_real_and_null_moves_and_unwinds_to_root ... ok
+test search::tests::search_evaluator_reports_the_network_score_unrescaled ... ok
+test search::tests::the_scaled_soft_limit_can_never_exceed_the_hard_limit ... ok
+test search::tests::the_effort_factor_is_neutral_before_anything_is_measured_and_when_disabled ... ok
+test search::tests::search_context_position_stack_keeps_nnue_in_lockstep ... ok
+test search::tests::one_worker_accepts_the_limit_node_across_publication_boundary ... ok
+test search::tests::null_move_is_a_hard_boundary_for_repetition_history ... ok
+test search::tests::public_search_scores_the_root_with_the_network ... ok
+test search::tests::excluded_move_search_without_alternatives_returns_alpha_not_draw ... ok
+test search::tests::worker_generation_is_written_to_root_tt_entries ... ok
+test search::tests::worker_zero_iteration_nodes_include_published_helpers ... ok
+test search::tests::singular_verification_does_not_probe_or_overwrite_the_parent_tt_entry ... ok
+test search::tests::helper_search_does_not_observe_clock_limits ... ok
+test history::tests::clear_resets_every_table ... ok
+test history::tests::correction_history_clears_with_the_other_tables ... ok
+test history::tests::continuation_history_clears_with_the_other_tables ... ok
+test search::tests::helper_uses_aggregate_published_node_limit ... ok
+test search::tests::one_worker_node_limit_is_exact ... ok
+
+test result: ok. 98 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests\mate_king_capture.rs (target\debug\deps\mate_king_capture-85f3d2aee9d3b9d4.exe)
+
+running 1 test
+test a_mate_search_does_not_panic_on_a_king_capture ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests\search_invariants.rs (target\debug\deps\search_invariants-295dc3ef0530f1c8.exe)
+
+running 25 tests
+test selectivity_options_default_to_enabled ... ok
+test supplied_history_detects_threefold_repetition_and_selects_the_drawing_move ... ok
+test already_claimable_fifty_move_draw_is_scored_at_the_root ... ok
+test a_requested_depth_above_the_ceiling_is_clamped_to_it ... ok
+test m2_tt_marks_static_evaluation_as_unavailable ... ok
+test a_quiet_mating_check_is_found_only_when_the_qsearch_widening_is_enabled ... ok
+test stalemate_resource_is_visible_through_quiescence ... ok
+test null_move_pruning_is_inert_without_non_pawn_material ... ok
+test insufficient_material_is_scored_as_a_draw_without_masking_two_bishops ... ok
+test time_limits_are_observed_without_returning_immediately ... ok
+test an_infinite_search_stops_iterating_at_the_ply_ceiling ... ok
+test winning_side_avoids_completing_a_threefold_repetition ... ok
+test selectivity_preserves_shallow_forced_mates ... ok
+test fifty_move_rule_draws_at_the_boundary_but_not_from_a_fresh_clock ... ok
+test score_bounds_sane ... ok
+test the_effort_term_leaves_the_hard_limit_of_a_timed_search_intact ... ok
+test the_qsearch_checks_toggle_changes_the_searched_tree ... ok
+test campbell_ghi_position_is_stable_with_warm_and_cleared_tt ... ok
+test pv_is_legal ... ok
+test deterministic_single_thread ... ok
+test disabling_lmr_disables_capture_lmr_as_well ... ok
+test selective_fixed_depth_search_is_reproducible_with_fresh_and_warm_tt ... ok
+test capture_lmr_saves_nodes_on_tactical_middlegames_without_changing_the_move ... ok
+test the_time_effort_term_cannot_reach_a_fixed_depth_or_fixed_node_search ... ok
+test mate_in_n_found has been running for over 60 seconds
+test mate_in_n_found ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 144.46s
+
+     Running tests\smp.rs (target\debug\deps\smp-760021959aac2c6a.exe)
+
+running 11 tests
+test pool_reports_its_persistent_worker_count ... ok
+test parallel_clear_removes_shared_table_entries ... ok
+test concurrent_pool_calls_are_rejected_as_busy ... ok
+test external_stop_ends_an_infinite_smp_search ... ok
+test nnue_fixed_depth_smp_uses_a_network_on_every_worker ... ok
+test fixed_depth_public_path_uses_worker_zero_from_a_larger_pool ... ok
+test eight_thread_pool_survives_representative_position_stress ... ok
+test explicit_fixed_depth_smp_path_returns_a_legal_result ... ok
+test callback_panic_drains_workers_before_pool_reuse_and_drop ... ok
+test nnue_fixed_depth_is_identical_across_pool_sizes ... ok
+test infinite_search_ignores_embedded_limits_until_external_stop ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests\transposition_table.rs (target\debug\deps\transposition_table-78d4411b8b9d377d.exe)
+
+running 19 tests
+test a_request_past_the_machine_maximum_reports_the_real_limit ... ok
+test the_offered_maximum_is_half_of_installed_memory_rounded_down_to_a_power_of_two ... ok
+test a_tiny_machine_is_still_offered_a_usable_table ... ok
+test an_unknown_machine_falls_back_to_the_historically_safe_maximum ... ok
+test prefetch_is_safe_for_arbitrary_keys ... ok
+test indexing_and_key_verification_use_independent_key_bits ... ok
+test full_cluster_replaces_the_shallowest_current_entry ... ok
+test this_machine_is_offered_more_than_the_old_hard_coded_cap ... ok
+test out_of_range_age_is_rejected_instead_of_silently_truncated - should panic ... ok
+test replacement_age_wraps_across_the_five_bit_generation_boundary ... ok
+test boundary_values_round_trip_without_losing_bits ... ok
+test table_layout_is_cache_line_aligned_without_straddling ... ok
+test hashfull_reports_sampled_occupancy_in_per_mille ... ok
+test storing_an_existing_key_updates_it_without_evicting_cluster_peers ... ok
+test clear_makes_previously_stored_probe_miss ... ok
+test requested_hash_size_allocates_approximately_that_many_mebibytes ... ok
+test a_table_holding_entries_never_reports_zero_occupancy ... ok
+test concurrent_probe_never_accepts_a_torn_entry ... ok
+test pack_and_probe_round_trip_losslessly_under_fuzzing ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running unittests src\lib.rs (target\debug\deps\mf_tune-22acb37f67605ceb.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\mf_uci-35b4d10f4cb13718.exe)
+
+running 37 tests
+test tests::a_short_clock_caps_the_hard_limit_at_a_fraction_of_what_remains ... ok
+test tests::mtbench_parser_defaults_to_depth_ten_and_standard_thread_rows ... ok
+test tests::helper_selected_terminal_line_reports_depth_before_bestmove ... ok
+test datagen_cli::tests::help_lists_every_documented_flag ... ok
+test datagen_cli::tests::generation_only_flags_are_rejected_on_validate ... ok
+test datagen_cli::tests::an_unsupported_format_is_rejected_by_name ... ok
+test datagen_cli::tests::self_play_flags_and_conversion_flags_do_not_silently_cross_over ... ok
+test tests::a_distant_movestogo_is_clamped_so_the_per_move_budget_stays_usable ... ok
+test datagen_cli::tests::help_documents_the_conversion_source ... ok
+test tests::clock_limits_reserve_a_safety_margin_and_let_the_hard_limit_borrow_from_later_moves ... ok
+test tests::movetime_search_limits_use_the_requested_duration ... ok
+test datagen_cli::tests::missing_mode_and_conflicting_modes_are_both_rejected ... ok
+test tests::pool_failure_emits_error_and_deterministic_legal_fallback ... ok
+test tests::the_advertised_hash_maximum_is_the_one_the_engine_enforces ... ok
+test datagen_cli::tests::a_misaligned_file_fails_validation_with_a_clear_message ... ok
+test datagen_cli::tests::resuming_without_a_checkpoint_fails_rather_than_silently_restarting ... ok
+test datagen_cli::tests::a_corrupt_file_fails_validation_without_panicking ... ok
+test datagen_cli::tests::a_sample_stride_subsamples_the_source_and_is_recorded_in_the_summary ... ok
+test datagen_cli::tests::converting_jsonl_writes_a_record_aligned_file_that_validates_clean ... ok
+test datagen_cli::tests::a_resumed_conversion_reproduces_the_uninterrupted_corpus_byte_for_byte ... ok
+test tests::a_hash_request_within_the_maximum_is_honoured_without_a_clamp_notice ... ok
+test tests::existing_invalid_eval_file_reports_a_strict_format_error ... ok
+test tests::invalid_threads_resize_preserves_the_existing_pool ... ok
+test tests::successful_hash_resize_replaces_the_table_and_starts_empty ... ok
+test tests::the_evaluator_diagnostic_always_reports_nnue_and_its_source ... ok
+test tests::an_oversize_hash_request_clamps_to_the_maximum ... ok
+test tests::selectivity_options_parse_case_insensitively_and_survive_new_game ... ok
+test tests::ucinewgame_clears_the_transposition_table_without_changing_its_size ... ok
+test tests::good_explicit_eval_file_loads_and_reports_source_description_and_backend ... ok
+test tests::bad_explicit_eval_file_preserves_the_previous_network_arc ... ok
+test tests::changing_eval_file_clears_eval_dependent_search_state ... ok
+test tests::empty_eval_file_value_returns_to_automatic_resolution ... ok
+test tests::empty_marker_eval_file_value_returns_to_automatic_resolution ... ok
+test tests::bench_node_count_is_deterministic_for_a_given_network ... ok
+test datagen_cli::tests::generation_writes_a_record_aligned_file_and_reports_a_matching_count ... ok
+test datagen_cli::tests::check_filters_reports_zero_violations_and_positive_castling_retention ... ok
+test datagen_cli::tests::a_fixed_seed_reproduces_a_byte_identical_file ... ok
+
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.87s
+
+     Running unittests src\main.rs (target\debug\deps\manifold-2b491f5069fa2126.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\analysis_stop.rs (target\debug\deps\analysis_stop-2abf39d2a094db31.exe)
+
+running 6 tests
+test a_go_depth_above_the_ceiling_clamps_to_it ... ok
+test stop_answers_with_multiple_threads ... ok
+test stop_answers_within_half_a_second_during_deep_analysis ... ok
+test a_second_analysis_in_the_same_session_still_answers ... ok
+test stop_after_a_long_infinite_analysis_answers_and_exits ... ok
+test an_infinite_search_on_a_forced_mate_saturates_at_the_depth_ceiling ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.30s
+
+     Running tests\bench_cli.rs (target\debug\deps\bench_cli-0dad327fa9430148.exe)
+
+running 16 tests
+test bench_rejects_arguments_helpfully ... ok
+test the_advertised_pawn_history_default_matches_the_shipped_default ... ok
+test continuation_history_off_reproduces_the_nnue_signature ... ok
+test correction_history_off_reproduces_the_nnue_signature ... ok
+test bench_reports_deterministic_nodes_time_and_nps ... ok
+test history_pruning_ships_disabled_after_being_re_measured_on_the_continuation_signal ... ok
+test capture_lmr_ships_disabled_and_is_wired_through_to_the_search ... ok
+test pawn_history_ships_disabled_and_is_wired_through_to_the_search ... ok
+test qsearch_checks_ships_disabled_and_is_wired_through_to_the_search ... ok
+test the_time_effort_term_cannot_move_the_fixed_depth_bench_signature ... ok
+test correction_variants_are_off_and_have_pinned_nnue_signatures ... ok
+test history_toggles_have_pinned_nnue_signatures ... ok
+test uci_bench_matches_cli_and_clears_all_search_state ... ok
+test disabling_lmr_does_not_also_weaken_futility_and_see_pruning ... ok
+test disabling_history_reproduces_nnue_all_selectivity_off_signatures has been running for over 60 seconds
+test each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent has been running for over 60 seconds
+test disabling_history_reproduces_nnue_all_selectivity_off_signatures ... ok
+test each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 846.42s
+
+     Running tests\currmove_progress.rs (target\debug\deps\currmove_progress-f83d0f7aa0d0a020.exe)
+
+running 4 tests
+test a_short_search_also_reports_progress ... ok
+test reporting_starts_at_the_first_move_of_the_first_depth ... ok
+     Running tests\engine_compare.rs (target\debug\deps\engine_compare-84d8fce4967c95c9.exe)
+test a_long_search_reports_the_root_move_it_is_searching ... ok
+test only_one_worker_reports_so_numbering_stays_consistent_per_depth ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.12s
+
+
+running 1 test
+test go_depth_10_side_by_side ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running tests\fen_bestmove_legality.rs (target\debug\deps\fen_bestmove_legality-74cd4b10cc0a619c.exe)
+
+running 6 tests
+test a_rejected_position_makes_go_decline_instead_of_answering_from_a_stale_board ... ok
+test a_successful_position_clears_the_stale_flag ... ok
+test a_chess960_castling_dialect_does_not_fall_back_to_the_previous_board ... ok
+test abbreviated_or_zeroed_fen_counters_still_analyse_the_pasted_position ... ok
+test bestmove_is_legal_after_a_fen_switch ... ok
+test bestmove_is_legal_in_every_pasted_fen ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests\fixed_depth_completes.rs (target\debug\deps\fixed_depth_completes-9d82b166ff6a2068.exe)
+
+running 3 tests
+test a_pasted_fen_yields_a_move_that_is_legal_in_that_position ... ok
+test go_depth_reaches_the_requested_depth_from_a_pasted_fen ... ok
+test a_second_position_command_replaces_the_first ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+
+     Running tests\fritz_session.rs (target\debug\deps\fritz_session-d93df89ed138f5b5.exe)
+
+running 2 tests
+test threads_24_answers_isready_promptly_on_repeated_positions ... ok
+test the_fritz_option_set_still_analyses_the_reported_position ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.29s
+
+     Running tests\movetime_budget.rs (target\debug\deps\movetime_budget-69094a688cd89dc4.exe)
+
+running 3 tests
+test a_fixed_depth_go_actually_reaches_that_depth ... ok
+test movetime_spends_close_to_its_budget ... ok
+test a_clock_based_go_spends_a_sensible_share_of_it ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.44s
+
+     Running tests\mtbench_cli.rs (target\debug\deps\mtbench_cli-b15361d53dbad208.exe)
+
+running 5 tests
+test mtbench_rejects_zero_depth_helpfully ... ok
+test mtbench_rejects_invalid_thread_lists_helpfully ... ok
+test mtbench_prints_stable_parseable_columns ... ok
+test mtbench_defaults_to_rows_for_one_two_four_and_eight_threads ... ok
+test mtbench_accepts_a_custom_thread_list ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.76s
+
+     Running tests\perft_cli.rs (target\debug\deps\perft_cli-94401b62330407ee.exe)
+
+running 3 tests
+test perft_subcommand_rejects_bad_arguments_helpfully ... ok
+test perft_subcommand_accepts_fen_and_chess960 ... ok
+test perft_subcommand_uses_startpos_by_default ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\train_cli.rs (target\debug\deps\train_cli-2a99fd0743f68866.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\uci_protocol.rs (target\debug\deps\uci_protocol-7d6c0f7cba7c630a.exe)
+
+running 49 tests
+test Threads::four_worker_pool_stops_and_quits_cleanly ... ok
+test a_rejected_move_keeps_the_prefix_that_did_parse ... ok
+test malformed_no_argument_commands_are_ignored ... ok
+test finite_search_can_be_stopped_before_its_budget_expires ... ok
+test go_perft_tolerates_trailing_arguments ... ok
+test hash_option_resizes_case_insensitively_and_rejects_invalid_values_without_crashing ... ok
+test go_perft_honors_chess960_castling_encoding ... ok
+test checkmate_uses_the_uci_null_move_token ... ok
+test a_negative_clock_is_clamped_and_still_moves_immediately ... ok
+test Threads::invalid_resize_preserves_the_existing_pool ... ok
+test Threads::immediate_stop_keeps_publishing_until_pool_dispatch_finishes ... ok
+test go_perft_emits_machine_parseable_divide_output ... ok
+test infinite_overrides_depth_and_node_limits_until_stop ... ok
+test Threads::one_worker_emits_exactly_one_line_per_completed_depth ... ok
+test explicit_depth_ignores_small_clock_values ... ok
+test interrupted_iteration_does_not_duplicate_a_completed_depth ... ok
+test position_moves_history_survives_into_repetition_aware_search ... ok
+test position_fen_without_move_counters_still_applies_move_suffix ... ok
+test hashfull_is_monotone_and_reported_in_per_mille ... ok
+test every_search_reports_an_nnue_evaluator_and_its_source ... ok
+test terminal_infinite_search_waits_for_stop ... ok
+test readiness_unknown_commands_and_quit_are_safe ... ok
+test stalemate_uses_the_uci_null_move_token ... ok
+test position_reports_a_rejected_fen_instead_of_searching_a_stale_board ... ok
+test quit_during_infinite_search_exits_cleanly ... ok
+test setoption_name_and_boolean_value_are_case_insensitive ... ok
+test quit_during_finite_search_exits_cleanly ... ok
+test infinite_search_waits_for_stop_and_then_returns_promptly ... ok
+test uci_handshake_is_ordered_and_well_formed ... ok
+test search_info_fields_follow_the_reference_engine_keyword_order ... ok
+test gui_move_dialects_are_accepted_rather_than_stranding_the_engine ... ok
+test mate_scores_use_uci_sign_and_move_count_conventions ... ok
+test insufficient_material_and_stalemate_resources_are_scored_as_draws ... ok
+test fixed_depth_and_node_budget_go_forms_emit_deterministic_legal_bestmoves ... ok
+test fifty_millisecond_clock_returns_legal_moves_without_overshoot ... ok
+test ucinewgame_resets_position_but_preserves_options ... ok
+test position_fen_accepts_omitted_move_counters ... ok
+test position_startpos_and_fen_move_suffixes_load_exact_positions ... ok
+test movetime_and_clock_go_forms_honor_bounded_budgets ... ok
+test Threads::four_worker_fixed_depth_is_deterministic_across_fresh_processes ... ok
+test fifty_move_and_pawn_reset_state_are_observable_through_uci ... ok
+test castling_notation_switches_and_round_trips_in_both_modes ... ok
+test iterative_search_emits_well_formed_monotone_info_and_legal_pv ... ok
+test every_go_form_a_gui_sends_eventually_answers_with_bestmove ... ok
+test Threads::immediate_quit_does_not_hang_during_pool_dispatch ... ok
+test malformed_position_inputs_do_not_crash_or_poison_loop ... ok
+test node_limited_search_is_repeatable_at_exact_budget ... ok
+test the_advertised_hash_maximum_is_accepted_rather_than_refused ... ok
+test Threads::fixed_depth_output_is_identical_at_every_thread_count ... ok
+
+test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.16s
+
+   Doc-tests mf_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mf_datagen
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mf_lab
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mf_nnue
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mf_search
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mf_tune
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests mf_uci
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

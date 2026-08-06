@@ -80,7 +80,7 @@ impl SearchPool {
         Ok(Self {
             workers,
             node_counters,
-            history: Arc::new(SharedHistory::new(thread_count)),
+            history: Arc::new(SharedHistory::new()),
             active: AtomicBool::new(false),
             generation: AtomicU8::new(0),
         })

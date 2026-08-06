@@ -40,7 +40,7 @@ pub(crate) const CONTINUATION_WEIGHTS: [i32; CONTINUATION_PLIES.len()] = [1_040,
 /// given each other's constants.
 pub(crate) const CORRECTION_MAX: i32 = 1_024;
 
-/// Bucket count of each hash-keyed correction table at one thread.
+/// Bucket count of each hash-keyed correction table.
 ///
 /// Sized by the BUCKET COUNT, never by the gravity bound (mission AGENTS.md 4.54 trap
 /// 2 -- sizing pawn history from the reference's gravity divisor instead of its bucket
@@ -51,7 +51,11 @@ pub(crate) const CORRECTION_MAX: i32 = 1_024;
 /// would be 1 MiB of independently-strided lookups on the eval path. A search tree
 /// visits far fewer distinct pawn structures than 16,384 per node region, so the
 /// collision rate a larger table would hold flat is not the binding constraint here.
-const CORRECTION_BASE_BUCKETS: usize = 16_384;
+///
+/// **Thread-count invariant. Do not reintroduce a `* nextPow2(threads)` factor.** See
+/// [`SharedHistory::new`].
+const CORRECTION_BUCKETS: usize = 16_384;
+const CORRECTION_BUCKET_MASK: u64 = CORRECTION_BUCKETS as u64 - 1;
 
 /// Blend slots for the hash-keyed correction sources.
 ///
@@ -99,15 +103,17 @@ const PIECES: usize = 12;
 const VICTIMS: usize = 6;
 const NO_VICTIM: usize = PieceKind::King.index();
 
-/// Bucket count of the pawn-history table at one thread, per the reference's
-/// `PAWN_HISTORY_SIZE`. Scaled by `nextPow2(threads)` so a wider pool gets a
-/// proportionally larger table and the collision rate stays flat.
+/// Bucket count of the pawn-history table, per the reference's `PAWN_HISTORY_SIZE`.
 ///
 /// This is deliberately NOT `PAWN_MAX`: the two are different numbers that both
 /// happen to be powers of two in the reference source. 512 buckets is 768 KiB, which
 /// stays inside L2; 8192 buckets would be 12 MiB and cost ~18% NPS to cache misses
 /// for no ordering benefit.
-const PAWN_BASE_BUCKETS: usize = 512;
+///
+/// **Thread-count invariant. Do not reintroduce a `* nextPow2(threads)` factor.** See
+/// [`SharedHistory::new`].
+const PAWN_BUCKETS: usize = 512;
+const PAWN_BUCKET_MASK: u64 = PAWN_BUCKETS as u64 - 1;
 
 const BUTTERFLY_LEN: usize = COLORS * SQUARES * SQUARES;
 const CAPTURE_LEN: usize = PIECES * SQUARES * VICTIMS;
@@ -189,45 +195,48 @@ pub struct SharedHistory {
     correction: [CacheAligned<Box<[AtomicI16]>>; CORRECTION_SOURCES],
     /// Continuation correction history at plies 2 and 4.
     correction_continuation: [CacheAligned<Box<[AtomicI16]>>; CORRECTION_CONTINUATION_PLIES.len()],
-    pawn_bucket_mask: u64,
-    correction_bucket_mask: u64,
 }
 
 impl SharedHistory {
-    pub fn new(thread_count: usize) -> Self {
-        assert!(thread_count > 0, "thread count must be nonzero");
-
-        let buckets = PAWN_BASE_BUCKETS
-            .checked_mul(thread_count.next_power_of_two())
-            .expect("pawn history bucket count must not overflow");
-        // Corrhist scales with the thread count for the same reason pawn history does,
-        // and for the reason the reference gives explicitly: a shared table lets thread 1
-        // consume correction values thread 2 already paid to search for. More threads
-        // means more distinct positions in flight, so the table grows to hold the
-        // collision rate flat.
-        let correction_buckets = CORRECTION_BASE_BUCKETS
-            .checked_mul(thread_count.next_power_of_two())
-            .expect("correction history bucket count must not overflow");
-
+    /// Builds the shared tables. **Every table is sized independently of the thread
+    /// count, and must stay that way.**
+    ///
+    /// Pawn history and corrhist used to be sized `BASE * nextPow2(threads)`, on the
+    /// reference's argument that a wider pool holds more distinct positions in flight
+    /// so the table should grow to keep the collision rate flat. That made the bucket
+    /// MASK a function of `Threads`, so a hash collision that happens at 512 buckets
+    /// and not at 4,096 changed the corrhist residual applied to a static eval, and
+    /// therefore changed the tree — deterministically, with every helper parked. Fixed
+    /// depth from a single worker then produced different node counts at `Threads=1`
+    /// and `Threads=8` (kiwipete depth 10 on the M2 baseline binary), which is a
+    /// reproducibility defect that turns any tree-enlarging search change into an
+    /// apparent regression.
+    ///
+    /// This does not regress SMP. The tables stay SHARED across workers and every
+    /// access is the same single relaxed load / relaxed store it always was, so
+    /// cross-thread contention is unchanged in kind. The scaling only ever reduced
+    /// *collisions*, never contention: workers contend on the entries they both touch,
+    /// and a larger table does not stop two workers from updating the same bucket for
+    /// the same position — which is the sharing the reference explicitly wants. What it
+    /// did buy was collision headroom at high thread counts, paid for with cache: at 8
+    /// threads the four corrhist tables went from 256 KiB to 2 MiB and pawn history
+    /// from 768 KiB to 6 MiB, well past L2 on the target machine (AGENTS.md 4.54 trap
+    /// 2, the same trap that cost 18% NPS). Determinism is worth more than headroom the
+    /// cache cannot hold.
+    pub fn new() -> Self {
         Self {
             butterfly: CacheAligned(zeroed(BUTTERFLY_LEN)),
             capture: CacheAligned(zeroed(CAPTURE_LEN)),
-            pawn: CacheAligned(zeroed(buckets * PAWN_BUCKET_LEN)),
-            // Continuation history is FIXED SIZE and does not scale with the thread
-            // count, unlike pawn history and corrhist. The reference says so explicitly, and
-            // the reason is structural: this table is keyed on an exact predecessor move
-            // rather than on a hashed structure, so there is no collision rate for a
-            // larger table to hold flat. Four planes at 9 MiB each is already the whole
-            // Each ply is 12*64 planes of 12*64 `i16` = 1.125 MiB, 4.5 MiB in total;
-            // scaling that by the thread count would multiply a table under no collision
-            // pressure and only thrash cache, which is the AGENTS.md 4.54 trap.
+            pawn: CacheAligned(zeroed(PAWN_BUCKETS * PAWN_BUCKET_LEN)),
+            // Continuation history is keyed on an exact predecessor move rather than on
+            // a hashed structure, so it has no collision rate at all. Each ply is 12*64
+            // planes of 12*64 `i16` = 1.125 MiB, 4.5 MiB in total; multiplying a table
+            // under no collision pressure would only thrash cache (AGENTS.md 4.54 trap).
             continuation: core::array::from_fn(|_| CacheAligned(zeroed(CONTINUATION_LEN))),
-            correction: core::array::from_fn(|_| CacheAligned(zeroed(correction_buckets * COLORS))),
+            correction: core::array::from_fn(|_| CacheAligned(zeroed(CORRECTION_BUCKETS * COLORS))),
             correction_continuation: core::array::from_fn(|_| {
                 CacheAligned(zeroed(CORRECTION_CONTINUATION_LEN))
             }),
-            pawn_bucket_mask: (buckets - 1) as u64,
-            correction_bucket_mask: (correction_buckets - 1) as u64,
         }
     }
 
@@ -379,23 +388,23 @@ impl SharedHistory {
 
     #[inline]
     fn correction_index(&self, key: u64, color: Color) -> usize {
-        (key & self.correction_bucket_mask) as usize * COLORS + color.index()
+        (key & CORRECTION_BUCKET_MASK) as usize * COLORS + color.index()
     }
 
     #[cfg(test)]
     pub(crate) fn correction_bucket_count(&self) -> usize {
-        self.correction_bucket_mask as usize + 1
+        self.correction[0].0.len() / COLORS
     }
 
     #[inline]
     fn pawn_index(&self, pawn_key: u64, piece: Piece, to: Square) -> usize {
-        let bucket = (pawn_key & self.pawn_bucket_mask) as usize;
+        let bucket = (pawn_key & PAWN_BUCKET_MASK) as usize;
         bucket * PAWN_BUCKET_LEN + piece.index() * SQUARES + usize::from(to.index())
     }
 
     #[cfg(test)]
     pub(crate) fn pawn_bucket_count(&self) -> usize {
-        self.pawn_bucket_mask as usize + 1
+        self.pawn.0.len() / PAWN_BUCKET_LEN
     }
 
     #[cfg(test)]
@@ -427,6 +436,12 @@ impl SharedHistory {
     #[cfg(test)]
     pub(crate) fn continuation_base_address(&self) -> usize {
         self.continuation[0].0.as_ptr() as usize
+    }
+}
+
+impl Default for SharedHistory {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -540,11 +555,10 @@ mod tests {
 
     use super::{
         BUTTERFLY_MAX, CAPTURE_MAX, CONTINUATION_MAX, CONTINUATION_PLIES, CONTINUATION_WEIGHTS,
-        CORRECTION_BASE_BUCKETS, CORRECTION_CONTINUATION_PLIES,
-        CORRECTION_CONTINUATION_UPDATE_WEIGHTS, CORRECTION_MAJOR, CORRECTION_MATERIAL,
-        CORRECTION_MAX, CORRECTION_MINOR, CORRECTION_PAWN, CORRECTION_SOURCES,
-        CORRECTION_UPDATE_WEIGHTS, CORRECTION_WEIGHTS, ContinuationKey, KillerTable,
-        PAWN_BASE_BUCKETS, PAWN_MAX, SharedHistory, captured_kind,
+        CORRECTION_BUCKETS, CORRECTION_CONTINUATION_PLIES, CORRECTION_CONTINUATION_UPDATE_WEIGHTS,
+        CORRECTION_MAJOR, CORRECTION_MATERIAL, CORRECTION_MAX, CORRECTION_MINOR, CORRECTION_PAWN,
+        CORRECTION_SOURCES, CORRECTION_UPDATE_WEIGHTS, CORRECTION_WEIGHTS, ContinuationKey,
+        KillerTable, PAWN_BUCKETS, PAWN_MAX, SharedHistory, captured_kind,
     };
 
     fn square(index: u8) -> Square {
@@ -574,7 +588,7 @@ mod tests {
 
     #[test]
     fn butterfly_history_is_color_and_square_specific() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         history.update_butterfly(Color::White, first_move(), BUTTERFLY_MAX);
 
         assert_eq!(
@@ -587,7 +601,7 @@ mod tests {
 
     #[test]
     fn butterfly_history_uses_bounded_gravity_updates() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         history.update_butterfly(Color::White, first_move(), BUTTERFLY_MAX / 2);
         history.update_butterfly(Color::White, first_move(), BUTTERFLY_MAX / 2);
         // v + b - v*|b|/D with v = D/2, b = D/2 gives 3D/4 (integer division exact here).
@@ -610,7 +624,7 @@ mod tests {
 
     #[test]
     fn capture_history_separates_victims_and_saturates() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let piece = Piece::new(Color::White, PieceKind::Knight);
         history.update_capture(piece, square(20), Some(PieceKind::Rook), CAPTURE_MAX);
 
@@ -635,14 +649,14 @@ mod tests {
 
     #[test]
     fn pawn_history_penalties_are_weaker_than_bonuses() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let piece = Piece::new(Color::White, PieceKind::Knight);
 
         history.update_pawn(0x1234, piece, square(20), 1_000);
         let after_bonus = history.pawn_score(0x1234, piece, square(20));
         assert_eq!(after_bonus, 1_000 * 1_104 / 1_024);
 
-        let symmetric = SharedHistory::new(1);
+        let symmetric = SharedHistory::new();
         symmetric.update_pawn(0x1234, piece, square(20), -1_000);
         let after_malus = symmetric.pawn_score(0x1234, piece, square(20));
         assert_eq!(after_malus, -(1_000 * 459 / 1_024));
@@ -654,7 +668,7 @@ mod tests {
 
     #[test]
     fn pawn_history_is_keyed_on_the_pawn_structure() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let piece = Piece::new(Color::White, PieceKind::Knight);
         history.update_pawn(0x1111, piece, square(20), PAWN_MAX);
 
@@ -663,26 +677,55 @@ mod tests {
     }
 
     #[test]
-    fn pawn_history_scales_with_the_next_power_of_two_thread_count() {
-        assert_eq!(SharedHistory::new(1).pawn_bucket_count(), PAWN_BASE_BUCKETS);
+    fn every_hash_keyed_table_indexes_a_key_the_same_way_regardless_of_pool_width() {
+        // The bucket MASK is what makes the search reproducible. Both tables used to be
+        // sized `BASE * nextPow2(threads)`, so the mask changed with `Threads`, and a
+        // key that collided at the narrow size but not the wide one changed the corrhist
+        // residual, the static eval, and therefore the tree -- with every helper parked.
+        // Sizing is now a compile-time constant, so the only thing that can reintroduce
+        // the coupling is a deliberate edit, and this test is what catches it.
+        assert_eq!(SharedHistory::new().pawn_bucket_count(), PAWN_BUCKETS);
         assert_eq!(
-            SharedHistory::new(2).pawn_bucket_count(),
-            PAWN_BASE_BUCKETS * 2
+            SharedHistory::new().correction_bucket_count(),
+            CORRECTION_BUCKETS
         );
-        // Non-powers of two round UP, so indexing stays a single mask.
-        assert_eq!(
-            SharedHistory::new(5).pawn_bucket_count(),
-            PAWN_BASE_BUCKETS * 8
-        );
-        assert_eq!(
-            SharedHistory::new(8).pawn_bucket_count(),
-            PAWN_BASE_BUCKETS * 8
-        );
+        // Powers of two so indexing stays a single mask rather than a modulo.
+        assert!(PAWN_BUCKETS.is_power_of_two());
+        assert!(CORRECTION_BUCKETS.is_power_of_two());
+        assert_eq!(super::PAWN_BUCKET_MASK, PAWN_BUCKETS as u64 - 1);
+        assert_eq!(super::CORRECTION_BUCKET_MASK, CORRECTION_BUCKETS as u64 - 1);
+
+        // Two tables built by two independently-sized pools must land the same key in
+        // the same bucket. `SharedHistory::new` takes no thread count at all now, so
+        // this is the behavioural statement of that fact.
+        let piece = Piece::new(Color::White, PieceKind::Knight);
+        let narrow = SharedHistory::new();
+        let wide = SharedHistory::new();
+        // A key far above both bucket counts, so any surviving mask difference shows.
+        let key = 0xDEAD_BEEF_1234_5678u64;
+        narrow.update_pawn(key, piece, square(20), PAWN_MAX);
+        wide.update_pawn(key, piece, square(20), PAWN_MAX);
+        narrow.update_correction(CORRECTION_PAWN, key, Color::White, CORRECTION_MAX);
+        wide.update_correction(CORRECTION_PAWN, key, Color::White, CORRECTION_MAX);
+        for other in [
+            key ^ (PAWN_BUCKETS as u64),
+            key ^ (CORRECTION_BUCKETS as u64),
+        ] {
+            assert_eq!(
+                narrow.pawn_score(other, piece, square(20)),
+                wide.pawn_score(other, piece, square(20)),
+                "a key that aliases at one size must alias identically at every pool width"
+            );
+            assert_eq!(
+                narrow.correction_score(CORRECTION_PAWN, other, Color::White),
+                wide.correction_score(CORRECTION_PAWN, other, Color::White)
+            );
+        }
     }
 
     #[test]
     fn clear_resets_every_table() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let piece = Piece::new(Color::White, PieceKind::Knight);
         history.update_butterfly(Color::White, first_move(), BUTTERFLY_MAX);
         history.update_capture(piece, square(20), Some(PieceKind::Rook), CAPTURE_MAX);
@@ -700,7 +743,7 @@ mod tests {
 
     #[test]
     fn concurrent_updates_stay_inside_the_saturation_bound() {
-        let history = Arc::new(SharedHistory::new(8));
+        let history = Arc::new(SharedHistory::new());
         let workers: Vec<_> = (0..8)
             .map(|worker| {
                 let history = Arc::clone(&history);
@@ -753,7 +796,7 @@ mod tests {
 
     #[test]
     fn continuation_history_is_keyed_on_the_previous_move() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let knight = Piece::new(Color::White, PieceKind::Knight);
         let rook = Piece::new(Color::Black, PieceKind::Rook);
         let previous = ContinuationKey::new(rook, square(20));
@@ -782,7 +825,7 @@ mod tests {
 
     #[test]
     fn continuation_history_saturates_at_its_own_bound() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let knight = Piece::new(Color::White, PieceKind::Knight);
         let previous = ContinuationKey::new(knight, square(20));
 
@@ -806,8 +849,8 @@ mod tests {
         // previous move, not on a hashed structure, so there is no collision rate to
         // hold flat. Sizing it from a gravity bound instead of its real dimensions is
         // the mission AGENTS.md 4.54 trap that cost 18% NPS on the pawn table.
-        let one = SharedHistory::new(1);
-        let eight = SharedHistory::new(8);
+        let one = SharedHistory::new();
+        let eight = SharedHistory::new();
         assert_eq!(one.continuation_len(), eight.continuation_len());
         assert_eq!(one.continuation_len(), 12 * 64 * 12 * 64);
 
@@ -824,7 +867,7 @@ mod tests {
 
     #[test]
     fn continuation_history_clears_with_the_other_tables() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let knight = Piece::new(Color::White, PieceKind::Knight);
         let previous = ContinuationKey::new(knight, square(20));
         history.update_continuation(previous, knight, square(30), CONTINUATION_MAX);
@@ -836,7 +879,7 @@ mod tests {
 
     #[test]
     fn concurrent_continuation_updates_stay_inside_the_saturation_bound() {
-        let history = Arc::new(SharedHistory::new(8));
+        let history = Arc::new(SharedHistory::new());
         let knight = Piece::new(Color::White, PieceKind::Knight);
         let previous = ContinuationKey::new(knight, square(20));
         let workers: Vec<_> = (0..8)
@@ -879,14 +922,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "thread count must be nonzero")]
-    fn shared_history_requires_a_nonzero_thread_count() {
-        let _ = SharedHistory::new(0);
-    }
-
-    #[test]
     fn correction_history_is_keyed_on_the_position_hash_and_the_side_to_move() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         history.update_correction(CORRECTION_PAWN, 0xAAAA, Color::White, 400);
 
         assert!(history.correction_score(CORRECTION_PAWN, 0xAAAA, Color::White) > 0);
@@ -914,7 +951,7 @@ mod tests {
         // non-pawn position, so both take the non-pawn weight.
         assert_eq!(CORRECTION_UPDATE_WEIGHTS, [128, 150, 186, 186]);
         for (source, weight) in CORRECTION_UPDATE_WEIGHTS.iter().enumerate() {
-            let history = SharedHistory::new(1);
+            let history = SharedHistory::new();
             history.update_correction(source, 0x1234, Color::White, 128);
             assert_eq!(
                 history.correction_score(source, 0x1234, Color::White),
@@ -926,7 +963,7 @@ mod tests {
 
     #[test]
     fn correction_history_saturates_at_the_reference_limit() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         history.update_correction(CORRECTION_PAWN, 0x1234, Color::White, i32::MAX);
         assert_eq!(
             history.correction_score(CORRECTION_PAWN, 0x1234, Color::White),
@@ -978,7 +1015,7 @@ mod tests {
 
     #[test]
     fn continuation_correction_history_is_indexed_by_plane_and_entry_independently() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let knight = Piece::new(Color::White, PieceKind::Knight);
         let rook = Piece::new(Color::Black, PieceKind::Rook);
         let plane = ContinuationKey::new(rook, square(20));
@@ -1007,7 +1044,7 @@ mod tests {
         // Same shape, different quantity: an eval residual bounded by CORRECTION_MAX
         // versus an ordering score bounded by CONTINUATION_MAX. Aliasing them would let
         // a 30,000-magnitude ordering score be read as a 1,024-magnitude eval residual.
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let knight = Piece::new(Color::White, PieceKind::Knight);
         let plane = ContinuationKey::new(knight, square(20));
         let entry = ContinuationKey::new(knight, square(30));
@@ -1027,28 +1064,20 @@ mod tests {
     }
 
     #[test]
-    fn correction_history_scales_with_the_next_power_of_two_thread_count() {
-        // Corrhist is SHARED and grows with the pool, exactly as pawn history does and
-        // for the reason the reference gives: thread 1 consumes correction values thread 2
-        // already paid to search for, and more threads means more distinct positions in
-        // flight, so the table grows to hold the collision rate flat.
-        assert_eq!(
-            SharedHistory::new(1).correction_bucket_count(),
-            CORRECTION_BASE_BUCKETS
-        );
-        assert_eq!(
-            SharedHistory::new(5).correction_bucket_count(),
-            CORRECTION_BASE_BUCKETS * 8
-        );
+    fn correction_history_is_sized_by_its_bucket_count_and_stays_inside_l2() {
+        // Corrhist is SHARED, which is the point: one worker consumes correction values
+        // another paid to search for. Sharing is what the atomics buy; the table SIZE is
+        // a separate question, and it is fixed so the mask cannot depend on `Threads`.
         // Sized by the BUCKET COUNT, never by the gravity bound (AGENTS.md 4.54 trap 2).
-        // 16,384 buckets x 2 colors x i16 = 64 KiB per table, 256 KiB for all four.
-        assert_eq!(CORRECTION_BASE_BUCKETS * 2 * size_of::<i16>(), 64 * 1024);
-        assert_ne!(CORRECTION_BASE_BUCKETS, CORRECTION_MAX as usize);
+        // 16,384 buckets x 2 colors x i16 = 64 KiB per table, 256 KiB for all four --
+        // the whole point of not letting it scale to 2 MiB at eight threads.
+        assert_eq!(CORRECTION_BUCKETS * 2 * size_of::<i16>(), 64 * 1024);
+        assert_ne!(CORRECTION_BUCKETS, CORRECTION_MAX as usize);
     }
 
     #[test]
     fn correction_history_clears_with_the_other_tables() {
-        let history = SharedHistory::new(1);
+        let history = SharedHistory::new();
         let knight = Piece::new(Color::White, PieceKind::Knight);
         let plane = ContinuationKey::new(knight, square(20));
         let entry = ContinuationKey::new(knight, square(30));
@@ -1067,7 +1096,7 @@ mod tests {
 
     #[test]
     fn concurrent_correction_updates_stay_inside_the_saturation_bound() {
-        let history = Arc::new(SharedHistory::new(8));
+        let history = Arc::new(SharedHistory::new());
         let workers: Vec<_> = (0..8)
             .map(|worker| {
                 let history = Arc::clone(&history);
