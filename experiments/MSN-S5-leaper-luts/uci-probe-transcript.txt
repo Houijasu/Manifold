@@ -1,0 +1,30 @@
+--- rep 1 leaper-luts
+startpos  info depth 17 seldepth 35 multipv 1 score cp 18 nodes 604484 nps 618714 hashfull 91 time 977 pv d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c4d5 e6d5 c1g5 f8e7 e2e3 e8g8 f1d3 c7c5 g1f3 c5d4 f3d4 b8c6
+          bestmove d2d4
+kiwipete  info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467043 nps 546249 hashfull 56 time 855 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+          bestmove e2a6
+--- rep 1 m2-nnue
+startpos  info depth 17 currmove e2e3 currmovenumber 6
+          bestmove d2d4
+kiwipete  info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467043 nps 513234 hashfull 56 time 910 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+          bestmove e2a6
+--- rep 2 leaper-luts
+startpos  info depth 17 seldepth 35 multipv 1 score cp 18 nodes 604484 nps 627058 hashfull 91 time 964 pv d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c4d5 e6d5 c1g5 f8e7 e2e3 e8g8 f1d3 c7c5 g1f3 c5d4 f3d4 b8c6
+          bestmove d2d4
+kiwipete  info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467043 nps 560675 hashfull 56 time 833 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+          bestmove e2a6
+--- rep 2 m2-nnue
+startpos  info depth 17 currmove e2e4 currmovenumber 2
+          bestmove d2d4
+kiwipete  info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467043 nps 528329 hashfull 56 time 884 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+          bestmove e2a6
+--- rep 3 leaper-luts
+startpos  info depth 17 seldepth 35 multipv 1 score cp 18 nodes 604484 nps 636298 hashfull 91 time 950 pv d2d4 d7d5 c2c4 e7e6 b1c3 g8f6 c4d5 e6d5 c1g5 f8e7 e2e3 e8g8 f1d3 c7c5 g1f3 c5d4 f3d4 b8c6
+          bestmove d2d4
+kiwipete  info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467043 nps 561349 hashfull 56 time 832 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+          bestmove e2a6
+--- rep 3 m2-nnue
+startpos  info depth 17 currmove e2e4 currmovenumber 2
+          bestmove d2d4
+kiwipete  info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467043 nps 517212 hashfull 56 time 903 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+          bestmove e2a6
