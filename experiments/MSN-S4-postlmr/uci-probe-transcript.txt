@@ -1,0 +1,24 @@
+--- uci ---
+id name Manifold
+option name UsePostLMRDepth type check default true
+option name UsePostLMRContHist type check default false
+uciok
+--- isready ---
+info string hash resized to 64 MB
+readyok
+--- go movetime 2000 (kiwipete, shipped defaults) ---
+info depth 14 currmove f3f6 currmovenumber 47
+info depth 14 currmove f3h3 currmovenumber 48
+info depth 15 seldepth 38 multipv 1 score cp -152 nodes 890115 nps 544080 hashfull 115 time 1636 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 b6a4 c3d4 a4c5 a6d3 h8h5 d3e2 g7e5 d4e5
+bestmove e2a6
+
+--- go depth 14, toggle arms ---
+shipped (UsePostLMRDepth=true, UsePostLMRContHist=false):
+info depth 14 seldepth 27 multipv 1 score cp -160 nodes 281041 nps 539426 hashfull 37 time 521 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e5g4 d5e4 e1c1 e8f8 g4f6 g7f6 g2g3 h8h5 g3c7
+bestmove e2a6
+depth band off:
+info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467043 nps 544974 hashfull 56 time 857 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+bestmove e2a6
+conthist bonus on:
+info depth 14 seldepth 38 multipv 1 score cp -177 nodes 660324 nps 535977 hashfull 92 time 1232 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e5g4 d5e4 e1c1 h8h4 g4f6 g7f6 g2g3 f6g5 c3d2 g5d2 d1d2 d7d6 f2f3 e8f8 f3e4 e7e4 h1f1 a8e8
+bestmove e2a6

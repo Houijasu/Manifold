@@ -1,0 +1,6 @@
+
+=== movetime 1000ms, 24 positions, Hash=64 ===
+postlmr      mean depth 14.92  median  15.0  min 12  max 18
+m2-nnue      mean depth 14.92  median  14.0  min 13  max 19
+
+postlmr minus m2-nnue: +0.00 plies mean; postlmr deeper in 7/24, equal 12

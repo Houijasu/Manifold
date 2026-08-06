@@ -15,7 +15,7 @@ const PAWN_MAX: i32 = 8_192;
 /// This is deliberately ~4x the butterfly bound: a continuation entry is conditioned on
 /// a specific predecessor move, so it is a far sharper statistic than a from-to average
 /// and is allowed to express a correspondingly stronger opinion.
-const CONTINUATION_MAX: i32 = 30_000;
+pub(crate) const CONTINUATION_MAX: i32 = 30_000;
 
 /// Lookback distances, in plies, at which continuation history is kept.
 ///

@@ -41,6 +41,8 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseQSearchDeltaPruning type check default true",
     "option name UseQSearchChecks type check default false",
     "option name UseCaptureLMR type check default false",
+    "option name UsePostLMRDepth type check default true",
+    "option name UsePostLMRContHist type check default false",
     "option name UseSingularExt type check default true",
     "option name UseCheckExt type check default true",
     "option name UseMultiCut type check default true",
@@ -828,6 +830,14 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UseCaptureLMR") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_capture_lmr = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UsePostLMRDepth") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_post_lmr_depth = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UsePostLMRContHist") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_post_lmr_conthist = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseTimeEffort") {
         if let Some(enabled) = parse_check_option(&value) {

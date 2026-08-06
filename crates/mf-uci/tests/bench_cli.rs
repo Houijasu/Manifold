@@ -53,34 +53,54 @@ use std::time::{Duration, Instant};
 /// records two independent demonstrations of that. The enabled signature is pinned in
 /// `capture_lmr_ships_disabled_and_is_wired_through_to_the_search`, not here.
 ///
-/// This constant NOT moving is itself an assertion. A feature that ships disabled must
-/// leave the shipped signature bit-for-bit unchanged, so if adding one ever moves this
-/// number, the toggle is not gating everything it claims to gate.
-const BENCH_NODE_COUNT: u64 = 45_036;
-const BENCH_NODES: &str = "Nodes searched: 45036";
+/// M3-F4 is the FIRST M3 feature to move this constant, from `45_036` to `44_737`
+/// (-0.66%), because it is the first one whose measurement said ship it ON. It lets the
+/// LMR verification re-search depth respond to how far the reduced scout beat the
+/// incumbent best score instead of always paying full `child_depth`, which is the
+/// binding constraint M3-F2's write-up identified. Its package-mate, the post-LMR
+/// continuation bonus, ships OFF and pins its own signature below.
+///
+/// The old `45_036` is not lost: it is exactly what `UsePostLMRDepth=false` reproduces,
+/// which is pinned in `post_lmr_depth_ships_enabled_and_reproduces_the_m3_signature`
+/// and is the attribution proof that this feature moved the signature and nothing else
+/// did.
+///
+/// This constant NOT moving is otherwise still an assertion. A feature that ships
+/// disabled must leave the shipped signature bit-for-bit unchanged, so if adding one
+/// ever moves this number, the toggle is not gating everything it claims to gate.
+const BENCH_NODE_COUNT: u64 = 44_737;
+const BENCH_NODES: &str = "Nodes searched: 44737";
+
+/// The signature with `UsePostLMRDepth=false`: the M3 signature, bit-for-bit.
+const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 45_036;
+
+/// The signature with `UsePostLMRContHist=true`.
+///
+/// Pinned so the disabled half of the M3-F4 package stays measurable without a rebuild.
+const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 46_541;
 
 /// The signature with `UseCaptureLMR=true`.
 ///
 /// Pinned so the disabled technique stays measurable without a rebuild, and so a change
 /// to the shared reduction plumbing is still caught by the suite even though nothing in
 /// the shipped search reaches the capture arm.
-const BENCH_NODE_COUNT_WITH_CAPTURE_LMR: u64 = 42_409;
+const BENCH_NODE_COUNT_WITH_CAPTURE_LMR: u64 = 41_588;
 
 /// The all-on signature with `UseQSearchChecks=true`.
 ///
 /// Pinned so the disabled technique stays measurable without a rebuild, and so a change
 /// to the quiet-check generator is still caught by the suite even though nothing in the
 /// shipped search reaches it.
-const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 50_569;
+const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 48_017;
 
 /// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
-const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 47_144;
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 42_677;
 
 /// The NNUE signature reproduced exactly by `UseContHistory=false`.
 ///
 /// This is measured with correction history off so the anchor isolates continuation
 /// history rather than folding correction-history changes into the same number.
-const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 44_320;
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 43_290;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -465,7 +485,7 @@ fn history_toggles_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 4);
 
-    assert_eq!(nodes, [47_144, 44_881, 48_561, 44_320]);
+    assert_eq!(nodes, [42_677, 45_100, 43_526, 43_290]);
 
     assert!(
         nodes[2] > nodes[0],
@@ -568,7 +588,7 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 3);
 
-    assert_eq!(nodes, [BENCH_NODE_COUNT, 47_970, 49_331]);
+    assert_eq!(nodes, [BENCH_NODE_COUNT, 49_017, 47_522]);
 }
 
 /// `UseQSearchChecks` ships OFF, and this test records WHY in an executable form.
@@ -666,6 +686,121 @@ fn capture_lmr_ships_disabled_and_is_wired_through_to_the_search() {
         nodes,
         [BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITH_CAPTURE_LMR],
         "capture LMR must be OFF in the shipped default and must reach the search when on"
+    );
+}
+
+/// `UsePostLMRDepth` ships ON, and turning it off must reproduce the M3 signature.
+///
+/// M3-F4 is the first M3 feature to ship enabled, so this is the attribution control
+/// for the only shipped-signature move in the whole milestone: if `45_036` does not
+/// come back exactly when the band is switched off, something OTHER than this feature
+/// moved the tree and the `44_737` above is measuring more than one thing.
+///
+/// The mechanism: a reduced scout that beats alpha is re-searched one ply DEEPER when
+/// it cleared the incumbent best score by more than 53, one ply SHALLOWER when it
+/// cleared it by less than 8, and at the unchanged full depth in between. M3-F2's
+/// write-up identified that always-full-depth re-search as the reason a 25-33%
+/// fixed-depth node saving converted to +0.12 plies at equal time.
+#[test]
+fn post_lmr_depth_ships_enabled_and_reproduces_the_m3_signature() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UsePostLMRDepth value false\n\
+         bench\n\
+         quit\n",
+        "UCI post-LMR depth session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH],
+        "the verification-depth band must be ON by default and must restore the exact \
+         M3 signature when disabled"
+    );
+}
+
+/// `UsePostLMRContHist` ships OFF, and this test records WHY in an executable form.
+///
+/// M3-F4 was specified as ONE package of two sub-mechanisms hanging off the same LMR
+/// fail-high, "unless the worker finds cause to split". There was cause. Measured
+/// separately against the bit-identical both-off control over 24 book positions at
+/// fixed depth, they move the tree in OPPOSITE directions:
+///
+///   arm             d12 total   d12 median   d14 total   d14 median
+///   depth-only         +0.57%        0.935      -0.98%        0.960
+///   conthist-only      +5.92%        1.068      +1.30%        0.986
+///   both               +9.47%        1.053      +9.87%        1.061
+///
+/// A single toggle would therefore have measured their DIFFERENCE and called it the
+/// package. The bonus also fails the composition test M3-F3 established: it adds a
+/// fourth writer to a continuation table three tuned consumers already read (the LMR
+/// statScore, move ordering, and pruning history), with a bonus magnitude imported from
+/// an engine whose other history sites all use different ones.
+///
+/// The enabled anchor is exact rather than a bare inequality so the disabled half stays
+/// measurable without a rebuild. Full write-up in
+/// `experiments/MSN-S4-postlmr/results.md`.
+#[test]
+fn post_lmr_conthist_ships_disabled_and_is_wired_through_to_the_search() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UsePostLMRContHist value true\n\
+         bench\n\
+         quit\n",
+        "UCI post-LMR continuation history session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST],
+        "the post-LMR continuation bonus must be OFF in the shipped default and must \
+         reach the search when on"
+    );
+}
+
+/// Neither post-LMR mechanism may reach the tree while `UseLMR` is off.
+///
+/// Both sit behind `reduced_depth < child_depth`, which cannot happen when nothing is
+/// reduced. The continuation bonus writes to a table move ordering and the LMR
+/// statScore both read, so a leak would make the `UseLMR=false` arm stop being the
+/// clean control every other selectivity anchor in this file is read against
+/// (mission AGENTS.md 4.4).
+#[test]
+fn post_lmr_handling_cannot_reach_the_tree_without_lmr() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "setoption name UseLMR value false\n\
+         bench\n\
+         setoption name UsePostLMRDepth value false\n\
+         bench\n\
+         setoption name UsePostLMRContHist value true\n\
+         bench\n\
+         quit\n",
+        "UCI post-LMR without LMR session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 3);
+    // Not `BENCH_NODE_COUNT_WITHOUT_LMR`: that anchor is measured with correction
+    // history OFF, and this session leaves the shipped defaults alone so the inertness
+    // is asserted about the search that actually plays games. What the test needs is
+    // that all three readings AGREE, and the exact value pins that they agree at the
+    // default-context LMR-off tree rather than at some third thing.
+    assert_eq!(
+        nodes,
+        vec![80_425; 3],
+        "post-LMR handling must be completely inert while UseLMR is off"
     );
 }
 
@@ -862,6 +997,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseHistoryPruning",
         "UseQSearchChecks",
         "UseCaptureLMR",
+        "UsePostLMRContHist",
         "UseTimeEffort",
     ] {
         assert!(
@@ -871,7 +1007,12 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
             "{name} must advertise default false"
         );
     }
-    for name in ["UseButterflyHistory", "UseCaptureHistory", "UseContHistory"] {
+    for name in [
+        "UseButterflyHistory",
+        "UseCaptureHistory",
+        "UseContHistory",
+        "UsePostLMRDepth",
+    ] {
         assert!(
             stdout
                 .lines()
@@ -928,7 +1069,7 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 68_397,
+        nodes[2], 72_105,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(

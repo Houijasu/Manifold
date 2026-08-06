@@ -147,6 +147,12 @@ fn selectivity_options_default_to_enabled() {
             // depth and converts that to only +0.12 plies at equal time, measuring
             // -8.11 +/- 20.67 Elo. See the comment on `SearchOptions::default`.
             use_capture_lmr: false,
+            // The verification-depth band is the M3-F4 answer to the constraint M3-F2
+            // identified, and it ships ON. Its package-mate, the continuation bonus,
+            // ships OFF: measured separately they move the fixed-depth tree in opposite
+            // directions. See the comment on `SearchOptions::default` in `search.rs`.
+            use_post_lmr_depth: true,
+            use_post_lmr_conthist: false,
             use_singular_ext: true,
             use_check_ext: true,
             use_multicut: true,
@@ -276,6 +282,11 @@ fn mate_in_n_found() {
                 // Capture LMR is a reduction, so it is off here for the same reason
                 // `use_lmr` is: a mate search must be exact.
                 use_capture_lmr: false,
+                // Inert here: with `use_lmr` off no scout is ever reduced, so neither
+                // post-LMR site can be reached. Set to the SHIPPED defaults so this
+                // test keeps exercising the search that actually plays games.
+                use_post_lmr_depth: true,
+                use_post_lmr_conthist: false,
                 use_singular_ext: false,
                 use_check_ext: true,
                 use_multicut: false,
@@ -866,6 +877,92 @@ fn capture_lmr_saves_nodes_on_tactical_middlegames_without_changing_the_move() {
         "capture LMR must save nodes across the tactical set: {total_enabled} with, \
          {total_disabled} without"
     );
+}
+
+/// Middlegames with plenty of late quiets, which is where LMR fail-highs live.
+const POST_LMR_POSITIONS: [&str; 3] = [
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+    "2kr3r/pp1q1ppp/5n2/1Nb5/2Pp1B2/7Q/P4PPP/1R3RK1 w - - 0 1",
+];
+
+/// Both post-LMR toggles must reach the tree independently of each other.
+///
+/// This is the ablation anchor that makes the M3-F4 split real. The two sub-mechanisms
+/// hang off the SAME event -- a reduced scout that beat alpha -- and were specified as
+/// one package; they ship on different defaults because measured separately they move
+/// the fixed-depth tree in opposite directions. That decision is only meaningful if
+/// each toggle independently reaches a real search, which is what this pins.
+#[test]
+fn each_post_lmr_toggle_independently_reaches_the_tree() {
+    let Some(network) = network() else {
+        return;
+    };
+    for fen in POST_LMR_POSITIONS {
+        let position = Position::from_fen(fen, false).expect("test FEN should parse");
+        let shipped_table = TranspositionTable::new(16).expect("test TT should allocate");
+        let shipped = search_default(&position, &shipped_table, limits(9), network);
+
+        for flipped in [
+            SearchOptions {
+                use_post_lmr_depth: false,
+                ..SearchOptions::default()
+            },
+            SearchOptions {
+                use_post_lmr_conthist: true,
+                ..SearchOptions::default()
+            },
+        ] {
+            let table = TranspositionTable::new(16).expect("test TT should allocate");
+            let result = search(&position, &table, limits(9), flipped, network);
+            assert_ne!(
+                shipped.nodes, result.nodes,
+                "each post-LMR toggle must reach the search on {fen}"
+            );
+        }
+    }
+}
+
+/// Neither post-LMR toggle may do anything while `UseLMR` is off.
+///
+/// Both sites sit behind `reduced_depth < child_depth`, which is unreachable when
+/// nothing is reduced. This matters more than it looks: the continuation bonus writes
+/// to a SHARED table that move ordering, the LMR statScore, and pruning history all
+/// read, so a write leaking outside the LMR path would make `UseLMR=false` stop meaning
+/// "no late-move reduction of any kind" -- the control every other selectivity delta in
+/// `bench_cli.rs` is read against (mission AGENTS.md 4.4).
+#[test]
+fn disabling_lmr_disables_both_post_lmr_mechanisms() {
+    let Some(network) = network() else {
+        return;
+    };
+    for fen in POST_LMR_POSITIONS {
+        let position = Position::from_fen(fen, false).expect("test FEN should parse");
+        let lmr_off = SearchOptions {
+            use_lmr: false,
+            ..SearchOptions::default()
+        };
+        let baseline_table = TranspositionTable::new(16).expect("test TT should allocate");
+        let baseline = search(&position, &baseline_table, limits(8), lmr_off, network);
+
+        for flipped in [
+            SearchOptions {
+                use_post_lmr_depth: false,
+                ..lmr_off
+            },
+            SearchOptions {
+                use_post_lmr_conthist: true,
+                ..lmr_off
+            },
+        ] {
+            let table = TranspositionTable::new(16).expect("test TT should allocate");
+            let result = search(&position, &table, limits(8), flipped, network);
+            assert_eq!(
+                baseline.nodes, result.nodes,
+                "post-LMR handling must be inert while UseLMR is off on {fen}"
+            );
+        }
+    }
 }
 
 /// `UseLMR=false` must silence capture LMR too.

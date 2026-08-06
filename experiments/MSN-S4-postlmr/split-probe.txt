@@ -1,0 +1,36 @@
+M3-F4 post-LMR sub-mechanism attribution -- 2026-08-06T12:45:56
+Engine: C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe (temporary MF_DIAG_* instrumentation)
+
+== depth 10 ==
+position          neither   depth-only    hist-only         both
+startpos            39363        30397        37035        36120
+kiwipete           107279        59612        57856        65014
+italian             18337        19416        33309        22400
+promo-race          97663        94712       106597       113322
+chaos               35383        74979        45273        43360
+sicilian            13097        10829        13590        33813
+TOTAL              311122       289945       293660       314029
+vs neither                       -6,8%        -5,6%         0,9%
+
+== depth 12 ==
+position          neither   depth-only    hist-only         both
+startpos            99674        60025        93478       100490
+kiwipete           141659       108897       144708        96651
+italian             79249        93205        96025        88128
+promo-race         261414       250874       226800       312676
+chaos              288745       563864       796118       393700
+sicilian            55728       251377       211985       175209
+TOTAL              926469      1328242      1569114      1166854
+vs neither                       43,4%        69,4%        25,9%
+
+== depth 14 ==
+position          neither   depth-only    hist-only         both
+startpos           225979       139188       217619       185298
+kiwipete           467043       281041       311852       660324
+italian            305421       179873       245706       249374
+promo-race         642604       836079       557633      1260921
+chaos              987875       812745      1252168      1011406
+sicilian           298131       422275       407564       437007
+TOTAL             2927053      2671201      2992542      3804330
+vs neither                       -8,7%         2,2%        30,0%
+

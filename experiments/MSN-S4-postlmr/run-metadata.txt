@@ -1,0 +1,26 @@
+Commit:      51af069e68360b1153bc67ccd6ddd7a7ac019773
+Binary A:    postlmr -> C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+SHA-256 A:   D080358B4762D679DDDDBF1BB6413B13462F2249DF216BFE080411210B66FB5D
+Binary B:    m2-nnue -> C:\Users\Samaritan\Projects\Manifold\baselines\m2-nnue\manifold.exe
+SHA-256 B:   BC0C445CD9A26BEC0EEA446EEF555B1EE8C756250BAD943973D1C33D776DB48C
+TC:          tc=8+0.08
+Seed:        79205006
+Book:        C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd  -format epd -order random -repeat -games 2
+Affinity:    enabled   Concurrency: 8   Threads: A=1 B=1   Hash: 64
+SPRT:        (none -- fixed-length match)
+Rounds:      150 (x2 games, paired openings)
+Guardrail:   both engines run Threads=1; AGENTS.md 4.451 makes -use-affinity mandatory
+Pre-run CPU: 6% (max of 5 samples, AGENTS.md 4.8)
+Purpose:     M3-F4 post-LMR verification-depth band single-variable measurement vs the M2 kept build
+Date:        2026-08-06T10:08:46Z
+Driver:      harness/run_match.ps1
+Command:
+C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe -engine cmd=C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe name=postlmr option.Hash=64 option.Threads=1 -engine cmd=C:\Users\Samaritan\Projects\Manifold\baselines\m2-nnue\manifold.exe name=m2-nnue option.Hash=64 option.Threads=1 -each proto=uci tc=8+0.08 -openings file=C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd format=epd order=random -repeat -games 2 -rounds 150 -concurrency 8 -srand 79205006 -report penta=true -ratinginterval 50 -pgnout file=C:\Users\Samaritan\Projects\Manifold\experiments\MSN-S4-postlmr\games.pgn append=false -log file=C:\Users\Samaritan\Projects\Manifold\experiments\MSN-S4-postlmr\fastchess.log level=warn append=false -use-affinity
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  postlmr      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  m2-nnue      time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================

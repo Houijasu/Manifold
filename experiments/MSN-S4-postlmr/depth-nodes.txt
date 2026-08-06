@@ -1,0 +1,36 @@
+Post-LMR fixed-depth node counts -- 2026-08-06T12:43:55
+Engine: C:\Users\Samaritan\Projects\Manifold\target\release\manifold.exe
+
+== depth 10 ==
+position               on          off    delta%  bestmove
+startpos            36120        39363     -8,24  e2e4
+kiwipete            65014       107279    -39,40  e2a6
+italian             22400        18337     22,16  c3d5
+promo-race         113322        97663     16,03  d7c8r != d7c8q
+chaos               43360        35383     22,54  c4c5
+sicilian            33813        13097    158,17  b5a7
+TOTAL              314029       311122      0,93  disagreements: 1
+  differing: promo-race
+
+== depth 12 ==
+position               on          off    delta%  bestmove
+startpos           100490        99674      0,82  e2e4
+kiwipete            96651       141659    -31,77  e2a6
+italian             88128        79249     11,20  c3d5
+promo-race         312676       261414     19,61  d7c8r != d7c8q
+chaos              393700       288745     36,35  c4c5
+sicilian           175209        55728    214,40  b5a7
+TOTAL             1166854       926469     25,95  disagreements: 1
+  differing: promo-race
+
+== depth 14 ==
+position               on          off    delta%  bestmove
+startpos           185298       225979    -18,00  e2e4 != d2d4
+kiwipete           660324       467043     41,38  e2a6
+italian            249374       305421    -18,35  c3d5
+promo-race        1260921       642604     96,22  d7c8r != d7c8q
+chaos             1011406       987875      2,38  c4c5
+sicilian           437007       298131     46,58  b5a7
+TOTAL             3804330      2927053     29,97  disagreements: 2
+  differing: startpos, promo-race
+

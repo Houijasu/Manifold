@@ -235,6 +235,15 @@ pub struct SearchOptions {
     pub use_qsearch_checks: bool,
     /// Reduce late captures, one ply less deeply than the same-index quiet.
     pub use_capture_lmr: bool,
+    /// Adjust the LMR verification re-search depth by the scout's margin over the
+    /// incumbent best score (`doDeeperSearch` / `doShallowerSearch`).
+    pub use_post_lmr_depth: bool,
+    /// Bonus continuation history for a reduced move that beat alpha.
+    ///
+    /// A SEPARATE toggle from `use_post_lmr_depth` even though both hang off the same
+    /// fail-high, because measured together they move fixed-depth nodes in opposite
+    /// directions -- see the comment on [`SearchOptions::default`].
+    pub use_post_lmr_conthist: bool,
     pub use_singular_ext: bool,
     pub use_check_ext: bool,
     pub use_multicut: bool,
@@ -345,6 +354,36 @@ impl Default for SearchOptions {
             // depth respond to how badly the reduced scout missed. Full write-up in
             // `experiments/MSN-S2-capture-lmr/results.md`.
             use_capture_lmr: false,
+            // M3-F4 was specified as ONE package of two sub-mechanisms hanging off the
+            // same LMR fail-high, "unless the worker finds cause to split". A four-arm
+            // fixed-depth sweep over 24 book positions found the cause: measured
+            // against the bit-identical both-off control they move the tree in OPPOSITE
+            // directions, so a single toggle would have measured their difference.
+            //
+            //   arm          d12 total  d12 median   d14 total  d14 median
+            //   depth-only      +0.57%       0.935      -0.98%       0.960
+            //   conthist-only   +5.92%       1.068      +1.30%       0.986
+            //   both            +9.47%       1.053      +9.87%       1.061
+            //
+            // (`experiments/MSN-S4-postlmr/book-nodes.txt`, `-d14.txt`. Medians, not
+            // sums: the per-position node distribution of a verification change is
+            // long-tailed, and a six-position sweep let one position carry the whole
+            // aggregate with the sign flipping between depths.)
+            //
+            // The verification-depth band is the sub-mechanism M3-F2 asked for and it
+            // does what it was asked to do: it shrinks the median tree at both depths.
+            // The continuation bonus grows it, and the two together are worse than
+            // either alone, so they ship on DIFFERENT defaults.
+            use_post_lmr_depth: true,
+            // The post-LMR continuation bonus ships OFF. It is not a search change, it
+            // is an ORDERING change, and it lands on a table this engine has already
+            // tuned three separate consumers against (LMR statScore, pruning history,
+            // move ordering). The reference applies it inside a history system with
+            // different bonus magnitudes at every other site, so transplanting the
+            // constant means adding a fourth writer to a jointly-tuned table -- the
+            // same composition failure M3-F3 measured at ~20 Elo. Its measured cost
+            // here is +5.9% median nodes at depth 12 for no depth at equal time.
+            use_post_lmr_conthist: false,
             use_singular_ext: true,
             use_check_ext: true,
             use_multicut: true,
@@ -1554,6 +1593,10 @@ fn pvs(
 
         let child_depth = (new_depth + extension).max(0);
         let continuation = continuation_key(position, mv);
+        // Resolved BEFORE the move is made, because `mv.from()` is empty afterwards and
+        // the post-LMR update site runs while the child is still on the board. This is
+        // the pre-promotion piece, matching the cutoff site's `piece_at(from)`.
+        let moved_piece = position.piece_at(mv.from());
         let undo = position.make_move(mv);
         context
             .transposition_table
@@ -1619,22 +1662,56 @@ fn pvs(
             .map(|score| -score);
             scout.and_then(|score| {
                 let score = if score > alpha && reduced_depth < child_depth {
-                    child_pv.clear();
-                    pvs(
-                        position,
-                        child_depth,
-                        -alpha - 1,
-                        -alpha,
-                        ply + 1,
-                        false,
-                        !cut_node,
-                        true,
-                        false,
-                        None,
-                        context,
-                        &mut child_pv,
-                    )
-                    .map(|score| -score)?
+                    // Post-LMR re-search handling (M3-F4). Two things happen once a
+                    // reduced scout beats alpha, and both target the VERIFICATION
+                    // rather than the reduction, because M3-F2 measured a 25-33%
+                    // fixed-depth node saving converting to +0.12 plies at equal time
+                    // and identified this always-full-depth re-search as where the
+                    // saving went.
+                    let verification_depth = if context.options.use_post_lmr_depth {
+                        post_lmr_verification_depth(child_depth, reduced_depth, best_score, score)
+                    } else {
+                        child_depth
+                    };
+                    // The continuation bonus is applied at the FAIL HIGH, not after the
+                    // verification resolves: the fact being recorded is that a move the
+                    // ordering demoted beat alpha at all, which is evidence about the
+                    // ORDERING regardless of what full depth then says. The planes are
+                    // read at `ply` -- the same predecessors the cutoff site uses -- and
+                    // the moving piece comes from the continuation key resolved before
+                    // the move was made, because `mv.from()` is empty by now.
+                    if context.options.use_post_lmr_conthist
+                        && let Some(piece) = moved_piece
+                    {
+                        let planes = context.continuation_planes(ply);
+                        update_continuation_histories(
+                            context.history,
+                            &planes,
+                            piece,
+                            mv.to(),
+                            POST_LMR_CONTINUATION_BONUS,
+                        );
+                    }
+                    if verification_depth <= reduced_depth {
+                        score
+                    } else {
+                        child_pv.clear();
+                        pvs(
+                            position,
+                            verification_depth,
+                            -alpha - 1,
+                            -alpha,
+                            ply + 1,
+                            false,
+                            !cut_node,
+                            true,
+                            false,
+                            None,
+                            context,
+                            &mut child_pv,
+                        )
+                        .map(|score| -score)?
+                    }
                 } else {
                     score
                 };
@@ -2289,6 +2366,54 @@ fn capture_late_move_reduction(
 #[inline]
 fn capture_reduction_allowed(mv: Move, tt_move: Option<Move>, gives_check: bool) -> bool {
     Some(mv) != tt_move && !gives_check && mv.flag().promotion() != Some(PieceKind::Queen)
+}
+
+/// Margin above the incumbent best score that earns the verification a DEEPER search.
+///
+/// Denominated in this engine's centipawn-scaled NNUE units, which are the same units
+/// every other search margin here uses (`RFP_MARGIN_PER_DEPTH = 105`,
+/// `FUTILITY_BASE_MARGIN = 124`). The reference's 53 sits in its own internal eval
+/// scale; the value is kept because both scales are pinned to "roughly half a pawn per
+/// hundred", and because a re-tune is a second variable this feature is not measuring.
+const POST_LMR_DEEPER_MARGIN: i32 = 53;
+
+/// Margin below which the verification is searched one ply SHALLOWER.
+///
+/// A scout that beat alpha by less than this beat it by rounding: it is worth
+/// confirming, but not worth the full depth the unreduced move would have cost.
+const POST_LMR_SHALLOWER_MARGIN: i32 = 8;
+
+/// Continuation-history bonus applied once a reduced scout beats alpha.
+///
+/// The reference constant, applied unconditionally at the fail-high rather than
+/// conditioned on the verification's outcome. The evidence being recorded is "a move
+/// the ordering demoted turned out to beat alpha at all", which is the same size of
+/// fact wherever it happens, so it is deliberately NOT the depth-scaled
+/// `quiet_history_bonus` the cutoff site uses.
+const POST_LMR_CONTINUATION_BONUS: i32 = 1_334;
+
+/// The depth a fail-high verification re-search runs at.
+///
+/// M3-F2 measured a 25-33% fixed-depth node saving converting to +0.12 plies at equal
+/// time, and identified the always-full-depth verification re-search as where the
+/// saving went (`experiments/MSN-S2-capture-lmr/results.md` section 5). This lets the
+/// verification depth respond to how far the reduced scout actually beat the incumbent:
+/// a scout that cleared it comfortably is worth confirming a ply deeper, one that
+/// scraped past it is worth a ply less than full.
+///
+/// Only a scout that WAS reduced can earn the deeper band: deepening an already
+/// full-depth scout would grow the tree on evidence that was never discounted in the
+/// first place. The shallower band carries no such condition, matching the reference.
+#[inline]
+fn post_lmr_verification_depth(
+    child_depth: i32,
+    reduced_depth: i32,
+    best_score: i32,
+    scout_score: i32,
+) -> i32 {
+    let deeper = reduced_depth < child_depth && scout_score > best_score + POST_LMR_DEEPER_MARGIN;
+    let shallower = scout_score < best_score + POST_LMR_SHALLOWER_MARGIN;
+    (child_depth + i32::from(deeper) - i32::from(shallower)).max(1)
 }
 
 #[inline]
@@ -4106,6 +4231,130 @@ mod tests {
             mf_core::MoveFlag::KNIGHT_PROMOTION,
         );
         assert!(capture_reduction_allowed(knight_promotion, None, false));
+    }
+
+    /// The verification re-search depth must respond to HOW FAR the scout beat alpha.
+    ///
+    /// This is the M3-F4 mechanism. Before it, every reduced move that failed high was
+    /// re-searched at exactly `child_depth`, which is where M3-F2 measured its whole
+    /// node saving going back (`experiments/MSN-S2-capture-lmr/results.md` section 5).
+    /// Three bands, keyed on the scout score's margin over the best score so far:
+    ///
+    /// * comfortably above  -> one ply DEEPER, but only when the scout was reduced at
+    ///   all (a scout already searched at full depth has nothing to verify deeper),
+    /// * barely above       -> one ply SHALLOWER,
+    /// * in between         -> the unchanged full depth.
+    #[test]
+    fn the_verification_depth_follows_the_scout_score_margin() {
+        // Scout comfortably above the incumbent: verify one ply deeper.
+        assert_eq!(
+            post_lmr_verification_depth(10, 8, 500, 500 + POST_LMR_DEEPER_MARGIN + 1),
+            11
+        );
+        // Exactly AT the deeper margin is not enough -- the reference uses a strict
+        // inequality, and a boundary that drifts silently changes the tree.
+        assert_eq!(
+            post_lmr_verification_depth(10, 8, 500, 500 + POST_LMR_DEEPER_MARGIN),
+            10
+        );
+        // Barely above the incumbent: verify one ply shallower.
+        assert_eq!(
+            post_lmr_verification_depth(10, 8, 500, 500 + POST_LMR_SHALLOWER_MARGIN - 1),
+            9
+        );
+        // Exactly at the shallower margin is already out of the band.
+        assert_eq!(
+            post_lmr_verification_depth(10, 8, 500, 500 + POST_LMR_SHALLOWER_MARGIN),
+            10
+        );
+        // An UNREDUCED scout can never earn the deeper band: there is no reduction to
+        // pay back, and deepening past `child_depth` there would extend the tree on
+        // evidence that was already full-depth.
+        assert_eq!(
+            post_lmr_verification_depth(10, 10, 500, 500 + POST_LMR_DEEPER_MARGIN + 1),
+            10
+        );
+        // The result is a search depth, so it can never go below 1.
+        assert_eq!(
+            post_lmr_verification_depth(1, 1, 500, 500 + POST_LMR_SHALLOWER_MARGIN - 1),
+            1
+        );
+    }
+
+    /// The post-LMR continuation bonus is a plain positive bonus at the reference size.
+    ///
+    /// The reference applies `update_continuation_histories(ss, movedPiece, to, 1334)`
+    /// unconditionally once a reduced scout beats alpha, i.e. the SIGN is fixed by
+    /// having failed high at all rather than by the outcome of the verification. That
+    /// is deliberately not a depth-scaled `quiet_history_bonus`: the evidence here is
+    /// "a move the ordering demoted turned out to beat alpha", which is worth the same
+    /// wherever it happens.
+    ///
+    /// Still pinned even though the mechanism ships OFF, for the same reason the
+    /// capture-LMR anchors are: a measured negative stays measurable.
+    #[test]
+    fn the_post_lmr_continuation_bonus_is_the_reference_constant() {
+        assert_eq!(POST_LMR_CONTINUATION_BONUS, 1_334);
+        const { assert!(POST_LMR_CONTINUATION_BONUS > 0) };
+        // It rides the same weighted fan-out every other continuation update uses, so
+        // it must stay inside the table's saturation bound at the heaviest ply weight.
+        const {
+            assert!(
+                POST_LMR_CONTINUATION_BONUS * CONTINUATION_WEIGHTS[0] / 1_024
+                    < crate::history::CONTINUATION_MAX
+            )
+        };
+    }
+
+    /// The post-LMR update must reach EVERY continuation plane, with the shared weights.
+    ///
+    /// Instrumented against a real table rather than asserted in prose: this is the one
+    /// new write site the feature adds, and "it fires with the right sign at the right
+    /// planes" is the whole claim.
+    #[test]
+    fn the_post_lmr_update_writes_a_bonus_to_every_continuation_plane() {
+        let history = SharedHistory::new();
+        let piece = mf_core::Piece::new(Color::White, PieceKind::Knight);
+        let to = Square::new(30).expect("test square is in range");
+        let planes = CONTINUATION_PLIES.map(|distance| {
+            Some(ContinuationKey::new(
+                mf_core::Piece::new(Color::Black, PieceKind::Rook),
+                Square::new(u8::try_from(distance).expect("test distance fits") + 40)
+                    .expect("test square is in range"),
+            ))
+        });
+
+        update_continuation_histories(&history, &planes, piece, to, POST_LMR_CONTINUATION_BONUS);
+
+        for (slot, previous) in planes.iter().enumerate() {
+            let previous = previous.expect("every test plane is populated");
+            let score = history.continuation_score_at(slot, previous, piece, to);
+            assert!(
+                score > 0,
+                "plane {slot} must receive a POSITIVE post-LMR bonus, got {score}"
+            );
+            assert_eq!(
+                score,
+                POST_LMR_CONTINUATION_BONUS * CONTINUATION_WEIGHTS[slot] / 1_024,
+                "plane {slot} must use the shared continuation weight"
+            );
+        }
+
+        // An absent plane is an absence of information, not a zero: the update must
+        // skip it rather than writing to a sentinel.
+        let sparse = SharedHistory::new();
+        let mut one_plane = planes;
+        one_plane[1] = None;
+        update_continuation_histories(&sparse, &one_plane, piece, to, POST_LMR_CONTINUATION_BONUS);
+        assert_eq!(
+            sparse.continuation_score_at(
+                1,
+                planes[1].expect("plane exists in the dense copy"),
+                piece,
+                to
+            ),
+            0
+        );
     }
 
     #[test]
