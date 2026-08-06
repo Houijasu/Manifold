@@ -1,0 +1,2 @@
+LmrCoefficient 2872 (shipped): 18, 18, 18, 18, 18  median 18
+LmrCoefficient 2000:           16, 16, 16, 16, 16  median 16

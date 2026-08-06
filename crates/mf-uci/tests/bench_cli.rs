@@ -1217,6 +1217,122 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
     // where they are, which is exactly the signature this test exists to catch.
 }
 
+/// Writing every tunable parameter to its advertised default leaves the tree untouched.
+///
+/// This is the make-or-break invariant of M5-F3, and it is stated as a bench signature
+/// because that is the only statement strong enough to be worth making: an SPSA tuner
+/// reads a default off the handshake and writes it straight back, so if any spin's
+/// advertised default disagreed with the constant behind it, or if a spin wrote into a
+/// field the search does not actually read at its use site, this session would come back
+/// with a different number. It is also a wiring test for the WRITE path specifically —
+/// a `setoption` that silently no-ops would pass every unit test and fail here only if
+/// its default differed, so the companion below drives a value that is deliberately
+/// wrong.
+#[test]
+fn setting_every_tunable_parameter_to_its_default_reproduces_the_shipped_signature() {
+    require_bench_network!();
+    let mut script = String::new();
+    for spec in mf_search::SEARCH_PARAMETERS {
+        script.push_str(&format!(
+            "setoption name {} value {}\n",
+            spec.name, spec.default
+        ));
+    }
+    script.push_str("bench\nquit\n");
+
+    let output = run_uci_session(&script, "UCI tunable defaults session");
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT],
+        "writing every advertised default back must be a no-op on the shipped search"
+    );
+}
+
+/// A changed tunable must reach the tree.
+///
+/// The wiring proof for the READ side. `LmrCoefficient` scales the whole log-log
+/// reduction table, so shrinking it by 20% reduces less and must visit strictly more
+/// nodes; `RfpMarginPerDepth` gates a cutoff, so raising it prunes less and must also
+/// grow the tree. Both are then restored to their defaults and the shipped signature
+/// must come back exactly, which is what proves the change was the parameter rather
+/// than session state drifting.
+#[test]
+fn changing_a_tunable_parameter_changes_the_bench_signature() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name LmrCoefficient value 2298\n\
+         bench\n\
+         setoption name LmrCoefficient value 2872\n\
+         setoption name RfpMarginPerDepth value 210\n\
+         bench\n\
+         setoption name RfpMarginPerDepth value 105\n\
+         bench\n\
+         quit\n",
+        "UCI tunable wiring session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 4);
+
+    assert_eq!(nodes[0], BENCH_NODE_COUNT);
+    assert!(
+        nodes[1] > nodes[0],
+        "a 20% smaller LMR coefficient must reduce less and search more: {} vs {}",
+        nodes[1],
+        nodes[0]
+    );
+    assert!(
+        nodes[2] > nodes[0],
+        "a doubled RFP margin must prune less and search more: {} vs {}",
+        nodes[2],
+        nodes[0]
+    );
+    assert_eq!(
+        nodes[3], BENCH_NODE_COUNT,
+        "restoring both defaults must restore the shipped signature exactly"
+    );
+}
+
+/// An out-of-range spin is clamped to the advertised bound, not rejected.
+///
+/// A tuner steps a parameter without knowing its bounds, so a write past one must land
+/// on the bound. Verified as a signature identity: `value 999999` and `value <max>` must
+/// produce the same tree.
+#[test]
+fn an_out_of_range_tunable_write_clamps_to_the_advertised_bound() {
+    require_bench_network!();
+    let spec = mf_search::search_parameter("LmrCoefficient").expect("LmrCoefficient is advertised");
+    let output = run_uci_session(
+        &format!(
+            "setoption name LmrCoefficient value {}\n\
+             bench\n\
+             setoption name LmrCoefficient value 999999\n\
+             bench\n\
+             quit\n",
+            spec.max
+        ),
+        "UCI tunable clamp session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(
+        nodes[0], nodes[1],
+        "a write past the advertised max must land on the max"
+    );
+}
+
 #[test]
 fn bench_rejects_arguments_helpfully() {
     require_bench_network!();

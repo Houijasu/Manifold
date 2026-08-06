@@ -7,8 +7,8 @@ use std::sync::atomic::AtomicBool;
 use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move};
 use mf_nnue::Network;
 use mf_search::{
-    MATE_SCORE, MAX_SEARCH_PLY, SearchLimits, SearchOptions, TranspositionTable,
-    UNEVALUATED_STATIC_EVAL, search, search_with_callback,
+    MATE_SCORE, MAX_SEARCH_PLY, SEARCH_PARAMETERS, SearchLimits, SearchOptions, SearchParameters,
+    TranspositionTable, UNEVALUATED_STATIC_EVAL, search, search_with_callback,
 };
 
 /// The engine evaluates only with NNUE, so every search here needs a network.
@@ -182,7 +182,143 @@ fn selectivity_options_default_to_enabled() {
             // the share it measures is r = -0.348 correlated with the stability count
             // it multiplies. See the comment on `SearchOptions::default` in `search.rs`.
             use_time_effort: false,
+            // The tunable margins default to the constants the search shipped with, so
+            // an untouched engine is bit-identical to one with no tuning surface at
+            // all. `search_parameter_defaults_match_the_shipped_constants` pins each
+            // value individually.
+            parameters: SearchParameters::default(),
         }
+    );
+}
+
+/// Every advertised spin's default is the constant the shipped search uses.
+///
+/// This is the make-or-break invariant of the tuning surface: an SPSA tuner reads the
+/// handshake and writes values back with `setoption`, so a default that disagreed with
+/// the constant would change the engine the first time a GUI echoed back what it was
+/// just told. The bounds are checked here too, because a tuner samples inside them
+/// without knowing what any parameter means.
+#[test]
+fn every_search_parameter_advertises_its_shipped_value_inside_a_usable_range() {
+    let defaults = SearchParameters::default();
+    assert!(
+        (20..=40).contains(&SEARCH_PARAMETERS.len()),
+        "the tuning surface should stay pragmatic, got {}",
+        SEARCH_PARAMETERS.len()
+    );
+
+    for spec in SEARCH_PARAMETERS {
+        assert_eq!(
+            spec.value(&defaults),
+            spec.default,
+            "{} must default to its shipped constant",
+            spec.name
+        );
+        assert!(
+            spec.min <= spec.default && spec.default <= spec.max,
+            "{} default {} is outside [{}, {}]",
+            spec.name,
+            spec.default,
+            spec.min,
+            spec.max
+        );
+        assert!(
+            spec.min < spec.max,
+            "{} has an empty tuning range",
+            spec.name
+        );
+        assert!(
+            SEARCH_PARAMETERS
+                .iter()
+                .filter(|other| other.name.eq_ignore_ascii_case(spec.name))
+                .count()
+                == 1,
+            "{} is advertised twice",
+            spec.name
+        );
+        assert_eq!(
+            mf_search::search_parameter(spec.name).map(|found| found.name),
+            Some(spec.name)
+        );
+    }
+}
+
+/// A spin write lands on the field it names, and is clamped to the advertised range.
+///
+/// Clamping rather than rejecting: a tuner that steps past a bound must get the bound,
+/// not a silently ignored write that leaves it tuning a value the engine never adopted.
+#[test]
+fn writing_a_search_parameter_updates_only_that_field_and_clamps_to_its_range() {
+    for spec in SEARCH_PARAMETERS {
+        let mut parameters = SearchParameters::default();
+        spec.set(&mut parameters, spec.max);
+        assert_eq!(spec.value(&parameters), spec.max, "{}", spec.name);
+
+        spec.set(&mut parameters, spec.max.saturating_add(1_000_000));
+        assert_eq!(spec.value(&parameters), spec.max, "{} clamps up", spec.name);
+        spec.set(&mut parameters, spec.min.saturating_sub(1_000_000));
+        assert_eq!(
+            spec.value(&parameters),
+            spec.min,
+            "{} clamps down",
+            spec.name
+        );
+
+        // Nothing else moved: restoring this one field must restore the whole struct.
+        spec.set(&mut parameters, spec.default);
+        assert_eq!(parameters, SearchParameters::default(), "{}", spec.name);
+    }
+}
+
+/// A changed parameter must actually reach the search.
+///
+/// The wiring proof, and the reason it is a NODE COUNT rather than an assertion about a
+/// formula: a spin that updates `SearchParameters` but is never read at the use site
+/// would pass every unit test above and change nothing about the engine. Shrinking the
+/// LMR coefficient reduces less, so a fixed-depth search must visit strictly more nodes.
+#[test]
+fn changing_the_lmr_coefficient_changes_fixed_depth_node_counts() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::from_fen(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        false,
+    )
+    .expect("test FEN should parse");
+    let limits = SearchLimits {
+        depth: Some(8),
+        ..SearchLimits::default()
+    };
+
+    let shipped_table = TranspositionTable::new(4).expect("test TT should allocate");
+    let shipped = search(
+        &position,
+        &shipped_table,
+        limits,
+        SearchOptions::default(),
+        network,
+    );
+
+    let mut parameters = SearchParameters::default();
+    parameters.lmr_coefficient = parameters.lmr_coefficient * 4 / 5;
+    let softer_table = TranspositionTable::new(4).expect("test TT should allocate");
+    let softer = search(
+        &position,
+        &softer_table,
+        limits,
+        SearchOptions {
+            parameters,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+
+    assert!(
+        softer.nodes > shipped.nodes,
+        "a 20% smaller LMR coefficient must reduce less and search more: {} vs {}",
+        softer.nodes,
+        shipped.nodes
     );
 }
 
@@ -312,6 +448,7 @@ fn mate_in_n_found() {
                 // Inert here either way: this is a fixed-depth search with no soft
                 // limit to scale. Set to the SHIPPED default like every other toggle.
                 use_time_effort: false,
+                parameters: SearchOptions::default().parameters,
             },
             network,
         );

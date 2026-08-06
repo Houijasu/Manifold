@@ -466,6 +466,77 @@ fn uci_handshake_is_ordered_and_well_formed() {
     );
 }
 
+/// Every tunable parameter is advertised with the range a tuner will sample inside.
+///
+/// The handshake is the tuner's only source of truth for what a parameter is called and
+/// what it may be set to, so the line and the compiled spec must agree exactly. Written
+/// against `SEARCH_PARAMETERS` rather than a hard-coded list because a list maintained
+/// in two places is a list that eventually disagrees with itself.
+#[test]
+fn every_tunable_search_parameter_is_advertised_with_its_default_and_range() {
+    let output = run_uci(&["uci", "quit"]);
+    assert!(output.status.success());
+
+    let lines = stdout_lines(&output);
+    let uciok = lines
+        .iter()
+        .position(|line| *line == "uciok")
+        .expect("handshake should terminate");
+
+    for spec in mf_search::SEARCH_PARAMETERS {
+        let expected = format!(
+            "option name {} type spin default {} min {} max {}",
+            spec.name, spec.default, spec.min, spec.max
+        );
+        assert!(
+            lines[..uciok].iter().any(|line| *line == expected),
+            "handshake is missing {expected}"
+        );
+        assert_eq!(
+            lines[..uciok]
+                .iter()
+                .filter(|line| line.starts_with(&format!("option name {} ", spec.name)))
+                .count(),
+            1,
+            "{} is advertised more than once",
+            spec.name
+        );
+    }
+}
+
+/// A tunable spin write reaches the search options it names.
+///
+/// The engine has no way to report a parameter's current value over UCI, so this drives
+/// the same `handle_setoption` path a GUI does and reads the state back through the
+/// crate's own test surface in `lib.rs`. The end-to-end proof that a changed value
+/// reaches the TREE is `bench_cli::changing_a_tunable_parameter_changes_the_bench_signature`.
+#[test]
+fn a_tunable_spin_write_is_accepted_and_an_unparseable_one_is_reported() {
+    let output = run_uci(&[
+        "uci",
+        "setoption name LmrCoefficient value 2000",
+        "setoption name LmrCoefficient value banana",
+        "isready",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let lines = stdout_lines(&output);
+    assert!(lines.contains(&"readyok"));
+    assert!(
+        lines.contains(&"info string invalid LmrCoefficient value 'banana'"),
+        "an unparseable spin write must be reported, not swallowed"
+    );
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("info string invalid LmrCoefficient"))
+            .count(),
+        1,
+        "the valid write must not be reported as invalid"
+    );
+}
+
 #[test]
 fn readiness_unknown_commands_and_quit_are_safe() {
     let output = run_uci(&[

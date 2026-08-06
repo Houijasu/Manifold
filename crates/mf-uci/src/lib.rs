@@ -14,17 +14,20 @@ use std::time::{Duration, Instant};
 use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move, perft_divide};
 use mf_nnue::{Network, NetworkSource, production_forward_mode, resolve_network};
 use mf_search::{
-    IterationInfo, PoolError, PoolSearchResult, RootMoveInfo, SearchLimits, SearchOptions,
-    SearchPool, SearchResult, SharedHistory, TranspositionTable, clamp_centipawn_score,
-    max_hash_mebibytes, score_to_uci_mate, search_with_shared_history,
+    IterationInfo, PoolError, PoolSearchResult, RootMoveInfo, SEARCH_PARAMETERS, SearchLimits,
+    SearchOptions, SearchParameterSpec, SearchPool, SearchResult, SharedHistory,
+    TranspositionTable, clamp_centipawn_score, max_hash_mebibytes, score_to_uci_mate,
+    search_parameter, search_with_shared_history,
 };
 
 const DEFAULT_HASH_MIB: usize = 16;
 const MIN_HASH_MIB: i128 = 1;
-/// The handshake, apart from the `Hash` line.
+/// The handshake, apart from the `Hash` line and the tunable spins.
 ///
 /// `Hash` is not here because its advertised range is a property of the machine rather
-/// than of the build: see [`hash_option_line`].
+/// than of the build: see [`hash_option_line`]. The search parameters are not here
+/// because they are generated from [`mf_search::SEARCH_PARAMETERS`], which is what makes
+/// an advertised default and the constant behind it the same number by construction.
 const UCI_RESPONSE: &[&str] = &[
     "id name Manifold",
     "id author Houijasu",
@@ -106,6 +109,20 @@ fn hash_option_line() -> String {
     format!(
         "option name Hash type spin default {DEFAULT_HASH_MIB} min {MIN_HASH_MIB} max {}",
         max_hash_mebibytes()
+    )
+}
+
+/// The `option name ... type spin` line for one tunable search parameter.
+///
+/// Generated rather than written out, because an SPSA tuner discovers a parameter's
+/// range from this line and then writes values back with `setoption`. A hand-maintained
+/// list would eventually advertise a default that no longer matched the constant, and
+/// the engine would change strength the first time a GUI echoed back the value it was
+/// just told.
+fn search_parameter_option_line(spec: &SearchParameterSpec) -> String {
+    format!(
+        "option name {} type spin default {} min {} max {}",
+        spec.name, spec.default, spec.min, spec.max
     )
 }
 
@@ -232,6 +249,9 @@ where
                     writeln!(writer, "{response}")?;
                 }
                 writeln!(writer, "{}", hash_option_line())?;
+                for spec in SEARCH_PARAMETERS {
+                    writeln!(writer, "{}", search_parameter_option_line(spec))?;
+                }
                 writeln!(writer, "uciok")?;
                 writer.flush()?;
             }
@@ -891,6 +911,15 @@ fn handle_setoption<W: Write>(
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_correction_sources[source] = enabled;
         }
+    } else if let Some(spec) = search_parameter(&name) {
+        // A tuner writes these hundreds of times per session, so an unparseable value
+        // is reported rather than swallowed: a silently ignored write leaves the tuner
+        // measuring a value the engine never adopted.
+        let Ok(requested) = value.parse::<i32>() else {
+            writeln!(writer, "info string invalid {} value '{value}'", spec.name)?;
+            return Ok(());
+        };
+        spec.set(&mut state.search_options.parameters, requested);
     } else if name.eq_ignore_ascii_case("EvalFile") {
         handle_eval_file(&value, state, writer)?;
     } else if name.eq_ignore_ascii_case("Hash") {

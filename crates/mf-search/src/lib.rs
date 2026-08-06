@@ -13,9 +13,10 @@ pub use history::{
     SharedHistory,
 };
 pub use search::{
-    IterationInfo, MATE_SCORE, MAX_SEARCH_PLY, RootMoveInfo, SearchLimits, SearchOptions,
-    SearchResult, UNEVALUATED_STATIC_EVAL, clamp_centipawn_score, is_mate_score, score_to_uci_mate,
-    search, search_with_callback, search_with_shared_history,
+    IterationInfo, MATE_SCORE, MAX_SEARCH_PLY, RootMoveInfo, SEARCH_PARAMETERS, SearchLimits,
+    SearchOptions, SearchParameterSpec, SearchParameters, SearchResult, UNEVALUATED_STATIC_EVAL,
+    clamp_centipawn_score, is_mate_score, score_to_uci_mate, search, search_parameter,
+    search_with_callback, search_with_shared_history,
 };
 pub use thread_pool::{PoolError, PoolSearchResult, SearchPool};
 pub use transposition_table::{

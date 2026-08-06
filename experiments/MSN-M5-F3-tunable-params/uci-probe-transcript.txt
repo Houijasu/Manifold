@@ -1,0 +1,55 @@
+=== handshake spins (38) ===
+option name Threads type spin default 1 min 1 max 256
+option name Hash type spin default 16 min 1 max 8192
+option name RfpMarginPerDepth type spin default 105 min 20 max 300
+option name RfpTtPvMargin type spin default 21 min 0 max 150
+option name RazorBaseMargin type spin default 224 min 50 max 600
+option name RazorMarginPerDepth type spin default 202 min 50 max 600
+option name FutilityBaseMargin type spin default 124 min 20 max 400
+option name FutilityMarginPerDepth type spin default 109 min 20 max 400
+option name LmpBase type spin default 9 min 1 max 40
+option name LmrCoefficient type spin default 2872 min 1000 max 6000
+option name LmrBase type spin default 982 min -1024 max 3072
+option name LmrNonImprovingNumerator type spin default 197 min 0 max 1024
+option name LmrCutNodeBonus type spin default 1024 min 0 max 3072
+option name LmrTtPvReduction type spin default 1024 min 0 max 3072
+option name LmrHistoryNumerator type spin default 439 min 50 max 1500
+option name CaptureStatMaterialWeight type spin default 873 min 0 max 3000
+option name NmpMarginPerDepth type spin default 13 min 0 max 60
+option name NmpMarginBase type spin default 100 min 0 max 400
+option name NmpReductionBase type spin default 5 min 1 max 10
+option name NmpReductionDepthDivisor type spin default 3 min 1 max 10
+option name NmpEvalReductionDivisor type spin default 200 min 50 max 800
+option name NmpEvalReductionMax type spin default 3 min 0 max 8
+option name QuietSeeMarginPerDepth type spin default 26 min 1 max 150
+option name CaptureSeeMarginPerDepth type spin default 99 min 1 max 400
+option name CaptureSeeHistoryNumerator type spin default 34 min 0 max 256
+option name AspirationInitialDelta type spin default 8 min 1 max 60
+option name AspirationScoreDivisor type spin default 16053 min 1000 max 60000
+option name AspirationMaxDelta type spin default 512 min 16 max 2048
+option name SingularBetaBase type spin default 59 min 10 max 150
+option name SingularBetaTtPvBonus type spin default 66 min 0 max 200
+option name SingularDoubleMargin type spin default 16 min 0 max 100
+option name SingularDoubleMarginPvBonus type spin default 16 min 0 max 100
+option name SingularDoubleMarginQuietBonus type spin default 8 min 0 max 100
+option name PostLmrDeeperMargin type spin default 53 min 0 max 300
+option name PostLmrShallowerMargin type spin default 8 min 0 max 150
+option name PostLmrContinuationBonus type spin default 1334 min 0 max 4096
+option name ProbCutBaseMargin type spin default 241 min 50 max 600
+option name ProbCutImprovingMargin type spin default 64 min 0 max 300
+
+=== go movetime 1500 at DEFAULTS ===
+info depth 19 currmove e2e4 currmovenumber 1
+info nodes 768512 nps 512341 time 1500
+bestmove e2e4
+
+=== go movetime 1500 with LmrCoefficient 2000 ===
+info depth 17 currmove e2e4 currmovenumber 1
+info nodes 762368 nps 507906 time 1501
+bestmove e2e4
+
+=== an out-of-range and an unparseable write ===
+info string invalid RfpMarginPerDepth value 'banana'
+readyok
+
+exit code: 0

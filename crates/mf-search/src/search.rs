@@ -1,4 +1,3 @@
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -143,7 +142,164 @@ const TIME_EFFORT_HIGH_PERCENT: u32 = 90;
 /// whenever the effort term is disabled.
 const TIME_EFFORT_NEUTRAL_PERCENT: u32 = 100;
 const LMR_TABLE_SIZE: usize = MAX_SEARCH_PLY + 1;
-const LMP_TABLE: [[usize; LMP_MAX_DEPTH as usize + 1]; 2] = build_lmp_table();
+
+/// Declares the tunable search hyperparameters once, and derives everything from it.
+///
+/// The struct field, its `Default`, and the UCI spin advertised for it all come from the
+/// SAME line here. That is the point: a tuner discovers a parameter's range from the
+/// handshake and then writes it back with `setoption`, so a default that disagreed with
+/// the shipped constant would silently change the engine the moment a GUI echoed the
+/// value it was just told. Deriving all three from one declaration makes that class of
+/// drift unrepresentable rather than merely tested for.
+macro_rules! search_parameters {
+    ($(
+        $(#[$meta:meta])*
+        $field:ident : $name:literal = $default:expr, $range:expr;
+    )*) => {
+        /// Tunable search hyperparameters, exposed over UCI as spin options.
+        ///
+        /// Every field defaults to the constant the search shipped with, so
+        /// `SearchParameters::default()` reproduces the pinned bench signature exactly.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub struct SearchParameters {
+            $($(#[$meta])* pub $field: i32,)*
+        }
+
+        impl Default for SearchParameters {
+            fn default() -> Self {
+                Self { $($field: $default,)* }
+            }
+        }
+
+        /// Every tunable parameter, in handshake order.
+        pub const SEARCH_PARAMETERS: &[SearchParameterSpec] = &[
+            $(SearchParameterSpec {
+                name: $name,
+                default: $default,
+                min: *$range.start(),
+                max: *$range.end(),
+                get: |parameters| parameters.$field,
+                set: |parameters, value| parameters.$field = value,
+            },)*
+        ];
+    };
+}
+
+/// One tunable parameter's UCI identity: what it is called, and what it may be set to.
+///
+/// The bounds are part of the contract rather than documentation. A tuner samples inside
+/// them without knowing what any parameter means, so a range that admits a divisor of
+/// zero is a crash the tuner is entitled to find.
+pub struct SearchParameterSpec {
+    pub name: &'static str,
+    pub default: i32,
+    pub min: i32,
+    pub max: i32,
+    get: fn(&SearchParameters) -> i32,
+    set: fn(&mut SearchParameters, i32),
+}
+
+impl SearchParameterSpec {
+    pub fn value(&self, parameters: &SearchParameters) -> i32 {
+        (self.get)(parameters)
+    }
+
+    /// Writes `value`, clamped into the advertised range.
+    ///
+    /// Clamping rather than rejecting: a tuner that steps a parameter past its bound
+    /// should get the bound, not a silently ignored `setoption` that leaves it tuning a
+    /// value the engine never adopted.
+    pub fn set(&self, parameters: &mut SearchParameters, value: i32) {
+        (self.set)(parameters, value.clamp(self.min, self.max));
+    }
+}
+
+/// Looks a parameter up by its UCI name, case-insensitively.
+pub fn search_parameter(name: &str) -> Option<&'static SearchParameterSpec> {
+    SEARCH_PARAMETERS
+        .iter()
+        .find(|spec| name.eq_ignore_ascii_case(spec.name))
+}
+
+search_parameters! {
+    /// Centipawns of reverse-futility margin per ply. Source: `RFP_MARGIN_PER_DEPTH`.
+    rfp_margin_per_depth: "RfpMarginPerDepth" = RFP_MARGIN_PER_DEPTH, 20 ..= 300;
+    /// Surcharge demanded at a TT-PV node. Source: `RFP_TT_PV_MARGIN`.
+    rfp_tt_pv_margin: "RfpTtPvMargin" = RFP_TT_PV_MARGIN, 0 ..= 150;
+    /// Constant term of the razoring margin. Source: `RAZOR_BASE_MARGIN`.
+    razor_base_margin: "RazorBaseMargin" = RAZOR_BASE_MARGIN, 50 ..= 600;
+    /// Razoring margin per ply. Source: `RAZOR_MARGIN_PER_DEPTH`.
+    razor_margin_per_depth: "RazorMarginPerDepth" = RAZOR_MARGIN_PER_DEPTH, 50 ..= 600;
+    /// Constant term of the frontier futility margin. Source: `FUTILITY_BASE_MARGIN`.
+    futility_base_margin: "FutilityBaseMargin" = FUTILITY_BASE_MARGIN, 20 ..= 400;
+    /// Futility margin per ply of reduced depth. Source: `FUTILITY_MARGIN_PER_DEPTH`.
+    futility_margin_per_depth: "FutilityMarginPerDepth" = FUTILITY_MARGIN_PER_DEPTH, 20 ..= 400;
+    /// Constant term of the late-move-pruning move-count table. Source: `LMP_BASE`.
+    lmp_base: "LmpBase" = LMP_BASE as i32, 1 ..= 40;
+    /// Numerator of the LMR log-table coefficient, over 128. Source: `lmr_table`.
+    lmr_coefficient: "LmrCoefficient" = 2_872, 1_000 ..= 6_000;
+    /// Constant term added to every LMR reduction, in 1024ths of a ply.
+    lmr_base: "LmrBase" = 982, -1_024 ..= 3_072;
+    /// Extra reduction at a non-improving node, as a fraction of the table scale over 512.
+    lmr_non_improving_numerator: "LmrNonImprovingNumerator" = 197, 0 ..= 1_024;
+    /// Extra reduction at an expected cut node, in 1024ths of a ply.
+    lmr_cut_node_bonus: "LmrCutNodeBonus" = 1_024, 0 ..= 3_072;
+    /// Reduction refunded at a TT-PV node, in 1024ths of a ply.
+    lmr_tt_pv_reduction: "LmrTtPvReduction" = 1_024, 0 ..= 3_072;
+    /// Numerator of the LMR history term, over 4096.
+    lmr_history_numerator: "LmrHistoryNumerator" = 439, 50 ..= 1_500;
+    /// Weight on captured material in a capture's LMR `statScore`, over 128.
+    /// Source: `CAPTURE_STAT_MATERIAL_WEIGHT`.
+    capture_stat_material_weight: "CaptureStatMaterialWeight" = CAPTURE_STAT_MATERIAL_WEIGHT, 0 ..= 3_000;
+    /// Slope of the null-move eval precondition, in centipawns per ply.
+    nmp_margin_per_depth: "NmpMarginPerDepth" = 13, 0 ..= 60;
+    /// Constant term of the null-move eval precondition.
+    nmp_margin_base: "NmpMarginBase" = 100, 0 ..= 400;
+    /// Constant term of the null-move reduction, in plies.
+    nmp_reduction_base: "NmpReductionBase" = 5, 1 ..= 10;
+    /// Divisor turning depth into extra null-move reduction.
+    nmp_reduction_depth_divisor: "NmpReductionDepthDivisor" = 3, 1 ..= 10;
+    /// Centipawns of eval surplus over beta that buy one extra ply of null-move reduction.
+    nmp_eval_reduction_divisor: "NmpEvalReductionDivisor" = 200, 50 ..= 800;
+    /// Ceiling on the eval-driven part of the null-move reduction, in plies.
+    nmp_eval_reduction_max: "NmpEvalReductionMax" = 3, 0 ..= 8;
+    /// Quadratic slope of the quiet SEE pruning threshold. Source: `QUIET_SEE_MARGIN_PER_DEPTH`.
+    quiet_see_margin_per_depth: "QuietSeeMarginPerDepth" = QUIET_SEE_MARGIN_PER_DEPTH, 1 ..= 150;
+    /// Linear slope of the capture SEE pruning threshold. Source: `CAPTURE_SEE_MARGIN_PER_DEPTH`.
+    capture_see_margin_per_depth: "CaptureSeeMarginPerDepth" = CAPTURE_SEE_MARGIN_PER_DEPTH, 1 ..= 400;
+    /// Numerator of the capture-history relief on the SEE threshold, over 1024.
+    capture_see_history_numerator: "CaptureSeeHistoryNumerator" = 34, 0 ..= 256;
+    /// Constant term of the first aspiration half-width. Source: `ASPIRATION_INITIAL_DELTA`.
+    aspiration_initial_delta: "AspirationInitialDelta" = ASPIRATION_INITIAL_DELTA, 1 ..= 60;
+    /// Divisor on `previous_score^2` in the aspiration half-width.
+    /// Source: `ASPIRATION_SCORE_DIVISOR`.
+    aspiration_score_divisor: "AspirationScoreDivisor" = ASPIRATION_SCORE_DIVISOR, 1_000 ..= 60_000;
+    /// Ceiling on the score-scaled aspiration half-width. Source: `ASPIRATION_MAX_DELTA`.
+    aspiration_max_delta: "AspirationMaxDelta" = ASPIRATION_MAX_DELTA, 16 ..= 2_048;
+    /// Constant term of the singular beta margin slope, over 63.
+    singular_beta_base: "SingularBetaBase" = 59, 10 ..= 150;
+    /// Extra singular beta margin slope at a TT-PV non-PV node, over 63.
+    singular_beta_tt_pv_bonus: "SingularBetaTtPvBonus" = 66, 0 ..= 200;
+    /// Constant term of the double-extension margin.
+    singular_double_margin: "SingularDoubleMargin" = 16, 0 ..= 100;
+    /// Extra double-extension margin at a PV node.
+    singular_double_margin_pv_bonus: "SingularDoubleMarginPvBonus" = 16, 0 ..= 100;
+    /// Extra double-extension margin when the TT move is not a capture.
+    singular_double_margin_quiet_bonus: "SingularDoubleMarginQuietBonus" = 8, 0 ..= 100;
+    /// Margin above the incumbent best score earning a deeper verification.
+    /// Source: `POST_LMR_DEEPER_MARGIN`.
+    post_lmr_deeper_margin: "PostLmrDeeperMargin" = POST_LMR_DEEPER_MARGIN, 0 ..= 300;
+    /// Margin below which the verification is searched a ply shallower.
+    /// Source: `POST_LMR_SHALLOWER_MARGIN`.
+    post_lmr_shallower_margin: "PostLmrShallowerMargin" = POST_LMR_SHALLOWER_MARGIN, 0 ..= 150;
+    /// Continuation-history bonus applied once a reduced scout beats alpha.
+    /// Source: `POST_LMR_CONTINUATION_BONUS`.
+    post_lmr_continuation_bonus: "PostLmrContinuationBonus" = POST_LMR_CONTINUATION_BONUS, 0 ..= 4_096;
+    /// Constant term of the ProbCut margin. Source: `PROBCUT_BASE_MARGIN`.
+    probcut_base_margin: "ProbCutBaseMargin" = PROBCUT_BASE_MARGIN, 50 ..= 600;
+    /// ProbCut margin refunded at an improving node. Source: `PROBCUT_IMPROVING_MARGIN`.
+    probcut_improving_margin: "ProbCutImprovingMargin" = PROBCUT_IMPROVING_MARGIN, 0 ..= 300;
+}
 
 struct SearchEvaluator<'network> {
     accumulators: AccumulatorStack<'network>,
@@ -269,6 +425,13 @@ pub struct SearchOptions {
     /// Affects TIME-MANAGED searches only: with no `soft_time` there is nothing to
     /// scale, so `go depth`, `go nodes`, `go infinite` and `bench` are untouched.
     pub use_time_effort: bool,
+    /// The tunable margins, slopes, and divisors the enabled techniques are shaped by.
+    ///
+    /// Carried here rather than as a separate argument because every consumer of a
+    /// toggle is also a consumer of the numbers behind it, and the two must travel
+    /// together: a worker searching with a toggle its parameters were not sampled for
+    /// is a tuning run measuring the wrong build.
+    pub parameters: SearchParameters,
 }
 
 impl Default for SearchOptions {
@@ -495,6 +658,7 @@ impl Default for SearchOptions {
             // COMPOSITION that is wrong. Full write-up in
             // `experiments/MSN-S3-tm-effort/results.md`.
             use_time_effort: false,
+            parameters: SearchParameters::default(),
         }
     }
 }
@@ -869,7 +1033,11 @@ fn aspiration_search(
     previous_score: i32,
     context: &mut SearchContext<'_>,
 ) -> Option<(i32, Vec<Move>)> {
-    let mut delta = aspiration_delta(context.worker_id, previous_score);
+    let mut delta = aspiration_delta(
+        &context.options.parameters,
+        context.worker_id,
+        previous_score,
+    );
     let mut alpha = (previous_score - delta).max(-INFINITY);
     let mut beta = (previous_score + delta).min(INFINITY);
     // A fail high means the root move is better than believed. Re-searching at full
@@ -913,10 +1081,10 @@ fn aspiration_search(
 /// width re-searches those positions repeatedly. A flat 25cp was simultaneously too
 /// wide near equality -- where most of the tree lives -- and too narrow once decided.
 #[inline]
-fn aspiration_delta(worker_id: usize, previous_score: i32) -> i32 {
-    let scaled = ASPIRATION_INITIAL_DELTA
-        + previous_score.saturating_mul(previous_score) / ASPIRATION_SCORE_DIVISOR;
-    scaled.min(ASPIRATION_MAX_DELTA) + (worker_id % ASPIRATION_JITTER_BUCKETS) as i32
+fn aspiration_delta(parameters: &SearchParameters, worker_id: usize, previous_score: i32) -> i32 {
+    let scaled = parameters.aspiration_initial_delta
+        + previous_score.saturating_mul(previous_score) / parameters.aspiration_score_divisor;
+    scaled.min(parameters.aspiration_max_delta) + (worker_id % ASPIRATION_JITTER_BUCKETS) as i32
 }
 
 fn published_node_total(counters: &[AtomicU64]) -> u64 {
@@ -1206,7 +1374,7 @@ fn pvs(
             && depth <= RAZOR_MAX_DEPTH
             && !is_mate_score(alpha)
             && eval_pruning_rule50_safe(position, depth)
-            && static_eval < alpha - razoring_margin(depth)
+            && static_eval < alpha - razoring_margin(&context.options.parameters, depth)
         {
             return quiescence(
                 position, alpha, beta, ply, pv_node, false, true, context, pv,
@@ -1217,7 +1385,15 @@ fn pvs(
             && depth <= RFP_MAX_DEPTH
             && !is_mate_score(beta)
             && eval_pruning_rule50_safe(position, depth)
-            && static_eval - reverse_futility_margin(depth, improving, cut_node, tt_pv) >= beta
+            && static_eval
+                - reverse_futility_margin(
+                    &context.options.parameters,
+                    depth,
+                    improving,
+                    cut_node,
+                    tt_pv,
+                )
+                >= beta
         {
             return Some((661 * beta + 363 * static_eval) / 1024);
         }
@@ -1233,9 +1409,12 @@ fn pvs(
             && eval_pruning_rule50_safe(position, depth)
             && context.nmp_allowed_at(ply)
             && has_non_pawn_material(position)
-            && static_eval >= beta - 13 * depth + 100
+            && static_eval
+                >= beta - context.options.parameters.nmp_margin_per_depth * depth
+                    + context.options.parameters.nmp_margin_base
         {
-            let reduction = null_move_reduction(depth, static_eval, beta);
+            let reduction =
+                null_move_reduction(&context.options.parameters, depth, static_eval, beta);
             let undo = position.make_null_move();
             context.push_null_position(ply + 1);
             let mut null_pv = Vec::new();
@@ -1302,7 +1481,7 @@ fn pvs(
         && !is_mate_score(beta)
         && eval_pruning_rule50_safe(position, depth)
     {
-        let probcut_beta = probcut_beta(beta, improving);
+        let probcut_beta = probcut_beta(&context.options.parameters, beta, improving);
         let tt_score = tt_entry
             .map(|entry| value_from_tt(i32::from(entry.score), ply, position.halfmove_clock()));
         if tt_score.is_none_or(|score| score >= probcut_beta) {
@@ -1428,9 +1607,20 @@ fn pvs(
             ordering.capture_history(position, mv)
         };
         let reduction = if quiet && !gives_check {
-            late_move_reduction(depth, move_count, improving, cut_node, tt_pv, history_score)
+            late_move_reduction(
+                &context.lmr_table,
+                &context.options.parameters,
+                depth,
+                move_count,
+                improving,
+                cut_node,
+                tt_pv,
+                history_score,
+            )
         } else if !quiet && capture_reduction_allowed(mv, tt_move, gives_check) {
             capture_late_move_reduction(
+                &context.lmr_table,
+                &context.options.parameters,
                 depth,
                 move_count,
                 improving,
@@ -1470,7 +1660,8 @@ fn pvs(
             && quiet
             && !gives_check
             && depth <= LMP_MAX_DEPTH
-            && move_count >= late_move_pruning_threshold(depth, improving)
+            && move_count
+                >= late_move_pruning_threshold(depth, improving, &context.options.parameters)
             && best_move.is_some()
             && shallow_pruning_allowed(best_score)
             && mover_has_non_pawn_material
@@ -1490,7 +1681,8 @@ fn pvs(
             && eval_pruning_rule50_safe(position, depth)
             && mover_has_non_pawn_material
         {
-            let futility_value = static_eval + frontier_futility_margin(effective_depth);
+            let futility_value = static_eval
+                + frontier_futility_margin(&context.options.parameters, effective_depth);
             if futility_value <= alpha {
                 best_score = best_score.max(futility_value);
                 continue;
@@ -1518,10 +1710,12 @@ fn pvs(
             } else {
                 depth <= CAPTURE_SEE_MAX_DEPTH
             };
+            let parameters = &context.options.parameters;
             let threshold = if quiet {
-                quiet_see_threshold(effective_depth)
+                quiet_see_threshold(parameters, effective_depth)
             } else {
-                capture_see_threshold(depth) - capture_history * 34 / 1024
+                capture_see_threshold(parameters, depth)
+                    - capture_history * parameters.capture_see_history_numerator / 1024
             };
             if within_window
                 && static_exchange_evaluation(position, mv) < threshold
@@ -1558,7 +1752,8 @@ fn pvs(
                 ply,
                 position.halfmove_clock(),
             );
-            let singular_beta = singular_beta(tt_score, depth, tt_pv, pv_node);
+            let singular_beta =
+                singular_beta(&context.options.parameters, tt_score, depth, tt_pv, pv_node);
             let singular_depth = (new_depth / 2).max(1);
             let mut singular_pv = Vec::new();
             let singular_value = pvs(
@@ -1583,6 +1778,7 @@ fn pvs(
             }
             if context.options.use_singular_ext {
                 extension = singular_extension(
+                    &context.options.parameters,
                     singular_value,
                     singular_beta,
                     pv_node,
@@ -1675,7 +1871,13 @@ fn pvs(
                     // and identified this always-full-depth re-search as where the
                     // saving went.
                     let verification_depth = if context.options.use_post_lmr_depth {
-                        post_lmr_verification_depth(child_depth, reduced_depth, best_score, score)
+                        post_lmr_verification_depth(
+                            &context.options.parameters,
+                            child_depth,
+                            reduced_depth,
+                            best_score,
+                            score,
+                        )
                     } else {
                         child_depth
                     };
@@ -1695,7 +1897,7 @@ fn pvs(
                             &planes,
                             piece,
                             mv.to(),
-                            POST_LMR_CONTINUATION_BONUS,
+                            context.options.parameters.post_lmr_continuation_bonus,
                         );
                     }
                     if verification_depth <= reduced_depth {
@@ -2224,8 +2426,8 @@ fn tt_cutoff_is_safe(
 /// Linear, and capped by `RAZOR_MAX_DEPTH`. The quadratic form reached 20835cp by
 /// depth 8 and was unbounded in depth, which is another way of writing "never fires".
 #[inline]
-fn razoring_margin(depth: i32) -> i32 {
-    RAZOR_BASE_MARGIN + RAZOR_MARGIN_PER_DEPTH * depth.max(0)
+fn razoring_margin(parameters: &SearchParameters, depth: i32) -> i32 {
+    parameters.razor_base_margin + parameters.razor_margin_per_depth * depth.max(0)
 }
 
 /// Margin the static eval must clear above beta before the node is cut without search.
@@ -2239,9 +2441,16 @@ fn razoring_margin(depth: i32) -> i32 {
 /// `improving` shortens the effective depth by a ply, because a node whose eval is
 /// rising is likelier to hold up; a node the TT marked PV pays a surcharge.
 #[inline]
-fn reverse_futility_margin(depth: i32, improving: bool, cut_node: bool, tt_pv: bool) -> i32 {
+fn reverse_futility_margin(
+    parameters: &SearchParameters,
+    depth: i32,
+    improving: bool,
+    cut_node: bool,
+    tt_pv: bool,
+) -> i32 {
     let effective_depth = depth - i32::from(improving && !cut_node);
-    RFP_MARGIN_PER_DEPTH * effective_depth.max(0) + RFP_TT_PV_MARGIN * i32::from(tt_pv)
+    parameters.rfp_margin_per_depth * effective_depth.max(0)
+        + parameters.rfp_tt_pv_margin * i32::from(tt_pv)
 }
 
 #[inline]
@@ -2249,39 +2458,35 @@ fn is_improving(static_eval: i32, same_side_previous_eval: Option<i32>) -> bool 
     same_side_previous_eval.is_none_or(|previous| static_eval > previous)
 }
 
-const fn build_lmp_table() -> [[usize; LMP_MAX_DEPTH as usize + 1]; 2] {
-    let mut table = [[0; LMP_MAX_DEPTH as usize + 1]; 2];
-    let mut improving = 0;
-    while improving < table.len() {
-        let mut depth = 1;
-        while depth < table[improving].len() {
-            table[improving][depth] = (LMP_BASE + depth * depth) / (2 - improving);
-            depth += 1;
-        }
-        improving += 1;
+#[inline]
+fn late_move_pruning_threshold(
+    depth: i32,
+    improving: bool,
+    parameters: &SearchParameters,
+) -> usize {
+    let depth = depth.clamp(1, LMP_MAX_DEPTH) as usize;
+    (parameters.lmp_base.max(0) as usize + depth * depth) / (2 - usize::from(improving))
+}
+
+/// The log-log reduction table, built from the tunable coefficient.
+///
+/// Built once per search rather than looked up from a process-wide static, because the
+/// coefficient is a tunable the GUI may change between searches. 128 logarithms at the
+/// start of a `go` is nothing against the tree that follows.
+fn build_lmr_table(parameters: &SearchParameters) -> [i32; LMR_TABLE_SIZE] {
+    let mut table = [0; LMR_TABLE_SIZE];
+    let coefficient = f64::from(parameters.lmr_coefficient) / 128.0;
+    for (index, reduction) in table.iter_mut().enumerate().skip(1) {
+        *reduction = (coefficient * (index as f64).ln()) as i32;
     }
     table
 }
 
 #[inline]
-fn late_move_pruning_threshold(depth: i32, improving: bool) -> usize {
-    let depth = depth.clamp(1, LMP_MAX_DEPTH) as usize;
-    LMP_TABLE[usize::from(improving)][depth]
-}
-
-fn lmr_table() -> &'static [i32; LMR_TABLE_SIZE] {
-    static TABLE: OnceLock<[i32; LMR_TABLE_SIZE]> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut table = [0; LMR_TABLE_SIZE];
-        for (index, reduction) in table.iter_mut().enumerate().skip(1) {
-            *reduction = (2872.0 / 128.0 * (index as f64).ln()) as i32;
-        }
-        table
-    })
-}
-
-#[inline]
+#[allow(clippy::too_many_arguments)]
 fn late_move_reduction(
+    table: &[i32; LMR_TABLE_SIZE],
+    parameters: &SearchParameters,
     depth: i32,
     move_count: usize,
     improving: bool,
@@ -2289,21 +2494,20 @@ fn late_move_reduction(
     tt_pv: bool,
     history_score: i32,
 ) -> i32 {
-    let table = lmr_table();
     let depth_index = depth.clamp(1, MAX_SEARCH_PLY as i32) as usize;
     let move_index = move_count.clamp(1, MAX_SEARCH_PLY);
     let scale = table[depth_index] * table[move_index];
-    let mut reduction = scale + 982;
+    let mut reduction = scale + parameters.lmr_base;
     if !improving {
-        reduction += scale * 197 / 512;
+        reduction += scale * parameters.lmr_non_improving_numerator / 512;
     }
     if cut_node {
-        reduction += 1024;
+        reduction += parameters.lmr_cut_node_bonus;
     }
     if tt_pv {
-        reduction -= 1024;
+        reduction -= parameters.lmr_tt_pv_reduction;
     }
-    reduction -= history_score * 439 / 4096;
+    reduction -= history_score * parameters.lmr_history_numerator / 4096;
     reduction.max(0)
 }
 
@@ -2329,14 +2533,20 @@ const CAPTURE_STAT_MATERIAL_WEIGHT: i32 = 873;
 /// term, so the two move kinds share one reduction shape and differ only in the evidence
 /// they feed it.
 #[inline]
-fn capture_stat_score(captured_material: i32, capture_history: i32) -> i32 {
-    CAPTURE_STAT_MATERIAL_WEIGHT * captured_material / 128 + capture_history
+fn capture_stat_score(
+    parameters: &SearchParameters,
+    captured_material: i32,
+    capture_history: i32,
+) -> i32 {
+    parameters.capture_stat_material_weight * captured_material / 128 + capture_history
 }
 
 /// LMR for a late capture: the quiet formula, fed a capture `statScore`.
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn capture_late_move_reduction(
+    table: &[i32; LMR_TABLE_SIZE],
+    parameters: &SearchParameters,
     depth: i32,
     move_count: usize,
     improving: bool,
@@ -2346,12 +2556,14 @@ fn capture_late_move_reduction(
     capture_history: i32,
 ) -> i32 {
     late_move_reduction(
+        table,
+        parameters,
         depth,
         move_count,
         improving,
         cut_node,
         tt_pv,
-        capture_stat_score(captured_material, capture_history),
+        capture_stat_score(parameters, captured_material, capture_history),
     )
 }
 
@@ -2412,29 +2624,31 @@ const POST_LMR_CONTINUATION_BONUS: i32 = 1_334;
 /// first place. The shallower band carries no such condition, matching the reference.
 #[inline]
 fn post_lmr_verification_depth(
+    parameters: &SearchParameters,
     child_depth: i32,
     reduced_depth: i32,
     best_score: i32,
     scout_score: i32,
 ) -> i32 {
-    let deeper = reduced_depth < child_depth && scout_score > best_score + POST_LMR_DEEPER_MARGIN;
-    let shallower = scout_score < best_score + POST_LMR_SHALLOWER_MARGIN;
+    let deeper =
+        reduced_depth < child_depth && scout_score > best_score + parameters.post_lmr_deeper_margin;
+    let shallower = scout_score < best_score + parameters.post_lmr_shallower_margin;
     (child_depth + i32::from(deeper) - i32::from(shallower)).max(1)
 }
 
 #[inline]
-fn frontier_futility_margin(effective_depth: i32) -> i32 {
-    FUTILITY_BASE_MARGIN + FUTILITY_MARGIN_PER_DEPTH * effective_depth.max(0)
+fn frontier_futility_margin(parameters: &SearchParameters, effective_depth: i32) -> i32 {
+    parameters.futility_base_margin + parameters.futility_margin_per_depth * effective_depth.max(0)
 }
 
 #[inline]
-fn quiet_see_threshold(effective_depth: i32) -> i32 {
-    -QUIET_SEE_MARGIN_PER_DEPTH * effective_depth.max(0).pow(2)
+fn quiet_see_threshold(parameters: &SearchParameters, effective_depth: i32) -> i32 {
+    -parameters.quiet_see_margin_per_depth * effective_depth.max(0).pow(2)
 }
 
 #[inline]
-fn capture_see_threshold(depth: i32) -> i32 {
-    -CAPTURE_SEE_MARGIN_PER_DEPTH * depth.max(0)
+fn capture_see_threshold(parameters: &SearchParameters, depth: i32) -> i32 {
+    -parameters.capture_see_margin_per_depth * depth.max(0)
 }
 
 #[inline]
@@ -2464,8 +2678,9 @@ fn internal_iterative_reduction(
 }
 
 #[inline]
-fn probcut_beta(beta: i32, improving: bool) -> i32 {
-    beta + PROBCUT_BASE_MARGIN - PROBCUT_IMPROVING_MARGIN * i32::from(improving)
+fn probcut_beta(parameters: &SearchParameters, beta: i32, improving: bool) -> i32 {
+    beta + parameters.probcut_base_margin
+        - parameters.probcut_improving_margin * i32::from(improving)
 }
 
 #[inline]
@@ -2479,12 +2694,24 @@ fn probcut_cutoff_value(value: i32, beta: i32, probcut_beta: i32) -> Option<i32>
 }
 
 #[inline]
-fn singular_beta(tt_score: i32, depth: i32, tt_pv: bool, pv_node: bool) -> i32 {
-    tt_score - (59 + 66 * i32::from(tt_pv && !pv_node)) * depth / 63
+fn singular_beta(
+    parameters: &SearchParameters,
+    tt_score: i32,
+    depth: i32,
+    tt_pv: bool,
+    pv_node: bool,
+) -> i32 {
+    tt_score
+        - (parameters.singular_beta_base
+            + parameters.singular_beta_tt_pv_bonus * i32::from(tt_pv && !pv_node))
+            * depth
+            / 63
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn singular_extension(
+    parameters: &SearchParameters,
     value: i32,
     singular_beta: i32,
     pv_node: bool,
@@ -2494,7 +2721,9 @@ fn singular_extension(
     beta: i32,
 ) -> i32 {
     if value < singular_beta {
-        let double_margin = 16 + 16 * i32::from(pv_node) + 8 * i32::from(!tt_capture);
+        let double_margin = parameters.singular_double_margin
+            + parameters.singular_double_margin_pv_bonus * i32::from(pv_node)
+            + parameters.singular_double_margin_quiet_bonus * i32::from(!tt_capture);
         1 + i32::from(value < singular_beta - double_margin)
     } else if tt_score >= beta && !is_mate_score(value) {
         -3
@@ -2892,8 +3121,16 @@ fn update_continuation_histories(
 }
 
 #[inline]
-fn null_move_reduction(depth: i32, static_eval: i32, beta: i32) -> i32 {
-    5 + depth / 3 + ((static_eval - beta).max(0) / 200).min(3)
+fn null_move_reduction(
+    parameters: &SearchParameters,
+    depth: i32,
+    static_eval: i32,
+    beta: i32,
+) -> i32 {
+    parameters.nmp_reduction_base
+        + depth / parameters.nmp_reduction_depth_divisor
+        + ((static_eval - beta).max(0) / parameters.nmp_eval_reduction_divisor)
+            .min(parameters.nmp_eval_reduction_max)
 }
 
 #[inline]
@@ -2968,6 +3205,10 @@ struct SearchContext<'a> {
     stop: &'a AtomicBool,
     limits: SearchLimits,
     options: SearchOptions,
+    /// The log-log LMR table, built from `options.parameters.lmr_coefficient` at
+    /// construction. Cached per search rather than recomputed per node, and per search
+    /// rather than per process because the coefficient is tunable.
+    lmr_table: [i32; LMR_TABLE_SIZE],
     started: Option<Instant>,
     worker_id: usize,
     node_counters: &'a [AtomicU64],
@@ -3028,6 +3269,7 @@ impl<'a> SearchContext<'a> {
             stop,
             limits,
             options,
+            lmr_table: build_lmr_table(&options.parameters),
             started,
             worker_id,
             node_counters,
@@ -3329,6 +3571,15 @@ mod tests {
 
     use super::*;
 
+    /// The shipped parameter values, which every formula test below is pinned against.
+    fn shipped() -> SearchParameters {
+        SearchParameters::default()
+    }
+
+    fn shipped_lmr_table() -> [i32; LMR_TABLE_SIZE] {
+        build_lmr_table(&shipped())
+    }
+
     fn local_network() -> Option<&'static mf_nnue::Network> {
         static NETWORK: OnceLock<Option<mf_nnue::Network>> = OnceLock::new();
         NETWORK
@@ -3537,31 +3788,40 @@ mod tests {
 
     #[test]
     fn worker_zero_preserves_the_original_aspiration_delta() {
-        assert_eq!(aspiration_delta(0, 0), ASPIRATION_INITIAL_DELTA);
+        assert_eq!(aspiration_delta(&shipped(), 0, 0), ASPIRATION_INITIAL_DELTA);
     }
 
     #[test]
     fn helpers_receive_distinct_bounded_aspiration_deltas() {
-        let values: Vec<_> = (0..8).map(|worker| aspiration_delta(worker, 0)).collect();
+        let values: Vec<_> = (0..8)
+            .map(|worker| aspiration_delta(&shipped(), worker, 0))
+            .collect();
         assert_eq!(values[0], ASPIRATION_INITIAL_DELTA);
         assert!(values.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]
     fn aspiration_window_widens_with_the_magnitude_of_the_previous_score() {
+        let parameters = shipped();
         // Near equality the window is tight, because that is where the score is most
         // predictable and most of the tree lives.
-        assert_eq!(aspiration_delta(0, 0), 8);
+        assert_eq!(aspiration_delta(&parameters, 0, 0), 8);
         // `100^2 / ASPIRATION_SCORE_DIVISOR` truncates to zero, so a hundredth of a pawn
         // does not widen the window at all.
-        assert_eq!(aspiration_delta(0, 100), 8);
+        assert_eq!(aspiration_delta(&parameters, 0, 100), 8);
         // A decided position swings more, so it starts wider instead of paying for a
         // chain of re-searches.
-        assert!(aspiration_delta(0, 800) > aspiration_delta(0, 200));
+        assert!(aspiration_delta(&parameters, 0, 800) > aspiration_delta(&parameters, 0, 200));
         // Sign does not matter, only distance from equality.
-        assert_eq!(aspiration_delta(0, -600), aspiration_delta(0, 600));
+        assert_eq!(
+            aspiration_delta(&parameters, 0, -600),
+            aspiration_delta(&parameters, 0, 600)
+        );
         // And the width is capped rather than exploding near mate scores.
-        assert_eq!(aspiration_delta(0, MATE_SCORE), ASPIRATION_MAX_DELTA);
+        assert_eq!(
+            aspiration_delta(&parameters, 0, MATE_SCORE),
+            ASPIRATION_MAX_DELTA
+        );
     }
 
     #[test]
@@ -3986,8 +4246,8 @@ mod tests {
     fn razoring_margin_uses_the_required_quadratic_formula() {
         // Linear and bounded by RAZOR_MAX_DEPTH. The quadratic form reached 20835cp by
         // depth 8, which is not a margin, it is an off switch.
-        assert_eq!(razoring_margin(1), 224 + 202);
-        assert_eq!(razoring_margin(3), 224 + 202 * 3);
+        assert_eq!(razoring_margin(&shipped(), 1), 224 + 202);
+        assert_eq!(razoring_margin(&shipped(), 3), 224 + 202 * 3);
         assert_eq!(RAZOR_MAX_DEPTH, 3);
     }
 
@@ -3995,21 +4255,38 @@ mod tests {
     fn reverse_futility_margin_is_linear_in_depth_with_improving_and_tt_pv_adjustments() {
         // Linear, and small enough to actually fire. The previous quadratic form asked
         // for 392cp at depth 1, which is most of a minor piece.
-        assert_eq!(reverse_futility_margin(1, false, false, false), 105);
-        assert_eq!(reverse_futility_margin(6, false, false, false), 630);
+        let parameters = shipped();
+        assert_eq!(
+            reverse_futility_margin(&parameters, 1, false, false, false),
+            105
+        );
+        assert_eq!(
+            reverse_futility_margin(&parameters, 6, false, false, false),
+            630
+        );
         // A rising eval is worth a ply of margin, but not at an expected cut node.
-        assert_eq!(reverse_futility_margin(6, true, false, false), 525);
-        assert_eq!(reverse_futility_margin(6, true, true, false), 630);
+        assert_eq!(
+            reverse_futility_margin(&parameters, 6, true, false, false),
+            525
+        );
+        assert_eq!(
+            reverse_futility_margin(&parameters, 6, true, true, false),
+            630
+        );
         // A TT-PV node pays a surcharge.
-        assert_eq!(reverse_futility_margin(6, false, false, true), 630 + 21);
+        assert_eq!(
+            reverse_futility_margin(&parameters, 6, false, false, true),
+            630 + 21
+        );
     }
 
     #[test]
     fn null_move_reduction_scales_with_depth_and_eval_surplus() {
-        assert_eq!(null_move_reduction(6, 100, 100), 7);
-        assert_eq!(null_move_reduction(6, 700, 100), 10);
-        assert_eq!(null_move_reduction(16, 100, 100), 10);
-        assert_eq!(null_move_reduction(16, 10_000, 100), 13);
+        let parameters = shipped();
+        assert_eq!(null_move_reduction(&parameters, 6, 100, 100), 7);
+        assert_eq!(null_move_reduction(&parameters, 6, 700, 100), 10);
+        assert_eq!(null_move_reduction(&parameters, 16, 100, 100), 10);
+        assert_eq!(null_move_reduction(&parameters, 16, 10_000, 100), 13);
     }
 
     #[test]
@@ -4086,24 +4363,42 @@ mod tests {
     fn lmp_movecount_table_is_indexed_by_depth_and_improving() {
         // Base 9, not 3: at depth 1 the non-improving row now keeps 5 moves rather than
         // pruning the position down to 2 before the ordering has demonstrated anything.
-        assert_eq!(late_move_pruning_threshold(1, false), 5);
-        assert_eq!(late_move_pruning_threshold(1, true), 10);
-        assert_eq!(late_move_pruning_threshold(4, false), 12);
-        assert_eq!(late_move_pruning_threshold(4, true), 25);
-        assert!(late_move_pruning_threshold(6, false) > late_move_pruning_threshold(5, false));
+        let parameters = shipped();
+        assert_eq!(late_move_pruning_threshold(1, false, &parameters), 5);
+        assert_eq!(late_move_pruning_threshold(1, true, &parameters), 10);
+        assert_eq!(late_move_pruning_threshold(4, false, &parameters), 12);
+        assert_eq!(late_move_pruning_threshold(4, true, &parameters), 25);
+        assert!(
+            late_move_pruning_threshold(6, false, &parameters)
+                > late_move_pruning_threshold(5, false, &parameters)
+        );
     }
 
     #[test]
     fn lmr_base_table_and_adjustments_move_reduction_in_the_expected_direction() {
-        let baseline = late_move_reduction(8, 8, true, false, false, 0);
+        let table = shipped_lmr_table();
+        let parameters = shipped();
+        let reduction = |depth, moves, improving, cut, tt_pv, history| {
+            late_move_reduction(
+                &table,
+                &parameters,
+                depth,
+                moves,
+                improving,
+                cut,
+                tt_pv,
+                history,
+            )
+        };
+        let baseline = reduction(8, 8, true, false, false, 0);
 
-        assert!(late_move_reduction(12, 8, true, false, false, 0) > baseline);
-        assert!(late_move_reduction(8, 12, true, false, false, 0) > baseline);
-        assert!(late_move_reduction(8, 8, false, false, false, 0) > baseline);
-        assert!(late_move_reduction(8, 8, true, true, false, 0) > baseline);
-        assert!(late_move_reduction(8, 8, true, false, true, 0) < baseline);
-        assert!(late_move_reduction(8, 8, true, false, false, 4_000) < baseline);
-        assert!(late_move_reduction(8, 8, true, false, false, -4_000) > baseline);
+        assert!(reduction(12, 8, true, false, false, 0) > baseline);
+        assert!(reduction(8, 12, true, false, false, 0) > baseline);
+        assert!(reduction(8, 8, false, false, false, 0) > baseline);
+        assert!(reduction(8, 8, true, true, false, 0) > baseline);
+        assert!(reduction(8, 8, true, false, true, 0) < baseline);
+        assert!(reduction(8, 8, true, false, false, 4_000) < baseline);
+        assert!(reduction(8, 8, true, false, false, -4_000) > baseline);
     }
 
     /// A capture's protection from LMR must scale with the MATERIAL it wins.
@@ -4116,43 +4411,16 @@ mod tests {
     fn capture_reduction_falls_as_the_victim_gets_more_valuable() {
         use mf_core::material_value;
 
-        let pawn = capture_late_move_reduction(
-            12,
-            12,
-            true,
-            false,
-            false,
-            material_value(PieceKind::Pawn),
-            0,
-        );
-        let knight = capture_late_move_reduction(
-            12,
-            12,
-            true,
-            false,
-            false,
-            material_value(PieceKind::Knight),
-            0,
-        );
-        let rook = capture_late_move_reduction(
-            12,
-            12,
-            true,
-            false,
-            false,
-            material_value(PieceKind::Rook),
-            0,
-        );
-        let queen = capture_late_move_reduction(
-            12,
-            12,
-            true,
-            false,
-            false,
-            material_value(PieceKind::Queen),
-            0,
-        );
-        let quiet = late_move_reduction(12, 12, true, false, false, 0);
+        let table = shipped_lmr_table();
+        let parameters = shipped();
+        let capture = |victim| {
+            capture_late_move_reduction(&table, &parameters, 12, 12, true, false, false, victim, 0)
+        };
+        let pawn = capture(material_value(PieceKind::Pawn));
+        let knight = capture(material_value(PieceKind::Knight));
+        let rook = capture(material_value(PieceKind::Rook));
+        let queen = capture(material_value(PieceKind::Queen));
+        let quiet = late_move_reduction(&table, &parameters, 12, 12, true, false, false, 0);
 
         assert!(queen < rook && rook < knight && knight < pawn);
         // Even the cheapest victim buys some protection relative to a no-history quiet.
@@ -4180,16 +4448,31 @@ mod tests {
     #[test]
     fn capture_reduction_scales_with_depth_move_count_and_capture_history() {
         let pawn = mf_core::material_value(PieceKind::Pawn);
-        let baseline = capture_late_move_reduction(12, 12, true, false, false, pawn, 0);
+        let table = shipped_lmr_table();
+        let parameters = shipped();
+        let reduction = |depth, moves, improving, cut, tt_pv, history| {
+            capture_late_move_reduction(
+                &table,
+                &parameters,
+                depth,
+                moves,
+                improving,
+                cut,
+                tt_pv,
+                pawn,
+                history,
+            )
+        };
+        let baseline = reduction(12, 12, true, false, false, 0);
 
-        assert!(capture_late_move_reduction(20, 12, true, false, false, pawn, 0) > baseline);
-        assert!(capture_late_move_reduction(12, 24, true, false, false, pawn, 0) > baseline);
-        assert!(capture_late_move_reduction(12, 12, false, false, false, pawn, 0) > baseline);
-        assert!(capture_late_move_reduction(12, 12, true, true, false, pawn, 0) > baseline);
-        assert!(capture_late_move_reduction(12, 12, true, false, true, pawn, 0) < baseline);
+        assert!(reduction(20, 12, true, false, false, 0) > baseline);
+        assert!(reduction(12, 24, true, false, false, 0) > baseline);
+        assert!(reduction(12, 12, false, false, false, 0) > baseline);
+        assert!(reduction(12, 12, true, true, false, 0) > baseline);
+        assert!(reduction(12, 12, true, false, true, 0) < baseline);
         // Capture history saturates at CAPTURE_MAX (10_692), so these are in range.
-        assert!(capture_late_move_reduction(12, 12, true, false, false, pawn, 8_000) < baseline);
-        assert!(capture_late_move_reduction(12, 12, true, false, false, pawn, -8_000) > baseline);
+        assert!(reduction(12, 12, true, false, false, 8_000) < baseline);
+        assert!(reduction(12, 12, true, false, false, -8_000) > baseline);
     }
 
     /// A capture reduction is the QUIET formula fed a capture `statScore`.
@@ -4200,11 +4483,23 @@ mod tests {
     /// `439/4096` history divisor. Only the statistic changes.
     #[test]
     fn the_capture_reduction_is_the_quiet_formula_with_a_capture_stat_score() {
+        let table = shipped_lmr_table();
+        let parameters = shipped();
         for (victim, history) in [(100, 0), (900, 4_000), (500, -3_000), (320, 10_692)] {
-            let stat_score = capture_stat_score(victim, history);
+            let stat_score = capture_stat_score(&parameters, victim, history);
             assert_eq!(
-                capture_late_move_reduction(14, 9, false, true, false, victim, history),
-                late_move_reduction(14, 9, false, true, false, stat_score)
+                capture_late_move_reduction(
+                    &table,
+                    &parameters,
+                    14,
+                    9,
+                    false,
+                    true,
+                    false,
+                    victim,
+                    history
+                ),
+                late_move_reduction(&table, &parameters, 14, 9, false, true, false, stat_score)
             );
         }
     }
@@ -4254,35 +4549,41 @@ mod tests {
     fn the_verification_depth_follows_the_scout_score_margin() {
         // Scout comfortably above the incumbent: verify one ply deeper.
         assert_eq!(
-            post_lmr_verification_depth(10, 8, 500, 500 + POST_LMR_DEEPER_MARGIN + 1),
+            post_lmr_verification_depth(&shipped(), 10, 8, 500, 500 + POST_LMR_DEEPER_MARGIN + 1),
             11
         );
         // Exactly AT the deeper margin is not enough -- the reference uses a strict
         // inequality, and a boundary that drifts silently changes the tree.
         assert_eq!(
-            post_lmr_verification_depth(10, 8, 500, 500 + POST_LMR_DEEPER_MARGIN),
+            post_lmr_verification_depth(&shipped(), 10, 8, 500, 500 + POST_LMR_DEEPER_MARGIN),
             10
         );
         // Barely above the incumbent: verify one ply shallower.
         assert_eq!(
-            post_lmr_verification_depth(10, 8, 500, 500 + POST_LMR_SHALLOWER_MARGIN - 1),
+            post_lmr_verification_depth(
+                &shipped(),
+                10,
+                8,
+                500,
+                500 + POST_LMR_SHALLOWER_MARGIN - 1
+            ),
             9
         );
         // Exactly at the shallower margin is already out of the band.
         assert_eq!(
-            post_lmr_verification_depth(10, 8, 500, 500 + POST_LMR_SHALLOWER_MARGIN),
+            post_lmr_verification_depth(&shipped(), 10, 8, 500, 500 + POST_LMR_SHALLOWER_MARGIN),
             10
         );
         // An UNREDUCED scout can never earn the deeper band: there is no reduction to
         // pay back, and deepening past `child_depth` there would extend the tree on
         // evidence that was already full-depth.
         assert_eq!(
-            post_lmr_verification_depth(10, 10, 500, 500 + POST_LMR_DEEPER_MARGIN + 1),
+            post_lmr_verification_depth(&shipped(), 10, 10, 500, 500 + POST_LMR_DEEPER_MARGIN + 1),
             10
         );
         // The result is a search depth, so it can never go below 1.
         assert_eq!(
-            post_lmr_verification_depth(1, 1, 500, 500 + POST_LMR_SHALLOWER_MARGIN - 1),
+            post_lmr_verification_depth(&shipped(), 1, 1, 500, 500 + POST_LMR_SHALLOWER_MARGIN - 1),
             1
         );
     }
@@ -4365,9 +4666,9 @@ mod tests {
 
     #[test]
     fn frontier_futility_margin_grows_with_effective_depth() {
-        assert_eq!(frontier_futility_margin(0), 124);
-        assert_eq!(frontier_futility_margin(1), 233);
-        assert_eq!(frontier_futility_margin(6), 778);
+        assert_eq!(frontier_futility_margin(&shipped(), 0), 124);
+        assert_eq!(frontier_futility_margin(&shipped(), 1), 233);
+        assert_eq!(frontier_futility_margin(&shipped(), 6), 778);
         // The window now reaches a reduced depth of 6, matching where the margin was
         // calibrated, instead of stopping at 3.
         assert_eq!(FUTILITY_MAX_EFFECTIVE_DEPTH, 6);
@@ -4375,9 +4676,9 @@ mod tests {
 
     #[test]
     fn see_pruning_uses_separate_main_search_and_qsearch_thresholds() {
-        assert_eq!(quiet_see_threshold(0), 0);
-        assert_eq!(quiet_see_threshold(3), -26 * 9);
-        assert_eq!(capture_see_threshold(3), -99 * 3);
+        assert_eq!(quiet_see_threshold(&shipped(), 0), 0);
+        assert_eq!(quiet_see_threshold(&shipped(), 3), -26 * 9);
+        assert_eq!(capture_see_threshold(&shipped(), 3), -99 * 3);
         // Qsearch admits equal trades and rejects losing ones. The old -74 admitted
         // captures that lose most of a pawn; demanding a strictly winning +1 instead
         // measured 1.5x MORE nodes, because an equal trade is how a recapture resolves.
@@ -4611,8 +4912,8 @@ mod tests {
 
     #[test]
     fn probcut_margin_and_depth_follow_the_reference_formulas() {
-        assert_eq!(probcut_beta(100, false), 341);
-        assert_eq!(probcut_beta(100, true), 277);
+        assert_eq!(probcut_beta(&shipped(), 100, false), 341);
+        assert_eq!(probcut_beta(&shipped(), 100, true), 277);
         assert_eq!(probcut_depth(8, false), 5);
         assert_eq!(probcut_depth(8, true), 3);
     }
@@ -4625,22 +4926,41 @@ mod tests {
 
     #[test]
     fn singular_extensions_support_single_double_negative_and_check_extensions() {
-        let singular_beta = singular_beta(200, 8, false, false);
+        let parameters = shipped();
+        let singular_beta = singular_beta(&parameters, 200, 8, false, false);
         assert_eq!(singular_beta, 193);
         assert_eq!(
-            singular_extension(192, singular_beta, false, true, false, 200, 300),
+            singular_extension(
+                &parameters,
+                192,
+                singular_beta,
+                false,
+                true,
+                false,
+                200,
+                300
+            ),
             1
         );
         assert_eq!(
-            singular_extension(150, singular_beta, true, true, false, 200, 300),
+            singular_extension(&parameters, 150, singular_beta, true, true, false, 200, 300),
             2
         );
         assert_eq!(
-            singular_extension(210, singular_beta, false, true, false, 400, 300),
+            singular_extension(
+                &parameters,
+                210,
+                singular_beta,
+                false,
+                true,
+                false,
+                400,
+                300
+            ),
             -3
         );
         assert_eq!(
-            singular_extension(210, singular_beta, false, true, true, 200, 300),
+            singular_extension(&parameters, 210, singular_beta, false, true, true, 200, 300),
             -2
         );
         assert_eq!(singular_multicut_value(350, 300, 320), Some(350));
