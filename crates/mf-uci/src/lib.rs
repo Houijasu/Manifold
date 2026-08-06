@@ -40,7 +40,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseQSearchTT type check default true",
     "option name UseQSearchDeltaPruning type check default true",
     "option name UseQSearchChecks type check default false",
-    "option name UseCaptureLMR type check default false",
+    "option name UseCaptureLMR type check default true",
     "option name UsePostLMRDepth type check default true",
     "option name UsePostLMRContHist type check default false",
     "option name UseSingularExt type check default true",

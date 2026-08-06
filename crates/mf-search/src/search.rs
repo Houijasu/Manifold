@@ -297,8 +297,9 @@ impl Default for SearchOptions {
             //
             // The mechanism is measured, not guessed. At `movetime 1000` over 24 book
             // positions the widening reaches **0.12 plies LESS depth** on average
-            // (15.96 vs 16.08; deeper in only 7 of 24), and it costs +12.3% bench nodes
-            // (45_036 -> 50_569). Every quiet check is a node that resolves no material,
+            // (15.96 vs 16.08; deeper in only 7 of 24), and it cost +12.3% bench nodes
+            // on the build it was measured against (45_036 -> 50_569). Every quiet
+            // check is a node that resolves no material,
             // so the qsearch grows without the standing pat converging faster, and the
             // extra time comes straight out of the iterative deepening that actually
             // finds moves. The tactics it does buy are real -- `search_invariants`
@@ -317,43 +318,48 @@ impl Default for SearchOptions {
             // evidence. TT moves, checking captures, and queen promotions are exempt;
             // see `capture_reduction_allowed` for why each one is.
             //
-            // Implemented, maintained, and toggleable, but ships **OFF**. Measured
-            // single-variable against the M2 kept build over 300 games at 8+0.08,
-            // Threads=1, `-use-affinity -concurrency 8`, zero forfeits both sides:
+            // Ships **ON**, but only on the second measurement. This toggle is the
+            // record of a feature whose verdict was decided by something outside
+            // itself, so both measurements are kept here.
             //
-            //   * enabled: -8.11 +/- 20.67 Elo, Ptnml [2,37,79,30,2], LOS 22.1%
+            // M3-F2 measured it single-variable against the M2 kept build over 300
+            // games at 8+0.08, Threads=1, `-use-affinity -concurrency 8`, zero
+            // forfeits: **-8.11 +/- 20.67 Elo**, Ptnml [2,37,79,30,2]. It shipped off,
+            // because the criterion was a positive point estimate.
             //
-            // The error bar covers zero, so the honest reading is "not shown to help",
-            // not "shown to hurt". It ships off because the feature's criterion was a
-            // positive point estimate, and a technique with no demonstrated gain has no
-            // claim on being the default.
+            // The mechanism behind that negative was measured rather than guessed, and
+            // it is what made the re-measurement worth one match. The node saving was
+            // LARGE and real -- -5.8% on bench, and -24.7% / -33.1% / -21.6% at fixed
+            // depths 10 / 12 / 14 over six tactical positions -- and it converted to
+            // almost nothing: at `movetime 1000` over 24 book positions the enabled
+            // build reached **+0.12 plies**. A 25% node saving worth a tenth of a ply
+            // is a saving handed straight back at the verification re-search, which at
+            // the time always paid full `newDepth`. A reduced capture that fails high
+            // is re-searched, and captures fail high far more often than quiets at the
+            // same move index -- the asymmetry the material term PRICES but cannot
+            // remove.
             //
-            // The mechanism is measured, not guessed, and it is a more interesting
-            // negative than M3-F1's was. The node saving is LARGE and real -- -5.8% on
-            // bench, and -24.7% / -33.1% / -21.6% at fixed depths 10 / 12 / 14 over six
-            // tactical positions -- and it converts to almost nothing: at `movetime
-            // 1000` over 24 book positions the enabled build reaches **+0.12 plies**
-            // (15.88 vs 15.75, deeper in only 6 of 24). A 25% node saving worth a tenth
-            // of a ply is a saving being handed straight back at the verification
-            // re-search. A reduced capture that fails high is re-searched at full
-            // depth, and captures fail high far more often than quiets at the same move
-            // index -- the asymmetry the material term PRICES but cannot remove.
+            // M3-F4 then shipped `use_post_lmr_depth`, which is exactly the named
+            // revisit condition: the re-search depth now responds to the scout's margin
+            // instead of always paying full depth. M4-F1b re-measured on top of it, one
+            // match, same conditions, against the M3 kept build (bench 44,737):
+            // **+11.59 +/- 22.22 Elo**, Ptnml [3,31,72,41,3], LOS 84.7%, PairsRatio
+            // 1.29, zero forfeits. Point estimate positive, so it ships. The error bar
+            // still covers zero and the two intervals overlap heavily -- this is a
+            // ~20 Elo swing in the point estimate after the constraint was removed, not
+            // a proof.
             //
             // Two designs were measured, and the first is recorded because the second
             // only looks obvious afterwards. A FLAT one-ply discount -- the design this
             // feature was specified with -- measured WORSE than no capture reduction at
             // all: +5.7% nodes at depth 10 and +51.6% at depth 12, because it shielded
             // a late pawn grab exactly as much as taking a hanging queen. Making the
-            // protection proportional to captured material fixed the node counts
-            // completely and moved the Elo not at all, which is what identifies the
-            // re-search rather than the reduction as the binding constraint.
+            // protection proportional to captured material fixed the node counts.
             //
-            // Conditions for revisiting, both aimed at that re-search rather than at
-            // the reduction: a post-LMR continuation-history update, and a
-            // doDeeperSearch/doShallowerSearch adjustment that lets the re-search
-            // depth respond to how badly the reduced scout missed. Full write-up in
-            // `experiments/MSN-S2-capture-lmr/results.md`.
-            use_capture_lmr: false,
+            // Write-ups: `experiments/MSN-S2-capture-lmr/results.md` (the negative and
+            // the mechanism) and `experiments/MSN-S7-capture-lmr-v2/results.md` (the
+            // re-measurement).
+            use_capture_lmr: true,
             // M3-F4 was specified as ONE package of two sub-mechanisms hanging off the
             // same LMR fail-high, "unless the worker finds cause to split". A four-arm
             // fixed-depth sweep over 24 book positions found the cause: measured

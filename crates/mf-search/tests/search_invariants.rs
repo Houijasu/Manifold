@@ -143,10 +143,11 @@ fn selectivity_options_default_to_enabled() {
             // Elo over 300 games and 0.12 plies SHALLOWER at equal time. See the
             // comment on `SearchOptions::default` in `search.rs`.
             use_qsearch_checks: false,
-            // Capture LMR also ships DISABLED: it saves 21-33% of the tree at fixed
-            // depth and converts that to only +0.12 plies at equal time, measuring
-            // -8.11 +/- 20.67 Elo. See the comment on `SearchOptions::default`.
-            use_capture_lmr: false,
+            // Capture LMR ships ENABLED, but only after a second measurement. It
+            // measured -8.11 +/- 20.67 Elo when the verification re-search always paid
+            // full depth, and +11.59 +/- 22.22 once `use_post_lmr_depth` below removed
+            // that constraint. See the comment on `SearchOptions::default`.
+            use_capture_lmr: true,
             // The verification-depth band is the M3-F4 answer to the constraint M3-F2
             // identified, and it ships ON. Its package-mate, the continuation bonus,
             // ships OFF: measured separately they move the fixed-depth tree in opposite
@@ -807,12 +808,19 @@ fn the_qsearch_checks_toggle_changes_the_searched_tree() {
 
 /// Capture LMR must SAVE nodes on tactical middlegames without changing the move played.
 ///
-/// This is the ablation anchor for the technique, and it is what makes the decision to
-/// ship it OFF a measured trade rather than a forgotten one. The saving is real and
-/// large, and the moves are the same — the feature was rejected because it could not
-/// SPEND the saving (+0.12 plies at equal time), not because the reduction is unsound.
-/// If that ever stops being true, this test fails and the write-up in
-/// `experiments/MSN-S2-capture-lmr/results.md` stops being the right explanation.
+/// This is the ablation anchor for the technique. It was written while the feature
+/// shipped OFF, to keep the rejection a measured trade rather than a forgotten one:
+/// the saving was real and large and the moves were the same, so the reason for the
+/// -8.11 +/- 20.67 Elo was that the tree could not SPEND the saving (+0.12 plies at
+/// equal time), not that the reduction was unsound.
+///
+/// The feature ships ON now (M4-F1b, +11.59 +/- 22.22 after `use_post_lmr_depth`
+/// removed the always-full-depth re-search), and the assertion is unchanged. Only the
+/// arms swapped: the DEFAULT is now the reduced one, so the flipped option produces the
+/// unreduced control. That is the point of writing it as a property rather than as
+/// pinned numbers — a soundness anchor should survive its feature's default flipping.
+/// If it ever fails, both `experiments/MSN-S2-capture-lmr/results.md` and
+/// `experiments/MSN-S7-capture-lmr-v2/results.md` stop being the right explanation.
 ///
 /// Tactical middlegames are the hostile case on purpose: they are where a wrongly
 /// reduced capture would change the answer, so agreeing on the best move here is the
@@ -843,21 +851,21 @@ fn capture_lmr_saves_nodes_on_tactical_middlegames_without_changing_the_move() {
     for fen in TACTICAL {
         let position = Position::from_fen(fen, false).expect("tactical FEN should parse");
 
+        // The technique ships ON, so the DEFAULT arm here is the reduced one.
         let enabled_table = TranspositionTable::new(16).expect("test TT should allocate");
-        let enabled = search(
+        let enabled = search_default(&position, &enabled_table, limits(9), network);
+
+        let disabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+        let disabled = search(
             &position,
-            &enabled_table,
+            &disabled_table,
             limits(9),
             SearchOptions {
-                use_capture_lmr: true,
+                use_capture_lmr: false,
                 ..SearchOptions::default()
             },
             network,
         );
-
-        // The technique ships OFF, so the DEFAULT arm here is the unreduced one.
-        let disabled_table = TranspositionTable::new(16).expect("test TT should allocate");
-        let disabled = search_default(&position, &disabled_table, limits(9), network);
 
         assert_eq!(
             enabled

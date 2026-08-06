@@ -39,68 +39,86 @@ use std::time::{Duration, Instant};
 /// that outlives any particular signature.
 ///
 /// M3-F1 added quiet checks in quiescence and left this anchor exactly where M7 put it,
-/// because the technique SHIPS OFF: enabling it costs +12.3% bench nodes
+/// because the technique SHIPS OFF: enabling it cost +12.3% bench nodes on that build
 /// (`45_036` -> `50_569`) and 0.12 plies of depth at equal time, and it measured
 /// -12.75 +/- 23.01 Elo over 300 games. The enabled signature is pinned in
 /// `qsearch_checks_ships_disabled_and_is_wired_through_to_the_search`, not here.
 ///
-/// M3-F2 added capture LMR and left this anchor where M7 put it for the same reason,
-/// which makes two consecutive M3 features that ship OFF. That one is the more
-/// instructive negative: enabling it SAVES a great deal of search -- -5.8% here
-/// (`45_036` -> `42_409`) and -24.7% / -33.1% / -21.6% at fixed depths 10 / 12 / 14 --
-/// and converts all of it into +0.12 plies at equal time, measuring -8.11 +/- 20.67
-/// Elo over 300 games. A large node saving is not a strength result and this file now
-/// records two independent demonstrations of that. The enabled signature is pinned in
-/// `capture_lmr_ships_disabled_and_is_wired_through_to_the_search`, not here.
+/// M3-F2 added capture LMR and left this anchor where M7 put it, because that
+/// measurement said ship it OFF: -8.11 +/- 20.67 Elo over 300 games despite saving
+/// -5.8% here and -24.7% / -33.1% / -21.6% at fixed depths 10 / 12 / 14. A large node
+/// saving is not a strength result, and this file records two independent
+/// demonstrations of that.
 ///
 /// M3-F4 is the FIRST M3 feature to move this constant, from `45_036` to `44_737`
 /// (-0.66%), because it is the first one whose measurement said ship it ON. It lets the
 /// LMR verification re-search depth respond to how far the reduced scout beat the
-/// incumbent best score instead of always paying full `child_depth`, which is the
-/// binding constraint M3-F2's write-up identified. Its package-mate, the post-LMR
-/// continuation bonus, ships OFF and pins its own signature below.
+/// incumbent best score instead of always paying full `child_depth`.
 ///
-/// The old `45_036` is not lost: it is exactly what `UsePostLMRDepth=false` reproduces,
-/// which is pinned in `post_lmr_depth_ships_enabled_and_reproduces_the_m3_signature`
-/// and is the attribution proof that this feature moved the signature and nothing else
-/// did.
+/// M4-F1b moved it again, from `44_737` to `41_588` (-7.0%), by turning capture LMR ON
+/// after re-measuring it on top of that band: **+11.59 +/- 22.22 Elo** vs the M3 kept
+/// build, zero forfeits. That order is the whole point. M3-F2's write-up named the
+/// always-full-depth verification re-search as the reason its node saving would not
+/// convert, M3-F4 removed exactly that constraint, and the same technique measured ~20
+/// Elo higher afterwards. Neither interval excludes zero, so what is established is the
+/// ORDER of the two measurements, not a proven gain from either.
+///
+/// The consequence for this file is that the two features now form an attribution
+/// SQUARE rather than a chain, and all four corners are pinned:
+///
+///   UseCaptureLMR   UsePostLMRDepth   signature   pinned in
+///   on  (shipped)   on  (shipped)     41_588      here
+///   off             on                44_737      `capture_lmr_ships_enabled_...`
+///   on              off               42_409      `post_lmr_depth_ships_enabled_...`
+///   off             off               45_036      `the_shipped_search_decomposes_...`
+///
+/// So `44_737` and `45_036` are not lost, and neither feature can be blamed for the
+/// other's contribution: any drift identifies which corner moved.
 ///
 /// This constant NOT moving is otherwise still an assertion. A feature that ships
 /// disabled must leave the shipped signature bit-for-bit unchanged, so if adding one
 /// ever moves this number, the toggle is not gating everything it claims to gate.
-const BENCH_NODE_COUNT: u64 = 44_737;
-const BENCH_NODES: &str = "Nodes searched: 44737";
+const BENCH_NODE_COUNT: u64 = 41_588;
+const BENCH_NODES: &str = "Nodes searched: 41588";
 
-/// The signature with `UsePostLMRDepth=false`: the M3 signature, bit-for-bit.
-const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 45_036;
+/// The signature with `UsePostLMRDepth=false`, capture LMR still on.
+///
+/// This is the number M3-F2 measured its -8.11 Elo with, which is not a coincidence:
+/// that build was capture LMR without the verification-depth band, and this arm
+/// reconstructs it exactly.
+const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 42_409;
 
 /// The signature with `UsePostLMRContHist=true`.
 ///
 /// Pinned so the disabled half of the M3-F4 package stays measurable without a rebuild.
-const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 46_541;
+const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 43_134;
 
-/// The signature with `UseCaptureLMR=true`.
+/// The signature with `UseCaptureLMR=false`: the M3 shipped signature, bit-for-bit.
 ///
-/// Pinned so the disabled technique stays measurable without a rebuild, and so a change
-/// to the shared reduction plumbing is still caught by the suite even though nothing in
-/// the shipped search reaches the capture arm.
-const BENCH_NODE_COUNT_WITH_CAPTURE_LMR: u64 = 41_588;
+/// The attribution proof that M4-F1b moved the signature by flipping one default and
+/// nothing else. If `44_737` does not come back exactly, something other than capture
+/// LMR moved the tree.
+const BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR: u64 = 44_737;
+
+/// The signature with `UseCaptureLMR=false` AND `UsePostLMRDepth=false`: the M7/M2
+/// signature both features were measured against, bit-for-bit.
+const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 45_036;
 
 /// The all-on signature with `UseQSearchChecks=true`.
 ///
 /// Pinned so the disabled technique stays measurable without a rebuild, and so a change
 /// to the quiet-check generator is still caught by the suite even though nothing in the
 /// shipped search reaches it.
-const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 48_017;
+const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 44_860;
 
 /// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
-const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 42_677;
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 38_858;
 
 /// The NNUE signature reproduced exactly by `UseContHistory=false`.
 ///
 /// This is measured with correction history off so the anchor isolates continuation
 /// history rather than folding correction-history changes into the same number.
-const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 43_290;
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 37_032;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -554,7 +572,7 @@ fn history_toggles_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 4);
 
-    assert_eq!(nodes, [42_677, 45_100, 43_526, 43_290]);
+    assert_eq!(nodes, [38_858, 37_593, 41_436, 37_032]);
 
     assert!(
         nodes[2] > nodes[0],
@@ -634,9 +652,15 @@ fn correction_history_off_reproduces_the_nnue_signature() {
 /// this test pins both exact signatures rather than pretending both still save nodes.
 /// The match evidence, not the bench direction, remains the reason both ship disabled.
 ///
-/// After M7 neither variant reads better on bench any more: `47_970` and `49_331`
-/// against the shipped `45_036`. That removes the last tempting number, but it changes
-/// nothing about the decision, which was never the bench delta's to make.
+/// After M7 neither variant read better on bench any more: `49_017` and `47_522`
+/// against the then-shipped `45_036`. Under M4-F1b's capture LMR the material variant
+/// is tempting AGAIN -- `40_161` against the shipped `41_588`, a 3.4% saving -- while
+/// the major variant stays worse at `45_188`.
+///
+/// That flip-flop across three searches is the point. This anchor has now shown the
+/// material variant as cheaper, dearer, and cheaper again without anyone re-running the
+/// depth-14 probe that actually condemned it. The decision was never the bench delta's
+/// to make, and the number moving back is not new evidence.
 #[test]
 fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     require_bench_network!();
@@ -657,7 +681,7 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 3);
 
-    assert_eq!(nodes, [BENCH_NODE_COUNT, 49_017, 47_522]);
+    assert_eq!(nodes, [BENCH_NODE_COUNT, 45_188, 40_161]);
 }
 
 /// `UseQSearchChecks` ships OFF, and this test records WHY in an executable form.
@@ -676,7 +700,8 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
 ///
 /// The mechanism was measured rather than assumed. At `movetime 1000` over 24 book
 /// positions the widening reaches **0.12 plies LESS depth** (15.96 vs 16.08, deeper in
-/// only 7 of 24) while costing +12.3% bench nodes. A quiet check resolves no material,
+/// only 7 of 24) while costing bench nodes (+12.3% when measured against the M2 build;
+/// +7.9% against the current one). A quiet check resolves no material,
 /// so the qsearch grows without the standing pat converging any faster, and the time
 /// comes out of the iterative deepening that actually finds moves. Full write-up in
 /// `experiments/MSN-S1-qchecks/results.md`.
@@ -707,39 +732,44 @@ fn qsearch_checks_ships_disabled_and_is_wired_through_to_the_search() {
     );
 }
 
-/// `UseCaptureLMR` ships OFF, and this test records WHY in an executable form.
+/// `UseCaptureLMR` ships ON, and turning it off must reproduce the M3 signature.
 ///
 /// M3-F2 extended LMR to late captures: the same log-log formula quiets use, fed a
 /// capture `statScore` of captured material plus capture history, with TT moves,
-/// checking captures, and queen promotions exempt. Measured single-variable against the
-/// M2 kept build over 300 games at 8+0.08, Threads=1, `-use-affinity -concurrency 8`,
-/// zero forfeits on both sides:
+/// checking captures, and queen promotions exempt. It shipped OFF on that measurement
+/// -- **-8.11 +/- 20.67 Elo**, Ptnml [2,37,79,30,2] -- and this test used to assert
+/// exactly that.
 ///
-///   * enabled: **-8.11 +/- 20.67 Elo**, Ptnml [2,37,79,30,2], LOS 22.1%
+/// It ships ON now, on the strength of a second match, and the reason the verdict
+/// changed is not that anyone re-ran the same experiment. M3-F2's write-up diagnosed
+/// the mechanism: the technique really does shrink the tree by a fifth to a third at
+/// fixed depth and really does play the same moves, but converted only +0.12 plies at
+/// equal time, because a reduced capture that fails high was re-searched at FULL depth
+/// and captures fail high far more often than quiets at the same move index. That
+/// write-up named the always-full-depth re-search as the binding constraint and named
+/// `doDeeperSearch`/`doShallowerSearch` as the prerequisite for a re-measurement.
 ///
-/// The error bar covers zero, so the honest reading is "not shown to help" rather than
-/// "shown to hurt". It ships off because the feature's stated criterion was a positive
-/// point estimate.
+/// M3-F4 shipped that prerequisite. M4-F1b then spent the one authorized re-measurement
+/// on top of it -- same conditions, 300 games at 8+0.08, Threads=1, `-use-affinity
+/// -concurrency 8`, vs the M3 kept build, zero forfeits both sides:
 ///
-/// What makes this one worth reading twice is the SIZE of the saving it failed to
-/// convert. Unlike history pruning, whose bench delta was a trap because the technique
-/// pruned away the best move, capture LMR really does shrink the tree by a fifth to a
-/// third at fixed depth (-24.7% / -33.1% / -21.6% at depths 10 / 12 / 14) and really
-/// does play the same moves. It just cannot spend the saving: at `movetime 1000` over
-/// 24 book positions it reaches +0.12 plies (15.88 vs 15.75, deeper in only 6 of 24),
-/// because a reduced capture that fails high is re-searched at full depth and captures
-/// fail high far more often than quiets at the same move index.
+///   * **+11.59 +/- 22.22 Elo**, Ptnml [3,31,72,41,3], LOS 84.7%, PairsRatio 1.29
 ///
-/// The enabled anchor is exact rather than a bare inequality so the disabled technique
-/// stays measurable -- a change to the shared reduction plumbing is caught here even
-/// though nothing in the shipped search reaches the capture arm. Full write-up in
-/// `experiments/MSN-S2-capture-lmr/results.md`.
+/// Both intervals cover zero and they overlap heavily, so the claim this test encodes
+/// is deliberately modest: the point estimate moved ~20 Elo in the direction the
+/// diagnosis predicted once the constraint it named was removed. That is why the
+/// disabled anchor here is `BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR` rather than a bare
+/// inequality -- it is the attribution control proving M4-F1b moved the shipped
+/// signature by flipping this one default and nothing else.
+///
+/// Write-ups: `experiments/MSN-S2-capture-lmr/results.md` and
+/// `experiments/MSN-S7-capture-lmr-v2/results.md`.
 #[test]
-fn capture_lmr_ships_disabled_and_is_wired_through_to_the_search() {
+fn capture_lmr_ships_enabled_and_reproduces_the_m3_signature_when_disabled() {
     require_bench_network!();
     let output = run_uci_session(
         "bench\n\
-         setoption name UseCaptureLMR value true\n\
+         setoption name UseCaptureLMR value false\n\
          bench\n\
          quit\n",
         "UCI capture LMR session",
@@ -753,25 +783,27 @@ fn capture_lmr_ships_disabled_and_is_wired_through_to_the_search() {
 
     assert_eq!(
         nodes,
-        [BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITH_CAPTURE_LMR],
-        "capture LMR must be OFF in the shipped default and must reach the search when on"
+        [BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR],
+        "capture LMR must be ON in the shipped default and must restore the exact M3 \
+         signature when disabled"
     );
 }
 
-/// `UsePostLMRDepth` ships ON, and turning it off must reproduce the M3 signature.
+/// `UsePostLMRDepth` ships ON, and turning it off must reproduce M3-F2's build.
 ///
-/// M3-F4 is the first M3 feature to ship enabled, so this is the attribution control
-/// for the only shipped-signature move in the whole milestone: if `45_036` does not
-/// come back exactly when the band is switched off, something OTHER than this feature
-/// moved the tree and the `44_737` above is measuring more than one thing.
+/// M3-F4 was the first M3 feature to ship enabled, and this is its attribution control.
+/// The arm it reproduces is now the more interesting one: with capture LMR also on,
+/// `UsePostLMRDepth=false` is exactly the build M3-F2 measured its -8.11 Elo with.
 ///
 /// The mechanism: a reduced scout that beats alpha is re-searched one ply DEEPER when
 /// it cleared the incumbent best score by more than 53, one ply SHALLOWER when it
 /// cleared it by less than 8, and at the unchanged full depth in between. M3-F2's
 /// write-up identified that always-full-depth re-search as the reason a 25-33%
-/// fixed-depth node saving converted to +0.12 plies at equal time.
+/// fixed-depth node saving converted to +0.12 plies at equal time, and M4-F1b's
+/// re-measurement on top of this band is what turned that diagnosis into a shipped
+/// default.
 #[test]
-fn post_lmr_depth_ships_enabled_and_reproduces_the_m3_signature() {
+fn post_lmr_depth_ships_enabled_and_reproduces_the_m3_f2_build() {
     require_bench_network!();
     let output = run_uci_session(
         "bench\n\
@@ -788,7 +820,36 @@ fn post_lmr_depth_ships_enabled_and_reproduces_the_m3_signature() {
         metrics(stdout, "Nodes searched: "),
         vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH],
         "the verification-depth band must be ON by default and must restore the exact \
-         M3 signature when disabled"
+         M3-F2 signature when disabled"
+    );
+}
+
+/// The two shipped LMR features must decompose to the M7 signature they were measured
+/// against.
+///
+/// `44_737` and `45_036` are the anchors M3 and M2/M7 shipped, and both are still
+/// reachable from the current default by switching off one or both of the LMR features
+/// added since. Together with the two tests above this closes the attribution square:
+/// each corner is pinned, so a drift in the shipped `41_588` identifies WHICH feature's
+/// contribution moved rather than merely that something did.
+#[test]
+fn the_shipped_search_decomposes_to_its_two_predecessor_signatures() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "setoption name UseCaptureLMR value false\n\
+         setoption name UsePostLMRDepth value false\n\
+         bench\n\
+         quit\n",
+        "UCI both-LMR-features-off session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE],
+        "with both LMR features off the search must be the M7 build bit-for-bit"
     );
 }
 
@@ -881,10 +942,10 @@ fn post_lmr_handling_cannot_reach_the_tree_without_lmr() {
 /// a difference: an ablation anchor proves a toggle reaches the search, while this one
 /// proves it cannot.
 ///
-/// It therefore also stands in for the enabled-signature anchors that
-/// `UseQSearchChecks` and `UseCaptureLMR` carry. Those two features ship off and pin a
-/// DIFFERENT number when enabled; this one ships off (-17.39 +/- 18.99 Elo at 8+0.08,
-/// -34.86 +/- 44.35 at 30+0.3) and pins the SAME number, because it does not touch the
+/// It therefore also stands in for the ablation anchors `UseQSearchChecks` and
+/// `UseCaptureLMR` carry. Those two toggles pin a DIFFERENT number in their off
+/// position; this one ships off (-17.39 +/- 18.99 Elo at 8+0.08, -34.86 +/- 44.35 at
+/// 30+0.3) and pins the SAME number in both positions, because it does not touch the
 /// tree at all -- only the clock.
 ///
 /// The per-root-move node accounting the term needs IS performed on every search,
@@ -965,11 +1026,12 @@ fn disabling_history_reproduces_nnue_all_selectivity_off_signatures() {
 /// regression, so the prediction that continuation history alone would make history
 /// pruning viable is DISPROVEN, not merely unconfirmed.
 ///
-/// The bench delta has moved twice since. M4-F2 measured +0.14% (`135_257` ->
-/// `135_443`), i.e. enabling it no longer even saved nodes. Under the M7 search it is
-/// favourable again, -4.6% (`45_036` -> `42_959`). That is precisely the trap this
-/// comment exists to disarm: the technique has now shown a tempting bench number under
-/// two different searches and lost a match under both. Bench is not the evidence.
+/// The bench delta has moved repeatedly since. M4-F2 measured +0.14% (`135_257` ->
+/// `135_443`), i.e. enabling it no longer even saved nodes. Under the M7 search it was
+/// favourable again, -4.6% (`45_036` -> `42_959`), and under M4-F1b's it still is,
+/// -3.7% (`41_588` -> `40_046`). That is precisely the trap this comment exists to
+/// disarm: the technique has now shown a tempting bench number under three different
+/// searches and lost a match under two of them. Bench is not the evidence.
 ///
 /// This test therefore pins only that the toggle ships off and still reaches the
 /// search. The old "must save nodes" assertion is deliberately NOT retained: it
@@ -1015,8 +1077,9 @@ fn history_pruning_ships_disabled_after_being_re_measured_on_the_continuation_si
 /// standalone signal M4-F1 measured it 9.18% WORSE than no history at all, whereas as
 /// a term in the sum it is now statistically indistinguishable from not having it
 /// (**-1.74 +/- 20.98 Elo**, 600 games, LLR -1.22, inconclusive at the cap). It cost
-/// 2.0% bench nodes at M4-F2 (`135_257` -> `137_940`) and costs 2.7% under M7
-/// (`45_036` -> `46_257`). See `experiments/M4-F2-conthist/pawn-history/`.
+/// 2.0% bench nodes at M4-F2 (`135_257` -> `137_940`), 2.7% under M7 (`45_036` ->
+/// `46_257`), and 5.3% under M4-F1b (`41_588` -> `43_806`). See
+/// `experiments/M4-F2-conthist/pawn-history/`.
 ///
 /// "Not measurably harmful" is not a reason to enable something, so the default stands
 /// unchanged. Pawn history remains wired as a term in `pruning_history` only, where it
@@ -1065,7 +1128,6 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UsePawnHistory",
         "UseHistoryPruning",
         "UseQSearchChecks",
-        "UseCaptureLMR",
         "UsePostLMRContHist",
         "UseTimeEffort",
     ] {
@@ -1081,6 +1143,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseCaptureHistory",
         "UseContHistory",
         "UsePostLMRDepth",
+        "UseCaptureLMR",
     ] {
         assert!(
             stdout
@@ -1138,7 +1201,7 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 72_105,
+        nodes[2], 58_272,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(
