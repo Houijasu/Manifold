@@ -44,11 +44,27 @@ use std::time::{Duration, Instant};
 /// -12.75 +/- 23.01 Elo over 300 games. The enabled signature is pinned in
 /// `qsearch_checks_ships_disabled_and_is_wired_through_to_the_search`, not here.
 ///
+/// M3-F2 added capture LMR and left this anchor where M7 put it for the same reason,
+/// which makes two consecutive M3 features that ship OFF. That one is the more
+/// instructive negative: enabling it SAVES a great deal of search -- -5.8% here
+/// (`45_036` -> `42_409`) and -24.7% / -33.1% / -21.6% at fixed depths 10 / 12 / 14 --
+/// and converts all of it into +0.12 plies at equal time, measuring -8.11 +/- 20.67
+/// Elo over 300 games. A large node saving is not a strength result and this file now
+/// records two independent demonstrations of that. The enabled signature is pinned in
+/// `capture_lmr_ships_disabled_and_is_wired_through_to_the_search`, not here.
+///
 /// This constant NOT moving is itself an assertion. A feature that ships disabled must
 /// leave the shipped signature bit-for-bit unchanged, so if adding one ever moves this
 /// number, the toggle is not gating everything it claims to gate.
 const BENCH_NODE_COUNT: u64 = 45_036;
 const BENCH_NODES: &str = "Nodes searched: 45036";
+
+/// The signature with `UseCaptureLMR=true`.
+///
+/// Pinned so the disabled technique stays measurable without a rebuild, and so a change
+/// to the shared reduction plumbing is still caught by the suite even though nothing in
+/// the shipped search reaches the capture arm.
+const BENCH_NODE_COUNT_WITH_CAPTURE_LMR: u64 = 42_409;
 
 /// The all-on signature with `UseQSearchChecks=true`.
 ///
@@ -602,6 +618,57 @@ fn qsearch_checks_ships_disabled_and_is_wired_through_to_the_search() {
     );
 }
 
+/// `UseCaptureLMR` ships OFF, and this test records WHY in an executable form.
+///
+/// M3-F2 extended LMR to late captures: the same log-log formula quiets use, fed a
+/// capture `statScore` of captured material plus capture history, with TT moves,
+/// checking captures, and queen promotions exempt. Measured single-variable against the
+/// M2 kept build over 300 games at 8+0.08, Threads=1, `-use-affinity -concurrency 8`,
+/// zero forfeits on both sides:
+///
+///   * enabled: **-8.11 +/- 20.67 Elo**, Ptnml [2,37,79,30,2], LOS 22.1%
+///
+/// The error bar covers zero, so the honest reading is "not shown to help" rather than
+/// "shown to hurt". It ships off because the feature's stated criterion was a positive
+/// point estimate.
+///
+/// What makes this one worth reading twice is the SIZE of the saving it failed to
+/// convert. Unlike history pruning, whose bench delta was a trap because the technique
+/// pruned away the best move, capture LMR really does shrink the tree by a fifth to a
+/// third at fixed depth (-24.7% / -33.1% / -21.6% at depths 10 / 12 / 14) and really
+/// does play the same moves. It just cannot spend the saving: at `movetime 1000` over
+/// 24 book positions it reaches +0.12 plies (15.88 vs 15.75, deeper in only 6 of 24),
+/// because a reduced capture that fails high is re-searched at full depth and captures
+/// fail high far more often than quiets at the same move index.
+///
+/// The enabled anchor is exact rather than a bare inequality so the disabled technique
+/// stays measurable -- a change to the shared reduction plumbing is caught here even
+/// though nothing in the shipped search reaches the capture arm. Full write-up in
+/// `experiments/MSN-S2-capture-lmr/results.md`.
+#[test]
+fn capture_lmr_ships_disabled_and_is_wired_through_to_the_search() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseCaptureLMR value true\n\
+         bench\n\
+         quit\n",
+        "UCI capture LMR session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 2);
+
+    assert_eq!(
+        nodes,
+        [BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITH_CAPTURE_LMR],
+        "capture LMR must be OFF in the shipped default and must reach the search when on"
+    );
+}
+
 /// Turning history off must reproduce the pinned NNUE all-off signatures bit-for-bit.
 ///
 /// This is the proof that M4-F1 moved the shipped bench signature by adding history
@@ -746,7 +813,12 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
     assert!(output.status.success());
 
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
-    for name in ["UsePawnHistory", "UseHistoryPruning", "UseQSearchChecks"] {
+    for name in [
+        "UsePawnHistory",
+        "UseHistoryPruning",
+        "UseQSearchChecks",
+        "UseCaptureLMR",
+    ] {
         assert!(
             stdout
                 .lines()

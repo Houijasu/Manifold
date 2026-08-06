@@ -143,6 +143,10 @@ fn selectivity_options_default_to_enabled() {
             // Elo over 300 games and 0.12 plies SHALLOWER at equal time. See the
             // comment on `SearchOptions::default` in `search.rs`.
             use_qsearch_checks: false,
+            // Capture LMR also ships DISABLED: it saves 21-33% of the tree at fixed
+            // depth and converts that to only +0.12 plies at equal time, measuring
+            // -8.11 +/- 20.67 Elo. See the comment on `SearchOptions::default`.
+            use_capture_lmr: false,
             use_singular_ext: true,
             use_check_ext: true,
             use_multicut: true,
@@ -264,6 +268,9 @@ fn mate_in_n_found() {
                 // this test exercises the search that actually plays games -- finding
                 // every mate here without the widening is the stronger statement.
                 use_qsearch_checks: false,
+                // Capture LMR is a reduction, so it is off here for the same reason
+                // `use_lmr` is: a mate search must be exact.
+                use_capture_lmr: false,
                 use_singular_ext: false,
                 use_check_ext: true,
                 use_multicut: false,
@@ -776,6 +783,129 @@ fn the_qsearch_checks_toggle_changes_the_searched_tree() {
     assert_ne!(
         enabled.nodes, disabled.nodes,
         "UseQSearchChecks must reach the quiescence move list"
+    );
+}
+
+/// Capture LMR must SAVE nodes on tactical middlegames without changing the move played.
+///
+/// This is the ablation anchor for the technique, and it is what makes the decision to
+/// ship it OFF a measured trade rather than a forgotten one. The saving is real and
+/// large, and the moves are the same — the feature was rejected because it could not
+/// SPEND the saving (+0.12 plies at equal time), not because the reduction is unsound.
+/// If that ever stops being true, this test fails and the write-up in
+/// `experiments/MSN-S2-capture-lmr/results.md` stops being the right explanation.
+///
+/// Tactical middlegames are the hostile case on purpose: they are where a wrongly
+/// reduced capture would change the answer, so agreeing on the best move here is the
+/// property worth pinning. Nodes are compared at a FIXED DEPTH, which is the only
+/// comparison a reduction can be judged by — at fixed time a reduction that saves nodes
+/// simply searches deeper and the node count says nothing.
+///
+/// Node counts are asserted as a strict drop rather than against pinned values, because
+/// `bench_cli.rs` already pins the exact enabled tree. What this test adds is that the
+/// saving is not concentrated in the one position bench happens to contain.
+#[test]
+fn capture_lmr_saves_nodes_on_tactical_middlegames_without_changing_the_move() {
+    let Some(network) = network() else {
+        return;
+    };
+    // Kiwipete, the Fine endgame study, a sharp Sicilian tabiya, and two promotion-race
+    // positions -- all with several captures available at the root.
+    const TACTICAL: [&str; 5] = [
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+        "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+        "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+        "2kr3r/pp1q1ppp/5n2/1Nb5/2Pp1B2/7Q/P4PPP/1R3RK1 w - - 0 1",
+    ];
+
+    let mut total_enabled = 0u64;
+    let mut total_disabled = 0u64;
+    for fen in TACTICAL {
+        let position = Position::from_fen(fen, false).expect("tactical FEN should parse");
+
+        let enabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+        let enabled = search(
+            &position,
+            &enabled_table,
+            limits(9),
+            SearchOptions {
+                use_capture_lmr: true,
+                ..SearchOptions::default()
+            },
+            network,
+        );
+
+        // The technique ships OFF, so the DEFAULT arm here is the unreduced one.
+        let disabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+        let disabled = search_default(&position, &disabled_table, limits(9), network);
+
+        assert_eq!(
+            enabled
+                .best_move
+                .map(|mv| format_uci_move(&position, mv, false)),
+            disabled
+                .best_move
+                .map(|mv| format_uci_move(&position, mv, false)),
+            "capture LMR changed the move played on {fen}"
+        );
+        total_enabled += enabled.nodes;
+        total_disabled += disabled.nodes;
+    }
+
+    assert!(
+        total_enabled < total_disabled,
+        "capture LMR must save nodes across the tactical set: {total_enabled} with, \
+         {total_disabled} without"
+    );
+}
+
+/// `UseLMR=false` must silence capture LMR too.
+///
+/// The LMR ablation arm is the control every other selectivity delta is read against
+/// (mission AGENTS.md 4.4). If capture LMR survived `UseLMR=false`, that arm would stop
+/// being "no late-move reduction" and every historical LMR anchor would quietly change
+/// meaning.
+#[test]
+fn disabling_lmr_disables_capture_lmr_as_well() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::from_fen(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        false,
+    )
+    .expect("test FEN should parse");
+
+    let with_capture_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let with_capture = search(
+        &position,
+        &with_capture_table,
+        limits(8),
+        SearchOptions {
+            use_lmr: false,
+            use_capture_lmr: true,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+
+    let without_capture_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let without_capture = search(
+        &position,
+        &without_capture_table,
+        limits(8),
+        SearchOptions {
+            use_lmr: false,
+            use_capture_lmr: false,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+
+    assert_eq!(
+        with_capture.nodes, without_capture.nodes,
+        "UseCaptureLMR must be inert while UseLMR is off"
     );
 }
 

@@ -1,0 +1,36 @@
+===== kiwipete movetime 3000, capture LMR ON (default) =====
+handshake: option name UseCaptureLMR type check default true
+info string hash resized to 64 MB
+info depth 16 seldepth 39 multipv 1 score cp -132 nodes 401291 nps 485237 hashfull 42 time 827 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 e1e5 e7h4 f4f5
+info depth 17 seldepth 40 multipv 1 score cp -175 nodes 720176 nps 493947 hashfull 83 time 1458 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 h8h5 e1e5 h5e5 f4e5 e7e5 g2f2 e5g7 f2c5
+info depth 18 seldepth 34 multipv 1 score cp -151 nodes 809721 nps 497371 hashfull 95 time 1628 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 h8h5 e1e5 h5e5 f4e5 c7c6 g1h1 b6c4 a6c4 d5c4 g2f2 e7e6
+bestmove e2a6
+WorkingSet64: 192.917.504 bytes
+
+===== kiwipete movetime 3000, capture LMR OFF =====
+handshake: option name UseCaptureLMR type check default true
+info string hash resized to 64 MB
+info depth 15 seldepth 34 multipv 1 score cp -164 nodes 541413 nps 492193 hashfull 68 time 1100 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 g7e5 c3e5 f7f6 e5d4 e8f7 a1e1 c7c5 d4c3 e7e6 a6d3
+info depth 16 seldepth 40 multipv 1 score cp -138 nodes 987986 nps 490802 hashfull 133 time 2013 pv d5e6 a6e2 c3e2 e7e6 d2f4 h3g2 f3g2 h8h4 e5d3 f6h5 f4e3 e6e4 g2e4 h4e4 e1c1 d7d6 e2g3 h5g3 h2g3 g7f6 h1h7
+info depth 17 seldepth 40 multipv 1 score cp -149 nodes 1264948 nps 493541 hashfull 169 time 2563 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e7h4 a6d3 e8c8 f4e5 h8h5
+bestmove e2a6
+WorkingSet64: 192.946.176 bytes
+
+===== kiwipete depth 14, capture LMR ON =====
+handshake: option name UseCaptureLMR type check default true
+info string hash resized to 64 MB
+info depth 12 seldepth 26 multipv 1 score cp -179 nodes 99573 nps 476425 hashfull 11 time 209 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e5g4 h8h4 c3f6 g7f6 e1g1 d5e4
+info depth 13 seldepth 29 multipv 1 score cp -153 nodes 144340 nps 482742 hashfull 16 time 299 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 e8f8 a1e1 g7e5 e1e5
+info depth 14 seldepth 29 multipv 1 score cp -159 nodes 252176 nps 477606 hashfull 26 time 528 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5
+bestmove e2a6
+WorkingSet64: 192.864.256 bytes
+
+===== kiwipete depth 14, capture LMR OFF =====
+handshake: option name UseCaptureLMR type check default true
+info string hash resized to 64 MB
+info depth 12 seldepth 26 multipv 1 score cp -142 nodes 141659 nps 476966 hashfull 19 time 297 pv e2a6 h3g2 f3g2 b4c3 d2c3 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5
+info depth 13 seldepth 32 multipv 1 score cp -147 nodes 303156 nps 491338 hashfull 40 time 617 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 f4e5
+info depth 14 seldepth 30 multipv 1 score cp -177 nodes 467043 nps 497913 hashfull 56 time 938 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 f2f4 e4c3 b2c3 g7e5 a1e1 e8f8 g1h1 h8h5 a6d3 f8g7
+bestmove e2a6
+WorkingSet64: 192.839.680 bytes
+

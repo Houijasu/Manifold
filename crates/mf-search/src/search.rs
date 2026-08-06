@@ -216,6 +216,8 @@ pub struct SearchOptions {
     /// Implemented, maintained, and toggleable, but ships **OFF** -- see the comment on
     /// [`SearchOptions::default`].
     pub use_qsearch_checks: bool,
+    /// Reduce late captures, one ply less deeply than the same-index quiet.
+    pub use_capture_lmr: bool,
     pub use_singular_ext: bool,
     pub use_check_ext: bool,
     pub use_multicut: bool,
@@ -278,6 +280,49 @@ impl Default for SearchOptions {
             // `move_gives_check` plus SEE, which is the honest first cut but not the
             // cheap one), and a longer TC, where a lost tenth of a ply buys back less.
             use_qsearch_checks: false,
+            // Late captures are reduced by the SAME formula quiets use, fed a capture
+            // `statScore` (captured material + capture history) instead of the
+            // butterfly-and-continuation sum. One reduction shape, two kinds of
+            // evidence. TT moves, checking captures, and queen promotions are exempt;
+            // see `capture_reduction_allowed` for why each one is.
+            //
+            // Implemented, maintained, and toggleable, but ships **OFF**. Measured
+            // single-variable against the M2 kept build over 300 games at 8+0.08,
+            // Threads=1, `-use-affinity -concurrency 8`, zero forfeits both sides:
+            //
+            //   * enabled: -8.11 +/- 20.67 Elo, Ptnml [2,37,79,30,2], LOS 22.1%
+            //
+            // The error bar covers zero, so the honest reading is "not shown to help",
+            // not "shown to hurt". It ships off because the feature's criterion was a
+            // positive point estimate, and a technique with no demonstrated gain has no
+            // claim on being the default.
+            //
+            // The mechanism is measured, not guessed, and it is a more interesting
+            // negative than M3-F1's was. The node saving is LARGE and real -- -5.8% on
+            // bench, and -24.7% / -33.1% / -21.6% at fixed depths 10 / 12 / 14 over six
+            // tactical positions -- and it converts to almost nothing: at `movetime
+            // 1000` over 24 book positions the enabled build reaches **+0.12 plies**
+            // (15.88 vs 15.75, deeper in only 6 of 24). A 25% node saving worth a tenth
+            // of a ply is a saving being handed straight back at the verification
+            // re-search. A reduced capture that fails high is re-searched at full
+            // depth, and captures fail high far more often than quiets at the same move
+            // index -- the asymmetry the material term PRICES but cannot remove.
+            //
+            // Two designs were measured, and the first is recorded because the second
+            // only looks obvious afterwards. A FLAT one-ply discount -- the design this
+            // feature was specified with -- measured WORSE than no capture reduction at
+            // all: +5.7% nodes at depth 10 and +51.6% at depth 12, because it shielded
+            // a late pawn grab exactly as much as taking a hanging queen. Making the
+            // protection proportional to captured material fixed the node counts
+            // completely and moved the Elo not at all, which is what identifies the
+            // re-search rather than the reduction as the binding constraint.
+            //
+            // Conditions for revisiting, both aimed at that re-search rather than at
+            // the reduction: a post-LMR continuation-history update, and a
+            // doDeeperSearch/doShallowerSearch adjustment that lets the re-search
+            // depth respond to how badly the reduced scout missed. Full write-up in
+            // `experiments/MSN-S2-capture-lmr/results.md`.
+            use_capture_lmr: false,
             use_singular_ext: true,
             use_check_ext: true,
             use_multicut: true,
@@ -1261,6 +1306,16 @@ fn pvs(
         };
         let reduction = if quiet && !gives_check {
             late_move_reduction(depth, move_count, improving, cut_node, tt_pv, history_score)
+        } else if !quiet && capture_reduction_allowed(mv, tt_move, gives_check) {
+            capture_late_move_reduction(
+                depth,
+                move_count,
+                improving,
+                cut_node,
+                tt_pv,
+                captured_material(position, mv),
+                capture_history,
+            )
         } else {
             0
         };
@@ -1448,7 +1503,19 @@ fn pvs(
             )
             .map(|score| -score)
         } else {
-            let reduced_depth = if context.options.use_lmr && depth >= 2 && quiet && !gives_check {
+            // Captures are reduced only when BOTH toggles are on. `use_capture_lmr` is
+            // nested inside `use_lmr` deliberately: the `UseLMR=false` arm is the
+            // control every other selectivity delta in `bench_cli.rs` is read against,
+            // and it has to keep meaning "no late-move reduction of any kind" or every
+            // historical LMR anchor silently changes meaning.
+            let reduce = if quiet {
+                context.options.use_lmr && !gives_check
+            } else {
+                context.options.use_lmr
+                    && context.options.use_capture_lmr
+                    && capture_reduction_allowed(mv, tt_move, gives_check)
+            };
+            let reduced_depth = if reduce && depth >= 2 {
                 (child_depth - reduction / 1024).clamp(1, child_depth.max(1))
             } else {
                 child_depth
@@ -2036,6 +2103,73 @@ fn late_move_reduction(
     }
     reduction -= history_score * 439 / 4096;
     reduction.max(0)
+}
+
+/// Weight on captured material in a capture's `statScore`, in 128ths.
+///
+/// A capture's protection from LMR is proportional to what it WINS, not a flat offset.
+/// A flat one-ply discount was tried first and measured: it grew fixed-depth nodes by
+/// +5.7% at depth 10 and +51.6% at depth 12, because it protected a late pawn grab
+/// exactly as much as it protected taking a hanging queen, and the searches it then had
+/// to re-run at full depth cost more than the reductions saved. Numbers in
+/// `experiments/MSN-S2-capture-lmr/results.md`.
+///
+/// At 873/128 a pawn (100) contributes 682 and a queen (900) contributes 6,139, so the
+/// `439/4096` divisor the quiet formula already applies turns those into 0.07 and 0.64
+/// plies of protection respectively. That is the intended shape: a queen is worth more
+/// than a ply back once its own capture history agrees, a pawn is worth almost nothing.
+const CAPTURE_STAT_MATERIAL_WEIGHT: i32 = 873;
+
+/// The `statScore` a capture presents to the shared reduction formula.
+///
+/// Captured material plus capture history, in place of the butterfly-and-continuation
+/// sum a quiet presents. Both are consumed by exactly the same `-statScore * 439 / 4096`
+/// term, so the two move kinds share one reduction shape and differ only in the evidence
+/// they feed it.
+#[inline]
+fn capture_stat_score(captured_material: i32, capture_history: i32) -> i32 {
+    CAPTURE_STAT_MATERIAL_WEIGHT * captured_material / 128 + capture_history
+}
+
+/// LMR for a late capture: the quiet formula, fed a capture `statScore`.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn capture_late_move_reduction(
+    depth: i32,
+    move_count: usize,
+    improving: bool,
+    cut_node: bool,
+    tt_pv: bool,
+    captured_material: i32,
+    capture_history: i32,
+) -> i32 {
+    late_move_reduction(
+        depth,
+        move_count,
+        improving,
+        cut_node,
+        tt_pv,
+        capture_stat_score(captured_material, capture_history),
+    )
+}
+
+/// Whether a capture may be reduced at all, before the table is consulted.
+///
+/// Three exemptions, each for a different reason:
+///
+/// * The **TT move** is the engine's own best guess at this node. Reducing it reduces
+///   the move most likely to be the answer, and the verification re-search then pays
+///   for the reduction twice on the move that least needed it.
+/// * A **checking capture** forces a reply, so the subtree under it bears no
+///   resemblance to the one a reduced scout would search: the reply set is tiny and the
+///   real cost is one ply deeper. This mirrors the quiet exemption on `gives_check`.
+/// * A **queen promotion** adds a queen. Whatever the ordering thinks of the square, a
+///   move that changes the material balance by nine points is not a late move in any
+///   sense the reduction table models. Under-promotions are NOT exempt: they are
+///   genuinely rare tactical shots and the ordering evidence against them is real.
+#[inline]
+fn capture_reduction_allowed(mv: Move, tt_move: Option<Move>, gives_check: bool) -> bool {
+    Some(mv) != tt_move && !gives_check && mv.flag().promotion() != Some(PieceKind::Queen)
 }
 
 #[inline]
@@ -3671,6 +3805,139 @@ mod tests {
         assert!(late_move_reduction(8, 8, true, false, true, 0) < baseline);
         assert!(late_move_reduction(8, 8, true, false, false, 4_000) < baseline);
         assert!(late_move_reduction(8, 8, true, false, false, -4_000) > baseline);
+    }
+
+    /// A capture's protection from LMR must scale with the MATERIAL it wins.
+    ///
+    /// This is the whole design. A capture is not uniformly safer to reduce than a
+    /// quiet: taking a hanging queen is, taking a pawn on move 30 is not. So the
+    /// discount is proportional to the victim rather than a flat base offset, and the
+    /// ordering below is the property that makes it a material term and not a constant.
+    #[test]
+    fn capture_reduction_falls_as_the_victim_gets_more_valuable() {
+        use mf_core::material_value;
+
+        let pawn = capture_late_move_reduction(
+            12,
+            12,
+            true,
+            false,
+            false,
+            material_value(PieceKind::Pawn),
+            0,
+        );
+        let knight = capture_late_move_reduction(
+            12,
+            12,
+            true,
+            false,
+            false,
+            material_value(PieceKind::Knight),
+            0,
+        );
+        let rook = capture_late_move_reduction(
+            12,
+            12,
+            true,
+            false,
+            false,
+            material_value(PieceKind::Rook),
+            0,
+        );
+        let queen = capture_late_move_reduction(
+            12,
+            12,
+            true,
+            false,
+            false,
+            material_value(PieceKind::Queen),
+            0,
+        );
+        let quiet = late_move_reduction(12, 12, true, false, false, 0);
+
+        assert!(queen < rook && rook < knight && knight < pawn);
+        // Even the cheapest victim buys some protection relative to a no-history quiet.
+        assert!(pawn < quiet);
+        // Proportionality, stated as a ratio so it survives any retune of the weight:
+        // a queen must buy back several times what a pawn does. A flat discount -- the
+        // design this replaced -- scores 1.0 here and is what the +51.6% depth-12
+        // measurement rejected.
+        assert!(
+            (quiet - queen) > 5 * (quiet - pawn),
+            "queen protection {} must be several times pawn protection {}",
+            quiet - queen,
+            quiet - pawn
+        );
+        // And a pawn must NOT buy a whole ply: a late pawn grab is exactly as
+        // speculative as a late quiet move.
+        assert!(
+            quiet - pawn < 1_024,
+            "a pawn must not buy a whole ply back: quiet={quiet}, pawn={pawn}"
+        );
+    }
+
+    /// The capture reduction must move with the same signals the quiet one does, and it
+    /// must read CAPTURE history rather than the quiet `statScore`.
+    #[test]
+    fn capture_reduction_scales_with_depth_move_count_and_capture_history() {
+        let pawn = mf_core::material_value(PieceKind::Pawn);
+        let baseline = capture_late_move_reduction(12, 12, true, false, false, pawn, 0);
+
+        assert!(capture_late_move_reduction(20, 12, true, false, false, pawn, 0) > baseline);
+        assert!(capture_late_move_reduction(12, 24, true, false, false, pawn, 0) > baseline);
+        assert!(capture_late_move_reduction(12, 12, false, false, false, pawn, 0) > baseline);
+        assert!(capture_late_move_reduction(12, 12, true, true, false, pawn, 0) > baseline);
+        assert!(capture_late_move_reduction(12, 12, true, false, true, pawn, 0) < baseline);
+        // Capture history saturates at CAPTURE_MAX (10_692), so these are in range.
+        assert!(capture_late_move_reduction(12, 12, true, false, false, pawn, 8_000) < baseline);
+        assert!(capture_late_move_reduction(12, 12, true, false, false, pawn, -8_000) > baseline);
+    }
+
+    /// A capture reduction is the QUIET formula fed a capture `statScore`.
+    ///
+    /// Pinned as an identity rather than described in prose, because the thing that
+    /// makes this feature single-variable is that it introduces no second reduction
+    /// shape: same table, same base, same improving/cut/ttPv adjustments, same
+    /// `439/4096` history divisor. Only the statistic changes.
+    #[test]
+    fn the_capture_reduction_is_the_quiet_formula_with_a_capture_stat_score() {
+        for (victim, history) in [(100, 0), (900, 4_000), (500, -3_000), (320, 10_692)] {
+            let stat_score = capture_stat_score(victim, history);
+            assert_eq!(
+                capture_late_move_reduction(14, 9, false, true, false, victim, history),
+                late_move_reduction(14, 9, false, true, false, stat_score)
+            );
+        }
+    }
+
+    /// Three classes of capture are never reduced, whatever the table says.
+    #[test]
+    fn the_tt_move_checks_and_queen_promotions_are_exempt_from_capture_reduction() {
+        let from = Square::new(8).unwrap();
+        let to = Square::new(16).unwrap();
+        let capture = Move::new(from, to, mf_core::MoveFlag::CAPTURE);
+        let other = Move::new(from, Square::new(17).unwrap(), mf_core::MoveFlag::CAPTURE);
+
+        assert!(capture_reduction_allowed(capture, Some(other), false));
+        // The TT move is the engine's own best guess; reducing it reduces the move most
+        // likely to be the answer.
+        assert!(!capture_reduction_allowed(capture, Some(capture), false));
+        // A checking capture forces a reply, so the reduced scout searches a tree that
+        // bears no resemblance to the real one.
+        assert!(!capture_reduction_allowed(capture, Some(other), true));
+
+        let queen_promotion = Move::new(
+            Square::new(48).unwrap(),
+            Square::new(56).unwrap(),
+            mf_core::MoveFlag::QUEEN_PROMOTION,
+        );
+        assert!(!capture_reduction_allowed(queen_promotion, None, false));
+        let knight_promotion = Move::new(
+            Square::new(48).unwrap(),
+            Square::new(56).unwrap(),
+            mf_core::MoveFlag::KNIGHT_PROMOTION,
+        );
+        assert!(capture_reduction_allowed(knight_promotion, None, false));
     }
 
     #[test]

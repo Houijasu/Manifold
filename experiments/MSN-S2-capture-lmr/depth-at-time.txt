@@ -1,0 +1,6 @@
+
+=== movetime 1000ms, 24 positions, Hash=64 ===
+capture-lmr  mean depth 15.88  median  15.0  min 14  max 19
+m2-nnue      mean depth 15.75  median  15.0  min 13  max 19
+
+capture-lmr minus m2-nnue: +0.12 plies mean; capture-lmr deeper in 6/24, equal 15

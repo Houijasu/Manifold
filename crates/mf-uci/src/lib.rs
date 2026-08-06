@@ -40,6 +40,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseQSearchTT type check default true",
     "option name UseQSearchDeltaPruning type check default true",
     "option name UseQSearchChecks type check default false",
+    "option name UseCaptureLMR type check default false",
     "option name UseSingularExt type check default true",
     "option name UseCheckExt type check default true",
     "option name UseMultiCut type check default true",
@@ -822,6 +823,10 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UseQSearchChecks") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_qsearch_checks = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseCaptureLMR") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_capture_lmr = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseSingularExt") {
         if let Some(enabled) = parse_check_option(&value) {
