@@ -6,7 +6,11 @@ use crate::{MATE_SCORE, MAX_SEARCH_PLY, SearchResult};
 
 const DECISIVE_SCORE: i32 = MATE_SCORE - 2 * MAX_SEARCH_PLY as i32 - 1;
 
-#[allow(dead_code)]
+/// Picks the worker whose result the pool reports, for a `DispatchMode::AllWorkers` search.
+///
+/// This is the live Lazy-SMP best-thread selection: `ThreadPool::search` calls it for every
+/// multi-worker dispatch. A decisive score always beats an ordinary vote winner, and among
+/// ordinary results the score-weighted votes for each distinct best move decide it.
 pub(crate) fn select_best_result(results: &[SearchResult]) -> usize {
     let eligible: Vec<_> = results
         .iter()
