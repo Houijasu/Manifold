@@ -68,7 +68,9 @@ name = "mf-tune"
 version = "0.1.0"
 dependencies = [
  "mf-core",
+ "mf-datagen",
  "mf-nnue",
+ "mf-search",
 ]
 
 [[package]]

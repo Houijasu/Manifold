@@ -5,6 +5,19 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "mf-tune"
+path = "src/main.rs"
+
 [dependencies]
 mf-core = { path = "../mf-core" }
 mf-nnue = { path = "../mf-nnue" }
+# The parameter names, defaults and ranges are READ from `mf_search::SEARCH_PARAMETERS`
+# rather than copied: a second list would eventually advertise a range the engine no
+# longer accepts, and the tuner would spend hours optimising a value that gets clamped.
+mf-search = { path = "../mf-search" }
+# `Rng` only. The workspace already has exactly one seeded PRNG (splitmix64, proven
+# reproducible in mf-datagen's tests) and SPSA needs its perturbation stream to be
+# reproducible from the seed for a run to be auditable, so this reuses it rather than
+# introducing a second generator.
+mf-datagen = { path = "../mf-datagen" }

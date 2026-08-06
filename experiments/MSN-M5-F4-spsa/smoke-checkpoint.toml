@@ -1,0 +1,10 @@
+completed = 3
+games_played = 12
+
+[[theta]]
+name = "LmrCoefficient"
+value = 2869.5827310448776
+
+[[theta]]
+name = "RfpMarginPerDepth"
+value = 104.75827310448777
