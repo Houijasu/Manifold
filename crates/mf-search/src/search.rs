@@ -53,10 +53,13 @@ const RAZOR_MAX_DEPTH: i32 = 3;
 const RAZOR_BASE_MARGIN: i32 = 224;
 const RAZOR_MARGIN_PER_DEPTH: i32 = 202;
 /// Centipawns per ply of reverse-futility margin.
-const RFP_MARGIN_PER_DEPTH: i32 = 105;
+///
+/// SPSA-tuned (M5-F5, 105 -> 95): the largest relative move of the eight parameters in
+/// that session, and monotone across all four quarters of it.
+const RFP_MARGIN_PER_DEPTH: i32 = 95;
 /// Extra margin demanded at a node the TT marked as PV, which is likelier to be worth
 /// searching properly than to be a genuine cutoff.
-const RFP_TT_PV_MARGIN: i32 = 21;
+const RFP_TT_PV_MARGIN: i32 = 22;
 const LMP_MAX_DEPTH: i32 = 8;
 /// Constant term in the late-move-pruning move-count table.
 ///
@@ -64,8 +67,8 @@ const LMP_MAX_DEPTH: i32 = 8;
 /// before the move ordering has shown anything. The reference uses 9.
 const LMP_BASE: usize = 9;
 const FUTILITY_MAX_EFFECTIVE_DEPTH: i32 = 6;
-const FUTILITY_BASE_MARGIN: i32 = 124;
-const FUTILITY_MARGIN_PER_DEPTH: i32 = 109;
+const FUTILITY_BASE_MARGIN: i32 = 125;
+const FUTILITY_MARGIN_PER_DEPTH: i32 = 106;
 /// Quiets may be pruned on SEE up to this reduced depth, matching the futility window.
 const QUIET_SEE_MAX_EFFECTIVE_DEPTH: i32 = 7;
 const QUIET_SEE_MARGIN_PER_DEPTH: i32 = 26;
@@ -237,17 +240,22 @@ search_parameters! {
     /// Constant term of the late-move-pruning move-count table. Source: `LMP_BASE`.
     lmp_base: "LmpBase" = LMP_BASE as i32, 1 ..= 40;
     /// Numerator of the LMR log-table coefficient, over 128. Source: `lmr_table`.
-    lmr_coefficient: "LmrCoefficient" = 2_872, 1_000 ..= 6_000;
+    ///
+    /// SPSA-tuned (M5-F5, 2_872 -> 2_754): the only parameter of the eight whose drift
+    /// exceeded its own final perturbation width, and monotone across every quarter of
+    /// the session — the tuner wants slightly SHALLOWER late-move reductions than the
+    /// hand-calibrated value.
+    lmr_coefficient: "LmrCoefficient" = 2_754, 1_000 ..= 6_000;
     /// Constant term added to every LMR reduction, in 1024ths of a ply.
-    lmr_base: "LmrBase" = 982, -1_024 ..= 3_072;
+    lmr_base: "LmrBase" = 996, -1_024 ..= 3_072;
     /// Extra reduction at a non-improving node, as a fraction of the table scale over 512.
     lmr_non_improving_numerator: "LmrNonImprovingNumerator" = 197, 0 ..= 1_024;
     /// Extra reduction at an expected cut node, in 1024ths of a ply.
     lmr_cut_node_bonus: "LmrCutNodeBonus" = 1_024, 0 ..= 3_072;
     /// Reduction refunded at a TT-PV node, in 1024ths of a ply.
-    lmr_tt_pv_reduction: "LmrTtPvReduction" = 1_024, 0 ..= 3_072;
+    lmr_tt_pv_reduction: "LmrTtPvReduction" = 1_028, 0 ..= 3_072;
     /// Numerator of the LMR history term, over 4096.
-    lmr_history_numerator: "LmrHistoryNumerator" = 439, 50 ..= 1_500;
+    lmr_history_numerator: "LmrHistoryNumerator" = 459, 50 ..= 1_500;
     /// Weight on captured material in a capture's LMR `statScore`, over 128.
     /// Source: `CAPTURE_STAT_MATERIAL_WEIGHT`.
     capture_stat_material_weight: "CaptureStatMaterialWeight" = CAPTURE_STAT_MATERIAL_WEIGHT, 0 ..= 3_000;
@@ -2521,7 +2529,7 @@ fn late_move_reduction(
 /// `experiments/MSN-S2-capture-lmr/results.md`.
 ///
 /// At 873/128 a pawn (100) contributes 682 and a queen (900) contributes 6,139, so the
-/// `439/4096` divisor the quiet formula already applies turns those into 0.07 and 0.64
+/// `459/4096` divisor the quiet formula already applies turns those into 0.07 and 0.67
 /// plies of protection respectively. That is the intended shape: a queen is worth more
 /// than a ply back once its own capture history agrees, a pawn is worth almost nothing.
 const CAPTURE_STAT_MATERIAL_WEIGHT: i32 = 873;
@@ -2529,7 +2537,7 @@ const CAPTURE_STAT_MATERIAL_WEIGHT: i32 = 873;
 /// The `statScore` a capture presents to the shared reduction formula.
 ///
 /// Captured material plus capture history, in place of the butterfly-and-continuation
-/// sum a quiet presents. Both are consumed by exactly the same `-statScore * 439 / 4096`
+/// sum a quiet presents. Both are consumed by exactly the same `-statScore * 459 / 4096`
 /// term, so the two move kinds share one reduction shape and differ only in the evidence
 /// they feed it.
 #[inline]
@@ -2589,8 +2597,8 @@ fn capture_reduction_allowed(mv: Move, tt_move: Option<Move>, gives_check: bool)
 /// Margin above the incumbent best score that earns the verification a DEEPER search.
 ///
 /// Denominated in this engine's centipawn-scaled NNUE units, which are the same units
-/// every other search margin here uses (`RFP_MARGIN_PER_DEPTH = 105`,
-/// `FUTILITY_BASE_MARGIN = 124`). The reference's 53 sits in its own internal eval
+/// every other search margin here uses (`RFP_MARGIN_PER_DEPTH = 95`,
+/// `FUTILITY_BASE_MARGIN = 125`). The reference's 53 sits in its own internal eval
 /// scale; the value is kept because both scales are pinned to "roughly half a pawn per
 /// hundred", and because a re-tune is a second variable this feature is not measuring.
 const POST_LMR_DEEPER_MARGIN: i32 = 53;
@@ -4258,25 +4266,25 @@ mod tests {
         let parameters = shipped();
         assert_eq!(
             reverse_futility_margin(&parameters, 1, false, false, false),
-            105
+            95
         );
         assert_eq!(
             reverse_futility_margin(&parameters, 6, false, false, false),
-            630
+            570
         );
         // A rising eval is worth a ply of margin, but not at an expected cut node.
         assert_eq!(
             reverse_futility_margin(&parameters, 6, true, false, false),
-            525
+            475
         );
         assert_eq!(
             reverse_futility_margin(&parameters, 6, true, true, false),
-            630
+            570
         );
         // A TT-PV node pays a surcharge.
         assert_eq!(
             reverse_futility_margin(&parameters, 6, false, false, true),
-            630 + 21
+            570 + 22
         );
     }
 
@@ -4480,7 +4488,7 @@ mod tests {
     /// Pinned as an identity rather than described in prose, because the thing that
     /// makes this feature single-variable is that it introduces no second reduction
     /// shape: same table, same base, same improving/cut/ttPv adjustments, same
-    /// `439/4096` history divisor. Only the statistic changes.
+    /// `459/4096` history divisor. Only the statistic changes.
     #[test]
     fn the_capture_reduction_is_the_quiet_formula_with_a_capture_stat_score() {
         let table = shipped_lmr_table();
@@ -4666,9 +4674,9 @@ mod tests {
 
     #[test]
     fn frontier_futility_margin_grows_with_effective_depth() {
-        assert_eq!(frontier_futility_margin(&shipped(), 0), 124);
-        assert_eq!(frontier_futility_margin(&shipped(), 1), 233);
-        assert_eq!(frontier_futility_margin(&shipped(), 6), 778);
+        assert_eq!(frontier_futility_margin(&shipped(), 0), 125);
+        assert_eq!(frontier_futility_margin(&shipped(), 1), 231);
+        assert_eq!(frontier_futility_margin(&shipped(), 6), 761);
         // The window now reaches a reduced depth of 6, matching where the margin was
         // calibrated, instead of stopping at 3.
         assert_eq!(FUTILITY_MAX_EFFECTIVE_DEPTH, 6);

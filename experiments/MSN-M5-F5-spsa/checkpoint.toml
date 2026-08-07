@@ -1,0 +1,34 @@
+completed = 345
+games_played = 5520
+
+[[theta]]
+name = "LmrCoefficient"
+value = 2753.9013535748604
+
+[[theta]]
+name = "LmrBase"
+value = 995.8135022592041
+
+[[theta]]
+name = "LmrTtPvReduction"
+value = 1027.7556173859546
+
+[[theta]]
+name = "LmrHistoryNumerator"
+value = 458.5502873247414
+
+[[theta]]
+name = "RfpMarginPerDepth"
+value = 94.74681703382065
+
+[[theta]]
+name = "RfpTtPvMargin"
+value = 22.25680828132227
+
+[[theta]]
+name = "FutilityBaseMargin"
+value = 125.0189510360839
+
+[[theta]]
+name = "FutilityMarginPerDepth"
+value = 105.77297831228702

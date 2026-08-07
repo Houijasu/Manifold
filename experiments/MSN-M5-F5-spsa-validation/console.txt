@@ -1,0 +1,634 @@
+Indexing opening suite...
+Started game 1 of 300 (spsa-tuned vs defaults)
+Started game 2 of 300 (defaults vs spsa-tuned)
+Started game 3 of 300 (spsa-tuned vs defaults)
+Started game 4 of 300 (defaults vs spsa-tuned)
+Started game 6 of 300 (defaults vs spsa-tuned)
+Started game 7 of 300 (spsa-tuned vs defaults)
+Started game 8 of 300 (defaults vs spsa-tuned)
+Started game 5 of 300 (spsa-tuned vs defaults)
+Finished game 1 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 9 of 300 (spsa-tuned vs defaults)
+Finished game 2 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 10 of 300 (defaults vs spsa-tuned)
+Finished game 4 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 11 of 300 (spsa-tuned vs defaults)
+Finished game 8 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 12 of 300 (defaults vs spsa-tuned)
+Finished game 5 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 13 of 300 (spsa-tuned vs defaults)
+Finished game 3 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 14 of 300 (defaults vs spsa-tuned)
+Finished game 7 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 15 of 300 (spsa-tuned vs defaults)
+Finished game 6 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 16 of 300 (defaults vs spsa-tuned)
+Finished game 11 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 17 of 300 (spsa-tuned vs defaults)
+Finished game 9 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 18 of 300 (defaults vs spsa-tuned)
+Finished game 12 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 19 of 300 (spsa-tuned vs defaults)
+Finished game 14 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 20 of 300 (defaults vs spsa-tuned)
+Finished game 15 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 21 of 300 (spsa-tuned vs defaults)
+Finished game 10 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 22 of 300 (defaults vs spsa-tuned)
+Finished game 16 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 23 of 300 (spsa-tuned vs defaults)
+Finished game 13 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 24 of 300 (defaults vs spsa-tuned)
+Finished game 17 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 25 of 300 (spsa-tuned vs defaults)
+Finished game 18 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 26 of 300 (defaults vs spsa-tuned)
+Finished game 19 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 27 of 300 (spsa-tuned vs defaults)
+Finished game 20 (defaults vs spsa-tuned): 0-1 {Black mates}
+Started game 28 of 300 (defaults vs spsa-tuned)
+Finished game 21 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 29 of 300 (spsa-tuned vs defaults)
+Finished game 24 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 30 of 300 (defaults vs spsa-tuned)
+Finished game 26 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 31 of 300 (spsa-tuned vs defaults)
+Finished game 25 (spsa-tuned vs defaults): 0-1 {Black mates}
+Started game 32 of 300 (defaults vs spsa-tuned)
+Finished game 23 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 33 of 300 (spsa-tuned vs defaults)
+Finished game 27 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 34 of 300 (defaults vs spsa-tuned)
+Finished game 22 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 35 of 300 (spsa-tuned vs defaults)
+Finished game 28 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 36 of 300 (defaults vs spsa-tuned)
+Finished game 29 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 37 of 300 (spsa-tuned vs defaults)
+Finished game 30 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 38 of 300 (defaults vs spsa-tuned)
+Finished game 31 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 39 of 300 (spsa-tuned vs defaults)
+Finished game 34 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 40 of 300 (defaults vs spsa-tuned)
+Finished game 32 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 41 of 300 (spsa-tuned vs defaults)
+Finished game 33 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 42 of 300 (defaults vs spsa-tuned)
+Finished game 36 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 43 of 300 (spsa-tuned vs defaults)
+Finished game 35 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 44 of 300 (defaults vs spsa-tuned)
+Finished game 37 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 45 of 300 (spsa-tuned vs defaults)
+Finished game 38 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 46 of 300 (defaults vs spsa-tuned)
+Finished game 40 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 47 of 300 (spsa-tuned vs defaults)
+Finished game 39 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 48 of 300 (defaults vs spsa-tuned)
+Finished game 41 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 49 of 300 (spsa-tuned vs defaults)
+Finished game 44 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 50 of 300 (defaults vs spsa-tuned)
+Finished game 42 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 51 of 300 (spsa-tuned vs defaults)
+Finished game 43 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 52 of 300 (defaults vs spsa-tuned)
+Finished game 45 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 53 of 300 (spsa-tuned vs defaults)
+Finished game 46 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 54 of 300 (defaults vs spsa-tuned)
+Finished game 50 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 55 of 300 (spsa-tuned vs defaults)
+Finished game 47 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 56 of 300 (defaults vs spsa-tuned)
+Finished game 48 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 57 of 300 (spsa-tuned vs defaults)
+Finished game 49 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 58 of 300 (defaults vs spsa-tuned)
+Finished game 51 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 59 of 300 (spsa-tuned vs defaults)
+Finished game 53 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 60 of 300 (defaults vs spsa-tuned)
+Finished game 59 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 61 of 300 (spsa-tuned vs defaults)
+Finished game 54 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 62 of 300 (defaults vs spsa-tuned)
+Finished game 52 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 63 of 300 (spsa-tuned vs defaults)
+Finished game 56 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 64 of 300 (defaults vs spsa-tuned)
+Finished game 55 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 65 of 300 (spsa-tuned vs defaults)
+Finished game 58 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 66 of 300 (defaults vs spsa-tuned)
+Finished game 60 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 67 of 300 (spsa-tuned vs defaults)
+Finished game 57 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 68 of 300 (defaults vs spsa-tuned)
+Finished game 61 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 69 of 300 (spsa-tuned vs defaults)
+Finished game 62 (defaults vs spsa-tuned): 0-1 {Black mates}
+Started game 70 of 300 (defaults vs spsa-tuned)
+Finished game 65 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 71 of 300 (spsa-tuned vs defaults)
+Finished game 63 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 72 of 300 (defaults vs spsa-tuned)
+Finished game 67 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 73 of 300 (spsa-tuned vs defaults)
+Finished game 64 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 74 of 300 (defaults vs spsa-tuned)
+Finished game 66 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 75 of 300 (spsa-tuned vs defaults)
+Finished game 69 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 76 of 300 (defaults vs spsa-tuned)
+Finished game 68 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 77 of 300 (spsa-tuned vs defaults)
+Finished game 70 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 78 of 300 (defaults vs spsa-tuned)
+Finished game 73 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 79 of 300 (spsa-tuned vs defaults)
+Finished game 71 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 80 of 300 (defaults vs spsa-tuned)
+Finished game 72 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 81 of 300 (spsa-tuned vs defaults)
+Finished game 74 (defaults vs spsa-tuned): 0-1 {Black mates}
+Started game 82 of 300 (defaults vs spsa-tuned)
+Finished game 75 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 83 of 300 (spsa-tuned vs defaults)
+Finished game 77 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 84 of 300 (defaults vs spsa-tuned)
+Finished game 76 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 85 of 300 (spsa-tuned vs defaults)
+Finished game 80 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 86 of 300 (defaults vs spsa-tuned)
+Finished game 79 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 87 of 300 (spsa-tuned vs defaults)
+Finished game 81 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 88 of 300 (defaults vs spsa-tuned)
+Finished game 82 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 89 of 300 (spsa-tuned vs defaults)
+Finished game 83 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 90 of 300 (defaults vs spsa-tuned)
+Finished game 78 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 91 of 300 (spsa-tuned vs defaults)
+Finished game 85 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 92 of 300 (defaults vs spsa-tuned)
+Finished game 84 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 93 of 300 (spsa-tuned vs defaults)
+Finished game 89 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 94 of 300 (defaults vs spsa-tuned)
+Finished game 88 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 95 of 300 (spsa-tuned vs defaults)
+Finished game 86 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 96 of 300 (defaults vs spsa-tuned)
+Finished game 90 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 97 of 300 (spsa-tuned vs defaults)
+Finished game 91 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 98 of 300 (defaults vs spsa-tuned)
+Finished game 92 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 99 of 300 (spsa-tuned vs defaults)
+Finished game 93 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 100 of 300 (defaults vs spsa-tuned)
+Finished game 94 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 101 of 300 (spsa-tuned vs defaults)
+Finished game 96 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 102 of 300 (defaults vs spsa-tuned)
+Finished game 87 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 103 of 300 (spsa-tuned vs defaults)
+Finished game 97 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 104 of 300 (defaults vs spsa-tuned)
+Finished game 99 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 105 of 300 (spsa-tuned vs defaults)
+Finished game 98 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 106 of 300 (defaults vs spsa-tuned)
+Finished game 95 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 107 of 300 (spsa-tuned vs defaults)
+Finished game 102 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 108 of 300 (defaults vs spsa-tuned)
+Finished game 100 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+--------------------------------------------------
+Results of spsa-tuned vs defaults (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -3.47 +/- 42.73, nElo: -5.56 +/- 68.10
+LOS: 43.64 %, DrawRatio: 40.00 %, PairsRatio: 0.88
+Games: 100, Wins: 29, Losses: 30, Draws: 41, Points: 49.5 (49.50 %)
+Ptnml(0-2): [1, 15, 20, 12, 2], WL/DD Ratio: 1.86
+--------------------------------------------------
+Started game 109 of 300 (spsa-tuned vs defaults)
+Finished game 103 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 110 of 300 (defaults vs spsa-tuned)
+Finished game 104 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 111 of 300 (spsa-tuned vs defaults)
+Finished game 101 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 112 of 300 (defaults vs spsa-tuned)
+Finished game 105 (spsa-tuned vs defaults): 0-1 {Black mates}
+Started game 113 of 300 (spsa-tuned vs defaults)
+Finished game 107 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 114 of 300 (defaults vs spsa-tuned)
+Finished game 106 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 115 of 300 (spsa-tuned vs defaults)
+Finished game 109 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 116 of 300 (defaults vs spsa-tuned)
+Finished game 108 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 117 of 300 (spsa-tuned vs defaults)
+Finished game 111 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 118 of 300 (defaults vs spsa-tuned)
+Finished game 110 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 119 of 300 (spsa-tuned vs defaults)
+Finished game 114 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 120 of 300 (defaults vs spsa-tuned)
+Finished game 113 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 121 of 300 (spsa-tuned vs defaults)
+Finished game 112 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 122 of 300 (defaults vs spsa-tuned)
+Finished game 116 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 123 of 300 (spsa-tuned vs defaults)
+Finished game 117 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 124 of 300 (defaults vs spsa-tuned)
+Finished game 115 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 125 of 300 (spsa-tuned vs defaults)
+Finished game 121 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 126 of 300 (defaults vs spsa-tuned)
+Finished game 119 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 127 of 300 (spsa-tuned vs defaults)
+Finished game 122 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 128 of 300 (defaults vs spsa-tuned)
+Finished game 120 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 129 of 300 (spsa-tuned vs defaults)
+Finished game 118 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 130 of 300 (defaults vs spsa-tuned)
+Finished game 123 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 131 of 300 (spsa-tuned vs defaults)
+Finished game 125 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 132 of 300 (defaults vs spsa-tuned)
+Finished game 126 (defaults vs spsa-tuned): 0-1 {Black mates}
+Started game 133 of 300 (spsa-tuned vs defaults)
+Finished game 124 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 134 of 300 (defaults vs spsa-tuned)
+Finished game 127 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 135 of 300 (spsa-tuned vs defaults)
+Finished game 128 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 136 of 300 (defaults vs spsa-tuned)
+Finished game 129 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 137 of 300 (spsa-tuned vs defaults)
+Finished game 130 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 138 of 300 (defaults vs spsa-tuned)
+Finished game 136 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 139 of 300 (spsa-tuned vs defaults)
+Finished game 131 (spsa-tuned vs defaults): 0-1 {Black mates}
+Started game 140 of 300 (defaults vs spsa-tuned)
+Finished game 134 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 141 of 300 (spsa-tuned vs defaults)
+Finished game 133 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 142 of 300 (defaults vs spsa-tuned)
+Finished game 132 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 143 of 300 (spsa-tuned vs defaults)
+Finished game 137 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 144 of 300 (defaults vs spsa-tuned)
+Finished game 135 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 145 of 300 (spsa-tuned vs defaults)
+Finished game 139 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 146 of 300 (defaults vs spsa-tuned)
+Finished game 141 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 147 of 300 (spsa-tuned vs defaults)
+Finished game 140 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 148 of 300 (defaults vs spsa-tuned)
+Finished game 138 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 149 of 300 (spsa-tuned vs defaults)
+Finished game 143 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 150 of 300 (defaults vs spsa-tuned)
+Finished game 144 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 151 of 300 (spsa-tuned vs defaults)
+Finished game 145 (spsa-tuned vs defaults): 0-1 {Black mates}
+Started game 152 of 300 (defaults vs spsa-tuned)
+Finished game 142 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 153 of 300 (spsa-tuned vs defaults)
+Finished game 147 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 154 of 300 (defaults vs spsa-tuned)
+Finished game 146 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 155 of 300 (spsa-tuned vs defaults)
+Finished game 149 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 156 of 300 (defaults vs spsa-tuned)
+Finished game 150 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 157 of 300 (spsa-tuned vs defaults)
+Finished game 153 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 158 of 300 (defaults vs spsa-tuned)
+Finished game 152 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 159 of 300 (spsa-tuned vs defaults)
+Finished game 148 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 160 of 300 (defaults vs spsa-tuned)
+Finished game 151 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 161 of 300 (spsa-tuned vs defaults)
+Finished game 155 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 162 of 300 (defaults vs spsa-tuned)
+Finished game 156 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 163 of 300 (spsa-tuned vs defaults)
+Finished game 161 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 164 of 300 (defaults vs spsa-tuned)
+Finished game 158 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 165 of 300 (spsa-tuned vs defaults)
+Finished game 159 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 166 of 300 (defaults vs spsa-tuned)
+Finished game 154 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 167 of 300 (spsa-tuned vs defaults)
+Finished game 160 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 168 of 300 (defaults vs spsa-tuned)
+Finished game 157 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 169 of 300 (spsa-tuned vs defaults)
+Finished game 162 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 170 of 300 (defaults vs spsa-tuned)
+Finished game 163 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 171 of 300 (spsa-tuned vs defaults)
+Finished game 164 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 172 of 300 (defaults vs spsa-tuned)
+Finished game 165 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 173 of 300 (spsa-tuned vs defaults)
+Finished game 166 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 174 of 300 (defaults vs spsa-tuned)
+Finished game 168 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 175 of 300 (spsa-tuned vs defaults)
+Finished game 172 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 176 of 300 (defaults vs spsa-tuned)
+Finished game 169 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 177 of 300 (spsa-tuned vs defaults)
+Finished game 167 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 178 of 300 (defaults vs spsa-tuned)
+Finished game 173 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 179 of 300 (spsa-tuned vs defaults)
+Finished game 170 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 180 of 300 (defaults vs spsa-tuned)
+Finished game 174 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 181 of 300 (spsa-tuned vs defaults)
+Finished game 175 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 182 of 300 (defaults vs spsa-tuned)
+Finished game 171 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 183 of 300 (spsa-tuned vs defaults)
+Finished game 176 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 184 of 300 (defaults vs spsa-tuned)
+Finished game 182 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 185 of 300 (spsa-tuned vs defaults)
+Finished game 177 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 186 of 300 (defaults vs spsa-tuned)
+Finished game 180 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 187 of 300 (spsa-tuned vs defaults)
+Finished game 179 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 188 of 300 (defaults vs spsa-tuned)
+Finished game 181 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 189 of 300 (spsa-tuned vs defaults)
+Finished game 178 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 190 of 300 (defaults vs spsa-tuned)
+Finished game 184 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 191 of 300 (spsa-tuned vs defaults)
+Finished game 183 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 192 of 300 (defaults vs spsa-tuned)
+Finished game 185 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 193 of 300 (spsa-tuned vs defaults)
+Finished game 186 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 194 of 300 (defaults vs spsa-tuned)
+Finished game 188 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 195 of 300 (spsa-tuned vs defaults)
+Finished game 187 (spsa-tuned vs defaults): 0-1 {Black mates}
+Started game 196 of 300 (defaults vs spsa-tuned)
+Finished game 192 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 197 of 300 (spsa-tuned vs defaults)
+Finished game 190 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 198 of 300 (defaults vs spsa-tuned)
+Finished game 189 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 199 of 300 (spsa-tuned vs defaults)
+Finished game 191 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 200 of 300 (defaults vs spsa-tuned)
+Finished game 194 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 201 of 300 (spsa-tuned vs defaults)
+Finished game 193 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 202 of 300 (defaults vs spsa-tuned)
+Finished game 198 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 203 of 300 (spsa-tuned vs defaults)
+Finished game 195 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 204 of 300 (defaults vs spsa-tuned)
+Finished game 197 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 205 of 300 (spsa-tuned vs defaults)
+Finished game 199 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 206 of 300 (defaults vs spsa-tuned)
+Finished game 201 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 207 of 300 (spsa-tuned vs defaults)
+Finished game 203 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 208 of 300 (defaults vs spsa-tuned)
+Finished game 196 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 209 of 300 (spsa-tuned vs defaults)
+Finished game 200 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+--------------------------------------------------
+Results of spsa-tuned vs defaults (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 10.43 +/- 30.49, nElo: 16.52 +/- 48.15
+LOS: 74.93 %, DrawRatio: 41.00 %, PairsRatio: 1.36
+Games: 200, Wins: 62, Losses: 56, Draws: 82, Points: 103.0 (51.50 %)
+Ptnml(0-2): [5, 20, 41, 32, 2], WL/DD Ratio: 1.73
+--------------------------------------------------
+Started game 210 of 300 (defaults vs spsa-tuned)
+Finished game 202 (defaults vs spsa-tuned): 0-1 {Black mates}
+Started game 211 of 300 (spsa-tuned vs defaults)
+Finished game 204 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 212 of 300 (defaults vs spsa-tuned)
+Finished game 205 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 213 of 300 (spsa-tuned vs defaults)
+Finished game 206 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 214 of 300 (defaults vs spsa-tuned)
+Finished game 208 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 215 of 300 (spsa-tuned vs defaults)
+Finished game 207 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 216 of 300 (defaults vs spsa-tuned)
+Finished game 209 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 217 of 300 (spsa-tuned vs defaults)
+Finished game 210 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 218 of 300 (defaults vs spsa-tuned)
+Finished game 212 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 219 of 300 (spsa-tuned vs defaults)
+Finished game 211 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 220 of 300 (defaults vs spsa-tuned)
+Finished game 215 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 221 of 300 (spsa-tuned vs defaults)
+Finished game 213 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 222 of 300 (defaults vs spsa-tuned)
+Finished game 214 (defaults vs spsa-tuned): 0-1 {Black mates}
+Started game 223 of 300 (spsa-tuned vs defaults)
+Finished game 216 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 224 of 300 (defaults vs spsa-tuned)
+Finished game 217 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 225 of 300 (spsa-tuned vs defaults)
+Finished game 218 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 226 of 300 (defaults vs spsa-tuned)
+Finished game 220 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 227 of 300 (spsa-tuned vs defaults)
+Finished game 219 (spsa-tuned vs defaults): 0-1 {Black mates}
+Started game 228 of 300 (defaults vs spsa-tuned)
+Finished game 222 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 229 of 300 (spsa-tuned vs defaults)
+Finished game 224 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 230 of 300 (defaults vs spsa-tuned)
+Finished game 221 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 231 of 300 (spsa-tuned vs defaults)
+Finished game 226 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 232 of 300 (defaults vs spsa-tuned)
+Finished game 223 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 233 of 300 (spsa-tuned vs defaults)
+Finished game 225 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 234 of 300 (defaults vs spsa-tuned)
+Finished game 228 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 235 of 300 (spsa-tuned vs defaults)
+Finished game 229 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 236 of 300 (defaults vs spsa-tuned)
+Finished game 230 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 237 of 300 (spsa-tuned vs defaults)
+Finished game 231 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 238 of 300 (defaults vs spsa-tuned)
+Finished game 227 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 239 of 300 (spsa-tuned vs defaults)
+Finished game 232 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 240 of 300 (defaults vs spsa-tuned)
+Finished game 234 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 241 of 300 (spsa-tuned vs defaults)
+Finished game 233 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 242 of 300 (defaults vs spsa-tuned)
+Finished game 235 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 243 of 300 (spsa-tuned vs defaults)
+Finished game 236 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 244 of 300 (defaults vs spsa-tuned)
+Finished game 237 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 245 of 300 (spsa-tuned vs defaults)
+Finished game 239 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 246 of 300 (defaults vs spsa-tuned)
+Finished game 242 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 247 of 300 (spsa-tuned vs defaults)
+Finished game 238 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 248 of 300 (defaults vs spsa-tuned)
+Finished game 240 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 249 of 300 (spsa-tuned vs defaults)
+Finished game 243 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 250 of 300 (defaults vs spsa-tuned)
+Finished game 245 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 251 of 300 (spsa-tuned vs defaults)
+Finished game 247 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 252 of 300 (defaults vs spsa-tuned)
+Finished game 244 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 253 of 300 (spsa-tuned vs defaults)
+Finished game 246 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 254 of 300 (defaults vs spsa-tuned)
+Finished game 248 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Started game 255 of 300 (spsa-tuned vs defaults)
+Finished game 250 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 256 of 300 (defaults vs spsa-tuned)
+Finished game 249 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 257 of 300 (spsa-tuned vs defaults)
+Finished game 253 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 258 of 300 (defaults vs spsa-tuned)
+Finished game 241 (spsa-tuned vs defaults): 1/2-1/2 {Draw by fifty moves rule}
+Started game 259 of 300 (spsa-tuned vs defaults)
+Finished game 251 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 260 of 300 (defaults vs spsa-tuned)
+Finished game 252 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 261 of 300 (spsa-tuned vs defaults)
+Finished game 254 (defaults vs spsa-tuned): 0-1 {Black mates}
+Started game 262 of 300 (defaults vs spsa-tuned)
+Finished game 255 (spsa-tuned vs defaults): 0-1 {Black mates}
+Started game 263 of 300 (spsa-tuned vs defaults)
+Finished game 257 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 264 of 300 (defaults vs spsa-tuned)
+Finished game 259 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 265 of 300 (spsa-tuned vs defaults)
+Finished game 258 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 266 of 300 (defaults vs spsa-tuned)
+Finished game 260 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 267 of 300 (spsa-tuned vs defaults)
+Finished game 256 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 268 of 300 (defaults vs spsa-tuned)
+Finished game 261 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 269 of 300 (spsa-tuned vs defaults)
+Finished game 262 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 270 of 300 (defaults vs spsa-tuned)
+Finished game 263 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 271 of 300 (spsa-tuned vs defaults)
+Finished game 266 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 272 of 300 (defaults vs spsa-tuned)
+Finished game 269 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 273 of 300 (spsa-tuned vs defaults)
+Finished game 267 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 274 of 300 (defaults vs spsa-tuned)
+Finished game 268 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 275 of 300 (spsa-tuned vs defaults)
+Finished game 264 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 276 of 300 (defaults vs spsa-tuned)
+Finished game 265 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 277 of 300 (spsa-tuned vs defaults)
+Finished game 271 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 278 of 300 (defaults vs spsa-tuned)
+Finished game 272 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 279 of 300 (spsa-tuned vs defaults)
+Finished game 270 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 280 of 300 (defaults vs spsa-tuned)
+Finished game 273 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 281 of 300 (spsa-tuned vs defaults)
+Finished game 276 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 282 of 300 (defaults vs spsa-tuned)
+Finished game 275 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 283 of 300 (spsa-tuned vs defaults)
+Finished game 277 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Started game 284 of 300 (defaults vs spsa-tuned)
+Finished game 274 (defaults vs spsa-tuned): 1/2-1/2 {Draw by fifty moves rule}
+Started game 285 of 300 (spsa-tuned vs defaults)
+Finished game 278 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 286 of 300 (defaults vs spsa-tuned)
+Finished game 279 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 287 of 300 (spsa-tuned vs defaults)
+Finished game 281 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 288 of 300 (defaults vs spsa-tuned)
+Finished game 280 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 289 of 300 (spsa-tuned vs defaults)
+Finished game 282 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 290 of 300 (defaults vs spsa-tuned)
+Finished game 283 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 291 of 300 (spsa-tuned vs defaults)
+Finished game 284 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 292 of 300 (defaults vs spsa-tuned)
+Finished game 285 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 293 of 300 (spsa-tuned vs defaults)
+Finished game 286 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 294 of 300 (defaults vs spsa-tuned)
+Finished game 288 (defaults vs spsa-tuned): 1-0 {White mates}
+Started game 295 of 300 (spsa-tuned vs defaults)
+Finished game 289 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 296 of 300 (defaults vs spsa-tuned)
+Finished game 287 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 297 of 300 (spsa-tuned vs defaults)
+Finished game 290 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 298 of 300 (defaults vs spsa-tuned)
+Finished game 291 (spsa-tuned vs defaults): 1-0 {White mates}
+Started game 299 of 300 (spsa-tuned vs defaults)
+Finished game 293 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 300 of 300 (defaults vs spsa-tuned)
+Finished game 292 (defaults vs spsa-tuned): 1-0 {White mates}
+Finished game 295 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 294 (defaults vs spsa-tuned): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 297 (spsa-tuned vs defaults): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 296 (defaults vs spsa-tuned): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 298 (defaults vs spsa-tuned): 1-0 {White mates}
+Finished game 299 (spsa-tuned vs defaults): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 300 (defaults vs spsa-tuned): 1-0 {White mates}
+--------------------------------------------------
+Results of spsa-tuned vs defaults (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 4.63 +/- 23.40, nElo: 7.80 +/- 39.32
+LOS: 65.13 %, DrawRatio: 45.33 %, PairsRatio: 1.16
+Games: 300, Wins: 88, Losses: 84, Draws: 128, Points: 152.0 (50.67 %)
+Ptnml(0-2): [5, 33, 68, 41, 3], WL/DD Ratio: 1.52
+--------------------------------------------------
+Finished match
+Total Time: 00:17:10 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  spsa-tuned   time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  defaults     time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================
