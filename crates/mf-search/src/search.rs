@@ -1,26 +1,125 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(test)]
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use mf_core::{
-    Bitboard, CastlingSide, Color, Move, PieceKind, Position, Square, Undo, bishop_attacks,
-    generate_legal_moves, has_legal_move, is_in_check, king_attacks, knight_attacks, pawn_attacks,
-    rook_attacks, static_exchange_evaluation,
+    Bitboard, CastlingSide, Color, Move, MoveList, PieceKind, Position, Square, Undo,
+    bishop_attacks, generate_legal_moves, has_legal_move, has_legal_move_in_place, is_in_check,
+    is_legal, king_attacks, knight_attacks, pawn_attacks, rook_attacks, static_exchange_evaluation,
 };
 use mf_nnue::{ACCUMULATOR_STACK_CAPACITY, AccumulatorStack, AccumulatorStackError, Network};
+use mf_tb::{Tablebases, Wdl};
 
 use crate::history::{
     CONTINUATION_PLIES, CONTINUATION_WEIGHTS, CORRECTION_CONTINUATION_PLIES,
     CORRECTION_CONTINUATION_WEIGHT, CORRECTION_MAJOR, CORRECTION_MATERIAL, CORRECTION_MAX,
     CORRECTION_MINOR, CORRECTION_PAWN, CORRECTION_SCALE, CORRECTION_SOURCES, CORRECTION_WEIGHTS,
-    ContinuationKey, KillerTable, SharedHistory, captured_kind,
+    ContinuationKey, KillerTable, LowPlyHistory, SharedHistory, TtMoveHistory, captured_kind,
 };
-use crate::move_ordering::{MovePicker, OrderingContext, captured_material, quiescence_moves};
+use crate::move_ordering::{MovePicker, OrderingContext, captured_material};
 use crate::repetition::RepetitionHistory;
 use crate::{Bound, EntryData, TranspositionTable};
 
 pub const MATE_SCORE: i32 = 30_000;
 pub const MAX_SEARCH_PLY: usize = 128;
 const _: () = assert!(MAX_SEARCH_PLY == ACCUMULATOR_STACK_CAPACITY);
+
+/// The six correction-history entries visible when an ordinary PVS node begins.
+#[cfg(feature = "corrhist-regression")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CorrectionFeatures {
+    pub pawn: i16,
+    pub minor: i16,
+    pub major: i16,
+    pub material: i16,
+    pub continuation_2: i16,
+    pub continuation_4: i16,
+}
+
+/// One completed exact PVS observation for offline correction-history regression.
+#[cfg(feature = "corrhist-regression")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CorrectionSample {
+    pub features: CorrectionFeatures,
+    pub raw_static_eval: i32,
+    pub search_value: i32,
+    pub depth: u32,
+    pub ply: usize,
+    pub position_key: u64,
+}
+
+/// Fixed-capacity move buffer whose storage is deliberately left uninitialized.
+///
+/// One of these lives in every `pvs` and `quiescence` frame, so construction must be
+/// free: zeroing the array (as `MoveList::new` does) is a per-node memset, and a heap
+/// `Vec` is per-node allocator traffic once anything is pushed. Only the first `len`
+/// slots are ever written, and `as_slice` exposes exactly that prefix, so the
+/// uninitialized tail is never read.
+struct MoveBuffer<const N: usize> {
+    moves: [core::mem::MaybeUninit<Move>; N],
+    len: usize,
+}
+
+impl<const N: usize> MoveBuffer<N> {
+    const fn new() -> Self {
+        Self {
+            moves: [core::mem::MaybeUninit::uninit(); N],
+            len: 0,
+        }
+    }
+
+    /// Appends a move. Panics if the buffer is already at capacity.
+    #[inline]
+    fn push(&mut self, mv: Move) {
+        assert!(self.len < N, "move buffer overflow");
+        self.moves[self.len] = core::mem::MaybeUninit::new(mv);
+        self.len += 1;
+    }
+
+    #[inline]
+    fn as_slice(&self) -> &[Move] {
+        // SAFETY: `push` and `PvLine::load` initialize every slot below `len` before
+        // advancing it, and nothing ever lowers a slot back to uninitialized.
+        unsafe { core::slice::from_raw_parts(self.moves.as_ptr().cast::<Move>(), self.len) }
+    }
+}
+
+/// A principal variation collected on the stack.
+///
+/// `Move` is a `u16`, making the whole line 258 bytes -- small enough to live in every
+/// frame of a `MAX_SEARCH_PLY`-deep recursion on the workers' 8 MiB stacks.
+pub(crate) struct PvLine(MoveBuffer<MAX_SEARCH_PLY>);
+
+impl PvLine {
+    pub(crate) const fn new() -> Self {
+        Self(MoveBuffer::new())
+    }
+
+    #[inline]
+    pub(crate) fn clear(&mut self) {
+        self.0.len = 0;
+    }
+
+    #[inline]
+    pub(crate) fn as_slice(&self) -> &[Move] {
+        self.0.as_slice()
+    }
+
+    /// Replaces the line with `mv` followed by `child`, truncating at capacity.
+    ///
+    /// Truncation is unreachable in practice: a child line rooted one ply deeper is
+    /// always shorter than the ceiling, so `mv` plus the child fits. The `min` merely
+    /// keeps the copy in bounds without a panic path.
+    #[inline]
+    fn load(&mut self, mv: Move, child: &PvLine) {
+        self.0.moves[0] = core::mem::MaybeUninit::new(mv);
+        let tail = child.0.len.min(MAX_SEARCH_PLY - 1);
+        self.0.moves[1..=tail].copy_from_slice(&child.0.moves[..tail]);
+        self.0.len = tail + 1;
+    }
+}
 /// Marks a TT entry whose static evaluation was intentionally not computed.
 pub const UNEVALUATED_STATIC_EVAL: i16 = i16::MIN;
 /// Largest magnitude a non-mate score may report. Keeps evaluation clear of the mate
@@ -46,6 +145,10 @@ const DEFAULT_MAX_DEPTH: u32 = 64;
 const MAX_ITERATIVE_DEEPENING_DEPTH: u32 = MAX_SEARCH_PLY as u32;
 const TIME_CHECK_INTERVAL: u64 = 512;
 const NODE_PUBLISH_INTERVAL: u64 = 1_024;
+/// Extra depth credited to a TT entry written from a Syzygy WDL verdict, which is exact
+/// at any depth; the reference engine likewise stores probe results a few plies deep so
+/// they outlive deeper re-visits instead of falling back to a file probe.
+const SYZYGY_TT_DEPTH_BONUS: i32 = 6;
 const NMP_MIN_DEPTH: i32 = 3;
 const NMP_VERIFICATION_DEPTH: i32 = 6;
 const RFP_MAX_DEPTH: i32 = 6;
@@ -75,6 +178,18 @@ const QUIET_SEE_MARGIN_PER_DEPTH: i32 = 26;
 const CAPTURE_SEE_MAX_DEPTH: i32 = 6;
 const CAPTURE_SEE_MARGIN_PER_DEPTH: i32 = 99;
 const SINGULAR_MIN_DEPTH: i32 = 6;
+/// ttMove-history gravity bonus when a non-PV node's best move was the TT move.
+const TT_MOVE_HISTORY_HIT_BONUS: i32 = 918;
+/// ttMove-history gravity malus when a non-PV node's best move was NOT the TT move.
+const TT_MOVE_HISTORY_MISS_MALUS: i32 = -747;
+/// Base of the ttMove-history malus applied on a singular multicut early return.
+const TT_MOVE_HISTORY_MULTICUT_BASE: i32 = -421;
+/// Per-depth slope of the multicut malus: a deep multicut is stronger evidence.
+const TT_MOVE_HISTORY_MULTICUT_PER_DEPTH: i32 = 110;
+/// Numerator of the ttMove-history adjustment to the singular double margin.
+const TT_MOVE_HISTORY_MARGIN_NUMERATOR: i32 = 1_175;
+/// Divisor of the ttMove-history adjustment to the singular double margin.
+const TT_MOVE_HISTORY_MARGIN_DIVISOR: i32 = 114_178;
 const IIR_MIN_DEPTH: i32 = 4;
 const PROBCUT_MIN_DEPTH: i32 = 3;
 const PROBCUT_BASE_MARGIN: i32 = 241;
@@ -229,6 +344,9 @@ search_parameters! {
     rfp_margin_per_depth: "RfpMarginPerDepth" = RFP_MARGIN_PER_DEPTH, 20 ..= 300;
     /// Surcharge demanded at a TT-PV node. Source: `RFP_TT_PV_MARGIN`.
     rfp_tt_pv_margin: "RfpTtPvMargin" = RFP_TT_PV_MARGIN, 0 ..= 150;
+    /// Divisor turning the corrhist blend's magnitude into extra reverse-futility
+    /// margin. Reference: `futilityMargin ... + |correctionValue| / 198435`.
+    rfp_corrplexity_divisor: "RfpCorrplexityDivisor" = 198_435, 4_096 ..= 1_000_000;
     /// Constant term of the razoring margin. Source: `RAZOR_BASE_MARGIN`.
     razor_base_margin: "RazorBaseMargin" = RAZOR_BASE_MARGIN, 50 ..= 600;
     /// Razoring margin per ply. Source: `RAZOR_MARGIN_PER_DEPTH`.
@@ -256,6 +374,9 @@ search_parameters! {
     lmr_tt_pv_reduction: "LmrTtPvReduction" = 1_028, 0 ..= 3_072;
     /// Numerator of the LMR history term, over 4096.
     lmr_history_numerator: "LmrHistoryNumerator" = 459, 50 ..= 1_500;
+    /// Divisor turning the corrhist blend's magnitude into an LMR reduction refund, in
+    /// 1024ths of a ply. Reference: `r -= ... + |correctionValue| / 26310`.
+    lmr_corrplexity_divisor: "LmrCorrplexityDivisor" = 26_310, 4_096 ..= 1_000_000;
     /// Weight on captured material in a capture's LMR `statScore`, over 128.
     /// Source: `CAPTURE_STAT_MATERIAL_WEIGHT`.
     capture_stat_material_weight: "CaptureStatMaterialWeight" = CAPTURE_STAT_MATERIAL_WEIGHT, 0 ..= 3_000;
@@ -294,6 +415,10 @@ search_parameters! {
     singular_double_margin_pv_bonus: "SingularDoubleMarginPvBonus" = 16, 0 ..= 100;
     /// Extra double-extension margin when the TT move is not a capture.
     singular_double_margin_quiet_bonus: "SingularDoubleMarginQuietBonus" = 8, 0 ..= 100;
+    /// Divisor turning the corrhist blend's magnitude into a smaller double-extension
+    /// margin. Reference: `doubleMargin ... - 148 * |correctionValue| / 29360128`,
+    /// i.e. `|correctionValue| / 198368`.
+    singular_corrplexity_divisor: "SingularCorrplexityDivisor" = 198_368, 4_096 ..= 1_000_000;
     /// Margin above the incumbent best score earning a deeper verification.
     /// Source: `POST_LMR_DEEPER_MARGIN`.
     post_lmr_deeper_margin: "PostLmrDeeperMargin" = POST_LMR_DEEPER_MARGIN, 0 ..= 300;
@@ -379,6 +504,83 @@ pub struct SearchLimits {
     pub soft_time: Option<Duration>,
     pub hard_time: Option<Duration>,
     pub infinite: bool,
+    /// Whether the soft/hard pair came from normal side-to-move clock allocation.
+    ///
+    /// `movetime` deliberately keeps this false even though it supplies equal limits:
+    /// exact requested time must not enter an adaptive between-iteration governor.
+    pub use_clock_management: bool,
+}
+
+/// Shared latch between the UCI thread and a pondering search.
+///
+/// Armed at `go ponder` and flipped by `ponderhit`. While armed, worker 0 runs as if
+/// the search were infinite -- the soft and hard time checks are skipped and the
+/// mate-found early break is suppressed -- because UCI forbids a `bestmove` before
+/// `ponderhit` or `stop`. The flip also re-bases the clock: the time budget was
+/// computed from the clock tokens at `go ponder`, but that time only starts counting
+/// against the engine when the predicted move is actually played, so worker 0 measures
+/// every subsequent elapsed computation from the flip instant rather than from spawn.
+pub struct PonderState {
+    pondering: AtomicBool,
+    rebased_start: Mutex<Option<Instant>>,
+}
+
+impl PonderState {
+    /// A freshly armed latch: the search it is handed to starts out pondering.
+    pub fn new() -> Self {
+        Self {
+            pondering: AtomicBool::new(true),
+            rebased_start: Mutex::new(None),
+        }
+    }
+
+    /// Whether the search is still pondering.
+    pub fn is_pondering(&self) -> bool {
+        self.pondering.load(Ordering::Acquire)
+    }
+
+    /// Converts the ponder search into a normal timed one, with its clock starting now.
+    ///
+    /// Idempotent: only the first call records the clock base, so a duplicate
+    /// `ponderhit` cannot quietly extend the time budget.
+    pub fn ponderhit(&self) {
+        let mut rebased = self
+            .rebased_start
+            .lock()
+            .expect("ponder clock lock should not be poisoned");
+        if rebased.is_none() {
+            *rebased = Some(Instant::now());
+        }
+        drop(rebased);
+        // Release-ordered after the clock base is written, so a worker that observes
+        // the flip is guaranteed to see the instant it must measure from.
+        self.pondering.store(false, Ordering::Release);
+    }
+
+    /// Ends the ponder wait without converting to a timed search.
+    ///
+    /// This is the `stop`/`quit`/new-command path: the search is being terminated, so
+    /// no clock base is recorded. It exists because the shared stop flag alone cannot
+    /// end the wait -- the pool sets that same flag internally when worker 0 completes,
+    /// which happens while still pondering whenever the search exhausts its depth
+    /// ceiling or the root is terminal, and answering then would violate the protocol.
+    pub fn abort(&self) {
+        self.pondering.store(false, Ordering::Release);
+    }
+
+    /// The instant `ponderhit` arrived, once it has.
+    fn rebased_start(&self) -> Option<Instant> {
+        *self
+            .rebased_start
+            .lock()
+            .expect("ponder clock lock should not be poisoned")
+    }
+}
+
+impl Default for PonderState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -428,11 +630,30 @@ pub struct SearchOptions {
     /// the reference engine. A single master toggle would measure the family, not the
     /// members.
     pub use_correction_sources: [bool; CORRECTION_SOURCES + 1],
+    /// Let the per-worker ttMove-history scalar deepen or shallow the singular
+    /// double-extension margin. Gates only that read; the scalar is maintained
+    /// unconditionally.
+    pub use_tt_move_history: bool,
+    /// Read the per-worker low-ply history table when ordering quiets at ply < 5.
+    /// Gates only the ordering term; the table is maintained unconditionally.
+    pub use_low_ply_history: bool,
+    /// Consume the corrhist blend's magnitude as a complexity proxy: refund LMR
+    /// reduction, demand more reverse-futility margin, and shrink the singular
+    /// double-extension margin where the correction is large. Gates only those three
+    /// reads; corrhist maintenance and the eval correction itself are untouched.
+    pub use_corrplexity: bool,
     /// Scale the soft time limit by the fraction of the tree the best root move owns.
     ///
     /// Affects TIME-MANAGED searches only: with no `soft_time` there is nothing to
     /// scale, so `go depth`, `go nodes`, `go infinite` and `bench` are untouched.
     pub use_time_effort: bool,
+    /// Replace the legacy additive governor with the continuous between-iteration
+    /// factor model for timed single-PV searches.
+    pub use_interpolated_time_management: bool,
+    /// Slow nominal depth growth after half of the effective soft budget is spent.
+    pub use_search_again_depth: bool,
+    /// Number of principal variations worker 0 reports at each completed depth.
+    pub multi_pv: u32,
     /// The tunable margins, slopes, and divisors the enabled techniques are shaped by.
     ///
     /// Carried here rather than as a separate argument because every consumer of a
@@ -625,6 +846,9 @@ impl Default for SearchOptions {
                 sources[CORRECTION_MATERIAL] = false;
                 sources
             },
+            use_tt_move_history: true,
+            use_low_ply_history: true,
+            use_corrplexity: true,
             // The best root move's share of the tree, folded into the soft limit
             // multiplicatively with the stability governor.
             //
@@ -666,6 +890,9 @@ impl Default for SearchOptions {
             // COMPOSITION that is wrong. Full write-up in
             // `experiments/MSN-S3-tm-effort/results.md`.
             use_time_effort: false,
+            use_interpolated_time_management: false,
+            use_search_again_depth: false,
+            multi_pv: 1,
             parameters: SearchParameters::default(),
         }
     }
@@ -675,10 +902,16 @@ impl Default for SearchOptions {
 pub struct IterationInfo {
     pub depth: u32,
     pub seldepth: u32,
+    /// 1-based analysis-line index for UCI `multipv`.
+    pub multipv_index: u32,
     pub score: i32,
     pub nodes: u64,
     pub hashfull: u16,
+    /// Successful tablebase probes so far; 0 when no tablebases are loaded.
+    pub tbhits: u64,
     pub elapsed: Duration,
+    /// Soft-time scale selected for the next iteration, in percent.
+    pub time_scale_percent: u32,
     pub pv: Vec<Move>,
 }
 
@@ -704,25 +937,70 @@ pub struct SearchResult {
     pub seldepth: u32,
     pub nodes: u64,
     pub hashfull: u16,
+    /// Successful tablebase probes; 0 when no tablebases are loaded.
+    pub tbhits: u64,
     pub elapsed: Duration,
     pub pv: Vec<Move>,
     pub iterations: Vec<IterationInfo>,
 }
 
+/// A published node counter padded to its own cache line.
+///
+/// Without the padding, adjacent workers' counters share a line, and every publish
+/// invalidates that line in every other publishing core's cache. Publishing is
+/// amortized to once per `NODE_PUBLISH_INTERVAL` nodes, so the sharing is cheap
+/// rather than free -- but the padding costs nothing.
+#[repr(align(64))]
+#[derive(Default)]
+pub(crate) struct NodeCounter(AtomicU64);
+
+impl NodeCounter {
+    pub(crate) const fn new(nodes: u64) -> Self {
+        Self(AtomicU64::new(nodes))
+    }
+}
+
+impl std::ops::Deref for NodeCounter {
+    type Target = AtomicU64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct SearchAgainObservation {
+    pub(crate) worker_id: usize,
+    pub(crate) increase_depth: bool,
+    pub(crate) increase_depth_address: usize,
+    pub(crate) search_again_counter: u32,
+}
+
 pub(crate) struct WorkerParameters<'a> {
     worker_id: usize,
     generation: u8,
-    node_counters: &'a [AtomicU64],
+    node_counters: &'a [NodeCounter],
     history: &'a SharedHistory,
     network: &'a Network,
     root_move_reporter: Option<Box<dyn FnMut(RootMoveInfo) + 'a>>,
+    #[cfg(feature = "corrhist-regression")]
+    correction_sample_reporter: Option<Box<dyn FnMut(CorrectionSample) + 'a>>,
+    tablebases: Option<&'a Tablebases>,
+    tb_hit_counters: Option<&'a [NodeCounter]>,
+    root_moves: Option<Vec<Move>>,
+    ponder: Option<&'a PonderState>,
+    increase_depth: Option<&'a AtomicBool>,
+    search_again_counter: u32,
+    #[cfg(test)]
+    search_again_observer: Option<&'a mpsc::Sender<SearchAgainObservation>>,
 }
 
 impl<'a> WorkerParameters<'a> {
     pub(crate) fn new(
         worker_id: usize,
         generation: u8,
-        node_counters: &'a [AtomicU64],
+        node_counters: &'a [NodeCounter],
         history: &'a SharedHistory,
         network: &'a Network,
     ) -> Self {
@@ -734,7 +1012,29 @@ impl<'a> WorkerParameters<'a> {
             history,
             network,
             root_move_reporter: None,
+            #[cfg(feature = "corrhist-regression")]
+            correction_sample_reporter: None,
+            tablebases: None,
+            tb_hit_counters: None,
+            root_moves: None,
+            ponder: None,
+            increase_depth: None,
+            search_again_counter: 0,
+            #[cfg(test)]
+            search_again_observer: None,
         }
+    }
+
+    /// Attaches Syzygy tablebases and the per-worker tbhits publish slots.
+    pub(crate) fn with_tablebases(
+        mut self,
+        tablebases: &'a Tablebases,
+        tb_hit_counters: &'a [NodeCounter],
+    ) -> Self {
+        assert!(self.worker_id < tb_hit_counters.len());
+        self.tablebases = Some(tablebases);
+        self.tb_hit_counters = Some(tb_hit_counters);
+        self
     }
 
     /// Attaches a `currmove` sink. Only worker 0 should carry one: helpers search the same
@@ -745,6 +1045,45 @@ impl<'a> WorkerParameters<'a> {
         reporter: impl FnMut(RootMoveInfo) + 'a,
     ) -> Self {
         self.root_move_reporter = Some(Box::new(reporter));
+        self
+    }
+
+    #[cfg(feature = "corrhist-regression")]
+    fn with_correction_sample_reporter(
+        mut self,
+        reporter: impl FnMut(CorrectionSample) + 'a,
+    ) -> Self {
+        self.correction_sample_reporter = Some(Box::new(reporter));
+        self
+    }
+
+    /// Restricts the root to the given moves, the UCI `go searchmoves` contract.
+    pub(crate) fn with_root_moves(mut self, root_moves: Vec<Move>) -> Self {
+        self.root_moves = Some(root_moves);
+        self
+    }
+
+    /// Attaches the `go ponder` latch: the search ignores its time budget and the
+    /// mate-found break until the latch flips, and measures elapsed time from the
+    /// `ponderhit` instant afterwards.
+    pub(crate) fn with_ponder(mut self, ponder: &'a PonderState) -> Self {
+        self.ponder = Some(ponder);
+        self
+    }
+
+    pub(crate) fn with_increase_depth(mut self, increase_depth: &'a AtomicBool) -> Self {
+        self.increase_depth = Some(increase_depth);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_search_again_test_state(
+        mut self,
+        search_again_counter: u32,
+        observer: &'a mpsc::Sender<SearchAgainObservation>,
+    ) -> Self {
+        self.search_again_counter = search_again_counter;
+        self.search_again_observer = Some(observer);
         self
     }
 }
@@ -769,6 +1108,8 @@ pub fn search(
         limits,
         options,
         network,
+        None,
+        None,
         &stop,
         |_| {},
     )
@@ -784,14 +1125,26 @@ pub fn search_with_callback<F>(
     limits: SearchLimits,
     options: SearchOptions,
     network: &Network,
+    tablebases: Option<&Tablebases>,
+    root_moves: Option<Vec<Move>>,
     stop: &AtomicBool,
     on_iteration: F,
 ) -> SearchResult
 where
     F: FnMut(&IterationInfo),
 {
-    let node_counters = [AtomicU64::new(0)];
+    let node_counters = [NodeCounter::new(0)];
+    let tb_hit_counters = [NodeCounter::new(0)];
     let shared_history = SharedHistory::new();
+    let increase_depth = Arc::new(AtomicBool::new(true));
+    let mut parameters = WorkerParameters::new(0, 0, &node_counters, &shared_history, network)
+        .with_increase_depth(&increase_depth);
+    if let Some(tablebases) = tablebases {
+        parameters = parameters.with_tablebases(tablebases, &tb_hit_counters);
+    }
+    if let Some(root_moves) = root_moves {
+        parameters = parameters.with_root_moves(root_moves);
+    }
     search_worker_with_history_callback_options(
         position,
         history,
@@ -799,7 +1152,7 @@ where
         limits,
         options,
         stop,
-        WorkerParameters::new(0, 0, &node_counters, &shared_history, network),
+        parameters,
         on_iteration,
     )
 }
@@ -813,6 +1166,7 @@ where
 /// AGENTS.md 4.54). Match play allocates once per game, so the benchmark matches it by
 /// hoisting the construction out and calling `clear()` between positions instead. Node
 /// counts are unaffected: a cleared table is bit-identical to a fresh one.
+#[allow(clippy::too_many_arguments)]
 pub fn search_with_shared_history(
     position: &Position,
     transposition_table: &TranspositionTable,
@@ -820,10 +1174,22 @@ pub fn search_with_shared_history(
     options: SearchOptions,
     shared_history: &SharedHistory,
     network: &Network,
+    tablebases: Option<&Tablebases>,
+    root_moves: Option<Vec<Move>>,
 ) -> SearchResult {
     let position_history = [position.repetition_key()];
-    let node_counters = [AtomicU64::new(0)];
+    let node_counters = [NodeCounter::new(0)];
+    let tb_hit_counters = [NodeCounter::new(0)];
     let stop = AtomicBool::new(false);
+    let increase_depth = Arc::new(AtomicBool::new(true));
+    let mut parameters = WorkerParameters::new(0, 0, &node_counters, shared_history, network)
+        .with_increase_depth(&increase_depth);
+    if let Some(tablebases) = tablebases {
+        parameters = parameters.with_tablebases(tablebases, &tb_hit_counters);
+    }
+    if let Some(root_moves) = root_moves {
+        parameters = parameters.with_root_moves(root_moves);
+    }
     search_worker_with_history_callback_options(
         position,
         &position_history,
@@ -831,7 +1197,44 @@ pub fn search_with_shared_history(
         limits,
         options,
         &stop,
-        WorkerParameters::new(0, 0, &node_counters, shared_history, network),
+        parameters,
+        |_| {},
+    )
+}
+
+/// Single-threaded fixed-configuration search that reports eligible exact PVS nodes.
+///
+/// The caller owns correction history so roots in one dataset split can retain their
+/// learned predictors without sharing them with another split. Tablebases and root
+/// filters are intentionally absent from this research-only entry point.
+#[cfg(feature = "corrhist-regression")]
+pub fn search_with_correction_samples<F>(
+    position: &Position,
+    transposition_table: &TranspositionTable,
+    limits: SearchLimits,
+    options: SearchOptions,
+    shared_history: &SharedHistory,
+    network: &Network,
+    on_sample: F,
+) -> SearchResult
+where
+    F: FnMut(CorrectionSample),
+{
+    let position_history = [position.repetition_key()];
+    let node_counters = [NodeCounter::new(0)];
+    let stop = AtomicBool::new(false);
+    let increase_depth = Arc::new(AtomicBool::new(true));
+    let parameters = WorkerParameters::new(0, 0, &node_counters, shared_history, network)
+        .with_increase_depth(&increase_depth)
+        .with_correction_sample_reporter(on_sample);
+    search_worker_with_history_callback_options(
+        position,
+        &position_history,
+        transposition_table,
+        limits,
+        options,
+        &stop,
+        parameters,
         |_| {},
     )
 }
@@ -854,6 +1257,17 @@ where
     let worker_id = worker.worker_id;
     let mut worker = worker;
     let root_move_reporter = worker.root_move_reporter.take();
+    #[cfg(feature = "corrhist-regression")]
+    let correction_sample_reporter = worker.correction_sample_reporter.take();
+    let root_moves = worker.root_moves.take();
+    let tablebases = worker.tablebases;
+    let tb_hit_counters = worker.tb_hit_counters;
+    let ponder = worker.ponder;
+    let increase_depth = worker.increase_depth;
+    let mut search_again_counter = worker.search_again_counter;
+    #[cfg(test)]
+    let search_again_observer = worker.search_again_observer;
+    let use_search_again_depth = search_again_depth_active(&limits, &options);
     let started = if worker_id == 0 {
         Some(Instant::now())
     } else {
@@ -865,10 +1279,14 @@ where
         SearchLimits {
             soft_time: None,
             hard_time: None,
+            use_clock_management: false,
             ..limits
         }
     };
     let maximum_depth = iteration_ceiling(&limits);
+    // Allocated once per worker per search, outside the deepening loop; each iteration
+    // only refills it in place.
+    let low_ply_history = LowPlyHistory::new();
     let mut context = SearchContext::new(
         transposition_table,
         worker_limits,
@@ -877,6 +1295,7 @@ where
         position,
         history,
         worker.history,
+        &low_ply_history,
         options,
         worker_id,
         worker.generation,
@@ -884,6 +1303,34 @@ where
         worker.network,
     );
     context.root_move_reporter = root_move_reporter;
+    #[cfg(feature = "corrhist-regression")]
+    {
+        context.correction_sample_reporter = correction_sample_reporter;
+    }
+    context.tablebases = tablebases;
+    context.tb_hit_counters = tb_hit_counters;
+    context.root_move_filter = root_moves;
+    context.ponder = ponder;
+    // Root DTZ probe: when the root itself is in table range, restrict the root move
+    // list to the moves that preserve the tablebase verdict for the whole search. DTZ
+    // handles the fifty-move rule itself, so a nonzero halfmove clock is fine here.
+    // A caller-supplied restriction (UCI `searchmoves`) is intersected rather than
+    // replaced: both constraints must hold.
+    if let Some(tablebases) = tablebases
+        && position.occupancy().count() as usize <= tablebases.max_pieces()
+        && let Some(root_probe) = tablebases.probe_root(position)
+    {
+        let mut allowed: Vec<Move> = root_probe
+            .preserving_moves()
+            .map(|entry| entry.mv)
+            .collect();
+        if let Some(requested) = context.root_move_filter.as_ref() {
+            allowed.retain(|mv| requested.contains(mv));
+        }
+        if !allowed.is_empty() {
+            context.root_move_filter = Some(allowed);
+        }
+    }
     let root_moves = generate_legal_moves(position);
 
     if root_moves.is_empty() {
@@ -900,6 +1347,7 @@ where
             seldepth: 0,
             nodes: 0,
             hashfull: transposition_table.hashfull_per_mille(),
+            tbhits: 0,
             elapsed: context.elapsed(),
             pv: Vec::new(),
             iterations: Vec::new(),
@@ -916,6 +1364,7 @@ where
             seldepth: 0,
             nodes: 0,
             hashfull: transposition_table.hashfull_per_mille(),
+            tbhits: 0,
             elapsed: context.elapsed(),
             pv: vec![fallback_move],
             iterations: Vec::new(),
@@ -925,14 +1374,53 @@ where
     let mut previous_score = 0;
     let mut previous_best_move = None;
     let mut stability = 0u32;
+    let mut previous_average_score = 0;
+    let mut score_history = [0; 4];
+    let mut score_history_index = 0usize;
+    let mut has_score_history = false;
+    let mut last_best_move_change_depth = 0u32;
+    let multi_pv_search = if worker_id == 0 && options.multi_pv > 1 {
+        Some((
+            options.multi_pv.min(
+                multipv_allowed_moves(&root_moves, context.root_move_filter.as_deref(), &[]).len()
+                    as u32,
+            ),
+            context.root_move_filter.clone(),
+        ))
+    } else {
+        None
+    };
 
-    for depth in 1..=maximum_depth {
+    for nominal_depth in 1..=maximum_depth {
+        let increase_depth_decision =
+            increase_depth.is_none_or(|decision| decision.load(Ordering::Relaxed));
+        let (next_counter, depth) = search_again_iteration(
+            nominal_depth,
+            search_again_counter,
+            use_search_again_depth,
+            increase_depth_decision,
+        );
+        search_again_counter = next_counter;
+        #[cfg(test)]
+        if let Some(observer) = search_again_observer {
+            let _ = observer.send(SearchAgainObservation {
+                worker_id,
+                increase_depth: increase_depth_decision,
+                increase_depth_address: increase_depth
+                    .map_or(0, |decision| std::ptr::from_ref(decision).addr()),
+                search_again_counter,
+            });
+        }
+        // Refilled with its prior rather than carried over: the previous iteration's
+        // near-root preferences are stale once the root depth moves on.
+        low_ply_history.fill_prior();
+        context.begin_root_iteration();
         let iteration_start_nodes = context.nodes;
         context.seldepth = depth;
         let attempt = if depth >= 5 {
             aspiration_search(position, depth, previous_score, &mut context)
         } else {
-            root_search(position, depth, -INFINITY, INFINITY, &mut context)
+            root_search(position, depth, -INFINITY, INFINITY, true, &mut context)
         };
 
         let Some((score, pv)) = attempt else {
@@ -948,31 +1436,169 @@ where
         // something. Once the same move survives several iterations, the budget shrinks
         // back below the nominal share and the saved time funds the moves that need it.
         let best_move = pv.first().copied();
-        if best_move.is_some() && best_move == previous_best_move {
-            stability = (stability + 1).min(TIME_STABILITY_CAP);
+        if context.uses_interpolated_time_management() {
+            if best_move.is_some() && best_move != previous_best_move {
+                last_best_move_change_depth = depth;
+            }
+            previous_best_move = best_move;
+            let previous_average = if has_score_history {
+                previous_average_score
+            } else {
+                score
+            };
+            let older_score = if has_score_history {
+                score_history[score_history_index]
+            } else {
+                score
+            };
+            context.set_time_scale(interpolated_time_scale_percent(
+                previous_average,
+                older_score,
+                score,
+                depth.saturating_sub(last_best_move_change_depth),
+                context.root_time_statistics.best_move_changes,
+                context.node_counters.len(),
+                context.root_time_statistics.nodes_effort(best_move),
+            ));
+            context.recompute_soft_time_reached();
+
+            if has_score_history {
+                previous_average_score = (previous_average_score + score) / 2;
+            } else {
+                previous_average_score = score;
+                score_history.fill(score);
+                has_score_history = true;
+            }
+            score_history[score_history_index] = score;
+            score_history_index = (score_history_index + 1) % score_history.len();
         } else {
-            stability = 0;
+            if best_move.is_some() && best_move == previous_best_move {
+                stability = (stability + 1).min(TIME_STABILITY_CAP);
+            } else {
+                stability = 0;
+            }
+            previous_best_move = best_move;
+            // Composed multiplicatively with stability because the two measure different
+            // things: stability asks whether the answer keeps CHANGING, effort asks whether
+            // the alternatives are still being taken seriously. A move can be stable for
+            // six iterations while a rival keeps costing a third of the tree.
+            let effort_percent = context.best_move_effort_percent(best_move);
+            context.set_time_scale(scaled_time_percent(
+                time_scale_percent(stability, score - previous_score),
+                effort_percent,
+            ));
         }
-        previous_best_move = best_move;
-        // Composed multiplicatively with stability because the two measure different
-        // things: stability asks whether the answer keeps CHANGING, effort asks whether
-        // the alternatives are still being taken seriously. A move can be stable for
-        // six iterations while a rival keeps costing a third of the tree.
-        let effort_percent = context.best_move_effort_percent(best_move);
-        context.set_time_scale(scaled_time_percent(
-            time_scale_percent(stability, score - previous_score),
-            effort_percent,
-        ));
         previous_score = score;
+        if worker_id == 0
+            && use_search_again_depth
+            && let Some(increase_depth) = increase_depth
+        {
+            increase_depth.store(
+                should_increase_search_depth(
+                    context.is_pondering(),
+                    context.elapsed(),
+                    context.scaled_soft_time(),
+                ),
+                Ordering::Relaxed,
+            );
+        }
+
+        if let Some((multi_pv, base_root_move_filter)) = multi_pv_search
+            .as_ref()
+            .filter(|(multi_pv, _)| *multi_pv > 1)
+        {
+            context.publish_nodes();
+            completed = Some(IterationInfo {
+                depth,
+                seldepth: context.seldepth.max(depth),
+                multipv_index: 1,
+                score,
+                nodes: context.reported_nodes(),
+                hashfull: context.transposition_table.hashfull_per_mille(),
+                tbhits: context.reported_tb_hits(),
+                elapsed: context.elapsed(),
+                time_scale_percent: context.time_scale_percent,
+                pv: pv.clone(),
+            });
+            let mut lines = vec![(score, pv)];
+            let mut found_moves = Vec::with_capacity(*multi_pv as usize);
+            found_moves.push(
+                lines[0]
+                    .1
+                    .first()
+                    .copied()
+                    .expect("a searched root line should have a first move"),
+            );
+            for _ in 1..*multi_pv {
+                context.root_move_filter = Some(multipv_allowed_moves(
+                    &root_moves,
+                    base_root_move_filter.as_deref(),
+                    &found_moves,
+                ));
+                // ponytail: secondary lines use full-width searches; add per-line
+                // aspiration windows if MultiPV analysis speed becomes a bottleneck.
+                let Some(line) =
+                    root_search(position, depth, -INFINITY, INFINITY, false, &mut context)
+                else {
+                    break;
+                };
+                found_moves.push(
+                    line.1
+                        .first()
+                        .copied()
+                        .expect("a searched root line should have a first move"),
+                );
+                lines.push(line);
+            }
+            context.root_move_filter = base_root_move_filter.clone();
+            lines.sort_by_key(|line| std::cmp::Reverse(line.0));
+            context.publish_nodes();
+            let elapsed = context.elapsed();
+            let seldepth = context.seldepth.max(depth);
+            let nodes = context.reported_nodes();
+            let hashfull = context.transposition_table.hashfull_per_mille();
+            let tbhits = context.reported_tb_hits();
+            for (index, (score, pv)) in lines.into_iter().enumerate() {
+                let info = IterationInfo {
+                    depth,
+                    seldepth,
+                    multipv_index: index as u32 + 1,
+                    score,
+                    nodes,
+                    hashfull,
+                    tbhits,
+                    elapsed,
+                    time_scale_percent: context.time_scale_percent,
+                    pv,
+                };
+                if index == 0 {
+                    completed = Some(info.clone());
+                }
+                on_iteration(&info);
+                context.iterations.push(info);
+            }
+
+            if context.nodes == iteration_start_nodes
+                || limits.depth == Some(nominal_depth)
+                || context.should_stop_after_iteration()
+            {
+                break;
+            }
+            continue;
+        }
+
         context.publish_nodes();
         let elapsed = context.elapsed();
         let info = IterationInfo {
             depth,
             seldepth: context.seldepth.max(depth),
+            multipv_index: 1,
             score,
             nodes: context.reported_nodes(),
             hashfull: context.transposition_table.hashfull_per_mille(),
+            tbhits: context.reported_tb_hits(),
             elapsed,
+            time_scale_percent: context.time_scale_percent,
             pv,
         };
         completed = Some(info.clone());
@@ -980,9 +1606,14 @@ where
         context.iterations.push(info);
 
         if context.nodes == iteration_start_nodes
-            || limits.depth == Some(depth)
+            || limits.depth == Some(nominal_depth)
             || context.should_stop_after_iteration()
-            || (!limits.infinite && score.abs() >= MATE_SCORE - depth as i32)
+            // A pondering search may not answer even from a found mate: UCI forbids a
+            // `bestmove` before `ponderhit`/`stop`, so it keeps searching instead.
+            || (!limits.infinite
+                && !context.is_pondering()
+                && options.multi_pv == 1
+                && score.abs() >= MATE_SCORE - depth as i32)
         {
             break;
         }
@@ -991,10 +1622,13 @@ where
     let completed = completed.unwrap_or_else(|| IterationInfo {
         depth: 0,
         seldepth: 0,
+        multipv_index: 1,
         score: context.static_eval(position),
         nodes: context.reported_nodes(),
         hashfull: context.transposition_table.hashfull_per_mille(),
+        tbhits: context.reported_tb_hits(),
         elapsed: context.elapsed(),
+        time_scale_percent: context.time_scale_percent,
         pv: vec![fallback_move],
     });
     let best_move = completed.pv.first().copied().or(Some(fallback_move));
@@ -1007,6 +1641,7 @@ where
         seldepth: completed.seldepth,
         nodes: context.nodes,
         hashfull: completed.hashfull,
+        tbhits: context.tb_hits,
         elapsed: context.elapsed(),
         pv: completed.pv,
         iterations: context.iterations,
@@ -1035,6 +1670,60 @@ fn iteration_ceiling(limits: &SearchLimits) -> u32 {
     }
 }
 
+fn effective_search_depth(
+    nominal_depth: u32,
+    search_again_counter: u32,
+    search_again_depth_active: bool,
+) -> u32 {
+    if !search_again_depth_active {
+        return nominal_depth;
+    }
+    let reduction = 3u32.saturating_mul(search_again_counter.saturating_add(1)) / 4;
+    nominal_depth.saturating_sub(reduction).max(1)
+}
+
+fn search_again_iteration(
+    nominal_depth: u32,
+    search_again_counter: u32,
+    search_again_depth_active: bool,
+    increase_depth: bool,
+) -> (u32, u32) {
+    let search_again_counter = if search_again_depth_active && !increase_depth {
+        search_again_counter.saturating_add(1)
+    } else {
+        search_again_counter
+    };
+    (
+        search_again_counter,
+        effective_search_depth(
+            nominal_depth,
+            search_again_counter,
+            search_again_depth_active,
+        ),
+    )
+}
+
+fn should_increase_search_depth(
+    pondering: bool,
+    elapsed: Duration,
+    effective_soft_time: Option<Duration>,
+) -> bool {
+    pondering || effective_soft_time.is_some_and(|soft_time| elapsed <= soft_time / 2)
+}
+
+fn multipv_allowed_moves(
+    legal_moves: &[Move],
+    base_allowed: Option<&[Move]>,
+    found_moves: &[Move],
+) -> Vec<Move> {
+    legal_moves
+        .iter()
+        .copied()
+        .filter(|mv| base_allowed.is_none_or(|allowed| allowed.contains(mv)))
+        .filter(|mv| !found_moves.contains(mv))
+        .collect()
+}
+
 fn aspiration_search(
     position: &Position,
     depth: u32,
@@ -1054,7 +1743,7 @@ fn aspiration_search(
     let mut search_depth = depth;
 
     loop {
-        let result = root_search(position, search_depth.max(1), alpha, beta, context)?;
+        let result = root_search(position, search_depth.max(1), alpha, beta, true, context)?;
         if result.0 <= alpha {
             // Fail low: the position is worse than believed, so the move about to be
             // played is in doubt and the full depth is worth paying for. Beta is pulled
@@ -1077,7 +1766,7 @@ fn aspiration_search(
         // the re-search window tight when the first failure was a near miss.
         delta += (delta / 3).max(1);
         if alpha == -INFINITY && beta == INFINITY {
-            return root_search(position, depth, alpha, beta, context);
+            return root_search(position, depth, alpha, beta, true, context);
         }
     }
 }
@@ -1095,7 +1784,7 @@ fn aspiration_delta(parameters: &SearchParameters, worker_id: usize, previous_sc
     scaled.min(parameters.aspiration_max_delta) + (worker_id % ASPIRATION_JITTER_BUCKETS) as i32
 }
 
-fn published_node_total(counters: &[AtomicU64]) -> u64 {
+fn published_node_total(counters: &[NodeCounter]) -> u64 {
     counters.iter().fold(0, |total, counter| {
         total.saturating_add(counter.load(Ordering::Relaxed))
     })
@@ -1106,6 +1795,7 @@ fn root_search(
     depth: u32,
     mut alpha: i32,
     beta: i32,
+    store_root_entry: bool,
     context: &mut SearchContext<'_>,
 ) -> Option<(i32, Vec<Move>)> {
     let mut position = position.clone();
@@ -1124,10 +1814,17 @@ fn root_search(
     let mut best_score = -INFINITY;
     let mut best_pv = Vec::new();
     let mut searched = 0usize;
-    let opponent_was_already_in_check = is_in_check(&position, !position.side_to_move());
 
     let ordering = context.ordering(&position, 0);
-    for mv in MovePicker::new(&position, tt_move, [None, None], ordering) {
+    let mut picker = MovePicker::new(tt_move, [None, None], ordering);
+    while let Some(mv) = picker.next(&position) {
+        if context
+            .root_move_filter
+            .as_ref()
+            .is_some_and(|allowed| !allowed.contains(&mv))
+        {
+            continue;
+        }
         let mover = position.side_to_move();
         let continuation = continuation_key(&position, mv);
         let undo = position.make_move(mv);
@@ -1138,24 +1835,15 @@ fn root_search(
             position.unmake_move(mv, undo);
             continue;
         }
-        // A move that captured a king leaves the board with a side missing one. That is
-        // reachable here because the corpus below tolerates a position where the side
-        // not to move is already in check, and `is_in_check` reports `false` for an
-        // absent king rather than panicking -- so the capture passes the legality filter
-        // above. NNUE then asks for the king square and panics inside the search thread,
-        // killing the engine mid-analysis. Such a "move" is not a chess move at all, so
-        // drop it here rather than teaching the evaluator to tolerate a kingless board.
+        // A move that captured a king leaves the board with a side missing one.
+        // `Position::from_fen` rejects the position classes that make such a move
+        // generatable, but a caller can still hand the search a manually built
+        // position, and `is_in_check` reports `false` for an *absent* king rather than
+        // panicking -- so the capture would pass the legality filter above. NNUE then
+        // asks for the king square and panics inside the search thread, killing the
+        // engine mid-analysis. Such a "move" is not a chess move at all, so drop it
+        // here rather than teaching the evaluator to tolerate a kingless board.
         if position.pieces(!mover, PieceKind::King).first().is_none() {
-            position.unmake_move(mv, undo);
-            continue;
-        }
-        // The externally validated mate corpus contains legacy composed positions
-        // where the side not to move starts in check. Match the reference engine's
-        // convention by not treating a continued, pre-existing check as mate in one.
-        if opponent_was_already_in_check
-            && is_in_check(&position, position.side_to_move())
-            && generate_legal_moves(&position).is_empty()
-        {
             position.unmake_move(mv, undo);
             continue;
         }
@@ -1164,7 +1852,7 @@ fn root_search(
         context.report_root_move(depth, mv, searched + 1);
         let nodes_before_move = context.nodes;
         context.push_position(&position, 1, mv, continuation, &undo);
-        let mut child_pv = Vec::new();
+        let mut child_pv = PvLine::new();
         let score = if searched == 0 {
             pvs(
                 &mut position,
@@ -1227,10 +1915,11 @@ fn root_search(
         searched += 1;
 
         if score > best_score {
+            context.record_root_best_move(mv, store_root_entry);
             best_score = score;
             best_pv.clear();
             best_pv.push(mv);
-            best_pv.extend_from_slice(&child_pv);
+            best_pv.extend_from_slice(child_pv.as_slice());
         }
         alpha = alpha.max(score);
         if alpha >= beta {
@@ -1253,20 +1942,22 @@ fn root_search(
     } else {
         Bound::Exact
     };
-    context.transposition_table.store(
-        key,
-        EntryData {
-            best_move: best_pv.first().copied(),
-            score: best_score as i16,
-            // Static evaluation is not probed by the M2 search. Avoid recomputing the full HCE
-            // solely to populate a field that becomes useful with M3 pruning.
-            static_eval: UNEVALUATED_STATIC_EVAL,
-            depth: tt_stored_depth(depth as i32),
-            bound,
-            age: context.generation,
-            pv: true,
-        },
-    );
+    if store_root_entry {
+        context.transposition_table.store(
+            key,
+            EntryData {
+                best_move: best_pv.first().copied(),
+                score: best_score as i16,
+                // Static evaluation is not probed by the M2 search. Avoid recomputing the full HCE
+                // solely to populate a field that becomes useful with M3 pruning.
+                static_eval: UNEVALUATED_STATIC_EVAL,
+                depth: tt_stored_depth(depth as i32),
+                bound,
+                age: context.generation,
+                pv: true,
+            },
+        );
+    }
     Some((best_score, best_pv))
 }
 
@@ -1283,7 +1974,7 @@ fn pvs(
     verification_node: bool,
     excluded_move: Option<Move>,
     context: &mut SearchContext<'_>,
-    pv: &mut Vec<Move>,
+    pv: &mut PvLine,
 ) -> Option<i32> {
     if !context.visit_node(ply) {
         return None;
@@ -1354,6 +2045,66 @@ fn pvs(
         tt_move = None;
     }
 
+    // Syzygy WDL probe, after the TT failed to cut off (reference-engine convention).
+    // Only exact when the halfmove clock is zero, and `probe_wdl` itself declines when
+    // castling rights remain. `pvs` never runs at the root (`root_search` owns ply 0),
+    // so no root gate is needed here.
+    //
+    // When the verdict cannot cut off (a win below beta or a loss above alpha at a PV
+    // node's wide window), it still bounds this node's value: `syzygy_floor` seeds the
+    // best score for a proven win and `syzygy_ceiling` caps it for a proven loss, which
+    // is how the reference engine propagates the tablebase band through PV nodes.
+    let mut syzygy_floor = -INFINITY;
+    let mut syzygy_ceiling = INFINITY;
+    if let Some(tablebases) = context.tablebases
+        && excluded_move.is_none()
+        && position.halfmove_clock() == 0
+        && position.occupancy().count() as usize <= tablebases.max_pieces()
+        && let Some(wdl) = tablebases.probe_wdl(position)
+    {
+        context.tb_hits += 1;
+        let (value, bound) = match wdl {
+            Wdl::Win => (TABLEBASE_SCORE - ply as i32, Bound::Lower),
+            Wdl::Loss => (-(TABLEBASE_SCORE - ply as i32), Bound::Upper),
+            Wdl::Draw | Wdl::BlessedLoss | Wdl::CursedWin => (0, Bound::Exact),
+        };
+        let bound_allows_cutoff = match bound {
+            Bound::Exact => true,
+            Bound::Lower => value >= beta,
+            Bound::Upper => value <= alpha,
+        };
+        if bound_allows_cutoff {
+            // Stored a few plies deeper than searched so the entry survives deeper
+            // re-visits: the verdict is exact regardless of depth, and re-probing the
+            // table files costs more than a TT hit. `value_to_tt` restores the
+            // ply-independent band, so `value_from_tt`'s rule50 headroom logic applies
+            // on the way back out.
+            context.transposition_table.store(
+                key,
+                EntryData {
+                    best_move: None,
+                    score: value_to_tt(value, ply) as i16,
+                    static_eval: UNEVALUATED_STATIC_EVAL,
+                    depth: tt_stored_depth(depth + SYZYGY_TT_DEPTH_BONUS),
+                    bound,
+                    age: context.generation,
+                    pv: pv_node,
+                },
+            );
+            return Some(value);
+        }
+        if pv_node {
+            match bound {
+                Bound::Lower => {
+                    syzygy_floor = value;
+                    alpha = alpha.max(value);
+                }
+                Bound::Upper => syzygy_ceiling = value,
+                Bound::Exact => {}
+            }
+        }
+    }
+
     let in_check = is_in_check(position, position.side_to_move());
     // The RAW static eval is what goes to the TT, deliberately. Storing the corrected
     // value would fold a residual that was learned at one point in the search into an
@@ -1365,8 +2116,18 @@ fn pvs(
             || context.static_eval(position),
             |entry| i32::from(entry.static_eval),
         );
+    #[cfg(feature = "corrhist-regression")]
+    let correction_features = correction_features(position, context, ply);
     let correction = correction_value(position, context, ply);
     let static_eval = to_corrected_static_eval(raw_static_eval, correction);
+    // The blend's magnitude doubles as the engine's complexity proxy: LMR, RFP, and
+    // the singular double margin all consume it below. `use_corrplexity` gates those
+    // three READS only; the correction applied to the eval above is untouched.
+    let corrplexity = if context.options.use_corrplexity {
+        correction.abs()
+    } else {
+        0
+    };
     // `improving` is a shared derived value: it feeds the LMR reduction, which feeds
     // `effective_depth`, which futility and SEE pruning read. Gating it on a set of
     // toggles is the AGENTS.md 4.4 defect class, so it is always computed.
@@ -1400,6 +2161,7 @@ fn pvs(
                     improving,
                     cut_node,
                     tt_pv,
+                    corrplexity,
                 )
                 >= beta
         {
@@ -1425,7 +2187,7 @@ fn pvs(
                 null_move_reduction(&context.options.parameters, depth, static_eval, beta);
             let undo = position.make_null_move();
             context.push_null_position(ply + 1);
-            let mut null_pv = Vec::new();
+            let mut null_pv = PvLine::new();
             let null_value = pvs(
                 position,
                 depth - reduction,
@@ -1452,7 +2214,7 @@ fn pvs(
 
                 let verification_depth = depth - reduction;
                 context.nmp_min_ply = null_move_verification_min_ply(ply, verification_depth);
-                let mut verification_pv = Vec::new();
+                let mut verification_pv = PvLine::new();
                 let verification = pvs(
                     position,
                     verification_depth,
@@ -1496,10 +2258,15 @@ fn pvs(
             let probcut_depth = probcut_depth(depth, improving);
             let see_threshold = probcut_beta - static_eval;
             let ordering = context.ordering(position, ply);
-            for mv in MovePicker::new(position, tt_move, context.killers.killers(ply), ordering)
-                .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
-            {
-                if static_exchange_evaluation(position, mv) < see_threshold {
+            let mut picker = MovePicker::captures_only(tt_move, ordering);
+            while let Some(mv) = picker.next(position) {
+                // Every yielded move is from the captures family here, so the picker's
+                // memoized exact SEE always answers the threshold test.
+                if picker
+                    .current_capture_see()
+                    .expect("captures_only yields only capture-family moves")
+                    < see_threshold
+                {
                     continue;
                 }
                 let mover = position.side_to_move();
@@ -1513,7 +2280,7 @@ fn pvs(
                     continue;
                 }
                 context.push_position(position, ply + 1, mv, continuation, &undo);
-                let mut probcut_pv = Vec::new();
+                let mut probcut_pv = PvLine::new();
                 let mut value = quiescence(
                     position,
                     -probcut_beta,
@@ -1579,24 +2346,29 @@ fn pvs(
     let mut best_score = -INFINITY;
     let mut best_move = None;
     let mut searched = 0usize;
-    let mut child_pv = Vec::new();
-    let mut searched_quiets = Vec::new();
-    let mut searched_captures = Vec::new();
+    let mut child_pv = PvLine::new();
+    let mut searched_quiets: MoveBuffer<256> = MoveBuffer::new();
+    let mut searched_captures: MoveBuffer<256> = MoveBuffer::new();
 
     let pawn_key = position.zobrist().pawn();
     let ordering = context.ordering(position, ply);
-    for mv in MovePicker::new(position, tt_move, context.killers.killers(ply), ordering) {
+    let check_info = CheckInfo::new(position);
+    // Loop-invariant: the mover and its material are the same at every move of this
+    // node, but the compiler cannot prove make/unmake restores the position, so
+    // hoisting is ours to do. The pruning consumers are each gated on their own
+    // toggle, so computing the shared value when ANY of them is on is exact.
+    let mover = position.side_to_move();
+    let needs_non_pawn_material =
+        context.options.use_lmp || context.options.use_futility || context.options.use_see_pruning;
+    let mover_has_non_pawn_material =
+        needs_non_pawn_material && has_non_pawn_material_for(position, mover);
+    let mut picker = MovePicker::new(tt_move, context.killers.killers(ply), ordering);
+    while let Some(mv) = picker.next(position) {
         if excluded_move == Some(mv) {
             continue;
         }
-        let mover = position.side_to_move();
         let quiet = !mv.flag().is_capture() && mv.flag().promotion().is_none();
-        let needs_non_pawn_material = (quiet
-            && (context.options.use_lmp || context.options.use_futility))
-            || context.options.use_see_pruning;
-        let mover_has_non_pawn_material =
-            needs_non_pawn_material && has_non_pawn_material_for(position, mover);
-        let gives_check = move_gives_check(position, mv);
+        let gives_check = check_info.gives_check(position, mv);
         let move_count = searched + 1;
         // `history_score`, `reduction`, and `effective_depth` are DERIVED VALUES read by
         // futility and SEE pruning as well as by LMR. They must never be gated on
@@ -1624,6 +2396,7 @@ fn pvs(
                 cut_node,
                 tt_pv,
                 history_score,
+                corrplexity,
             )
         } else if !quiet && capture_reduction_allowed(mv, tt_move, gives_check) {
             capture_late_move_reduction(
@@ -1636,6 +2409,7 @@ fn pvs(
                 tt_pv,
                 captured_material(position, mv),
                 capture_history,
+                corrplexity,
             )
         } else {
             0
@@ -1725,8 +2499,14 @@ fn pvs(
                 capture_see_threshold(parameters, depth)
                     - capture_history * parameters.capture_see_history_numerator / 1024
             };
+            // Captures reuse the exact SEE the picker computed while loading its
+            // capture list; only quiets (whose SEE the picker never computes) still
+            // walk the exchange here, and only inside the depth window.
             if within_window
-                && static_exchange_evaluation(position, mv) < threshold
+                && picker
+                    .current_capture_see()
+                    .unwrap_or_else(|| static_exchange_evaluation(position, mv))
+                    < threshold
                 && (quiet || alpha >= 0 || has_other_non_pawn_material(position, mover, mv))
             {
                 continue;
@@ -1763,7 +2543,7 @@ fn pvs(
             let singular_beta =
                 singular_beta(&context.options.parameters, tt_score, depth, tt_pv, pv_node);
             let singular_depth = (new_depth / 2).max(1);
-            let mut singular_pv = Vec::new();
+            let mut singular_pv = PvLine::new();
             let singular_value = pvs(
                 position,
                 singular_depth,
@@ -1782,6 +2562,11 @@ fn pvs(
                 && let Some(multicut_value) =
                     singular_multicut_value(singular_value, singular_beta, beta)
             {
+                // Maintenance is unconditional on the multicut path being taken: a
+                // multicut is direct evidence the TT move is NOT uniquely best here.
+                context.tt_move_history.apply(
+                    TT_MOVE_HISTORY_MULTICUT_BASE - TT_MOVE_HISTORY_MULTICUT_PER_DEPTH * depth,
+                );
                 return Some(multicut_value);
             }
             if context.options.use_singular_ext {
@@ -1794,6 +2579,8 @@ fn pvs(
                     cut_node,
                     tt_score,
                     beta,
+                    tt_move_history_margin_adjustment(&context.options, &context.tt_move_history),
+                    corrplexity,
                 );
             }
         }
@@ -1961,9 +2748,12 @@ fn pvs(
         if score > best_score {
             best_score = score;
             best_move = Some(mv);
-            pv.clear();
-            pv.push(mv);
-            pv.extend_from_slice(&child_pv);
+            // PV maintenance is a pure OUTPUT: no search decision reads the line back,
+            // and non-PV callers never consume the PvLine they pass, so the copy of up
+            // to MAX_SEARCH_PLY moves is skipped at non-PV nodes.
+            if pv_node {
+                pv.load(mv, &child_pv);
+            }
         }
         alpha = alpha.max(score);
         if alpha >= beta {
@@ -1980,8 +2770,8 @@ fn pvs(
                 pawn_key,
                 mv,
                 quiet,
-                &searched_quiets,
-                &searched_captures,
+                searched_quiets.as_slice(),
+                searched_captures.as_slice(),
             );
             break;
         }
@@ -2002,6 +2792,11 @@ fn pvs(
         });
     }
 
+    // A tablebase verdict outranks the searched score: a proven win floors it and a
+    // proven loss caps it, so heuristic evaluations inside the subtree cannot pull a
+    // decided position back into the ordinary evaluation band.
+    best_score = best_score.clamp(syzygy_floor, syzygy_ceiling);
+
     let bound = if best_score <= original_alpha {
         Bound::Upper
     } else if best_score >= beta {
@@ -2009,6 +2804,20 @@ fn pvs(
     } else {
         Bound::Exact
     };
+    // ttMove-history MAINTENANCE is unconditional (its `Use*` flag gates only the
+    // singular-margin read). Non-PV nodes only, and only when a TT move existed to be
+    // judged; verification nodes are excluded automatically because they clear
+    // `tt_move`. The "best move found" convention matches the correction update below.
+    if !pv_node
+        && best_score > original_alpha
+        && let (Some(best), Some(tt)) = (best_move, tt_move)
+    {
+        context.tt_move_history.apply(if best == tt {
+            TT_MOVE_HISTORY_HIT_BONUS
+        } else {
+            TT_MOVE_HISTORY_MISS_MALUS
+        });
+    }
     // Correction MAINTENANCE is unconditional, exactly as ordering-history maintenance
     // is (mission AGENTS.md 4.4): `use_correction_history` gates only the READ in
     // `correction_value`. That keeps the toggle a pure measurement control instead of
@@ -2029,6 +2838,23 @@ fn pvs(
                 best_move: (best_score > original_alpha).then_some(best_move).flatten(),
             },
         );
+    }
+    #[cfg(feature = "corrhist-regression")]
+    if bound == Bound::Exact
+        && !in_check
+        && !verification_node
+        && excluded_move.is_none()
+        && best_score.abs() <= EVALUATION_LIMIT
+        && let Some(reporter) = context.correction_sample_reporter.as_mut()
+    {
+        reporter(CorrectionSample {
+            features: correction_features,
+            raw_static_eval,
+            search_value: best_score,
+            depth: depth as u32,
+            ply,
+            position_key: position.repetition_key(),
+        });
     }
     if !verification_node {
         context.transposition_table.store(
@@ -2062,7 +2888,7 @@ fn quiescence(
     // tactics the first ply has already had its chance to see.
     first_qsearch_ply: bool,
     context: &mut SearchContext<'_>,
-    pv: &mut Vec<Move>,
+    pv: &mut PvLine,
 ) -> Option<i32> {
     if count_node && !context.visit_node(ply) {
         return None;
@@ -2158,7 +2984,12 @@ fn quiescence(
     };
     if !in_check {
         if best_score >= beta {
-            let score = if has_legal_move(position) {
+            // Exact stalemate detection, kept cheap by a legality-verified
+            // captures-first probe: `has_legal_move_in_place` tries the capture family
+            // first and returns on the first legal one, so at the typical qsearch
+            // terminal the probe ends within a few candidates; the quiet family is
+            // only generated in barren positions where stalemate is plausible.
+            let score = if has_legal_move_in_place(position) {
                 best_score
             } else {
                 0
@@ -2181,21 +3012,50 @@ fn quiescence(
     }
 
     let ordering = context.ordering(position, ply);
-    let moves: Vec<_> = if in_check {
-        MovePicker::new(position, tt_move, [None, None], ordering).collect()
+    // The in-check branch searches every evasion, so its yielded sequence is frozen
+    // into a stack list before the first child search: the search below updates
+    // `position` and the history tables mid-loop, so the full-width order has to be
+    // pinned up front. The non-check branch iterates its staged picker lazily inside
+    // the child-search loop, exactly as the interior loop does — sound mid-loop
+    // because `make_move`/`unmake_move` restore the position bit-for-bit before the
+    // loop asks for the next move (the `MovePicker` doc comment pins this), so each
+    // `next` call sees the node's own position. The picker's gate drops below-
+    // threshold captures at load, keeps promotions unconditionally, and yields the
+    // quiet-check widening only after every capture.
+    let mut evasions = MoveList::new();
+    let mut qsearch_picker = if in_check {
+        let mut picker = MovePicker::new(tt_move, [None, None], ordering);
+        while let Some(mv) = picker.next(position) {
+            evasions.push(mv);
+        }
+        None
     } else {
-        quiescence_moves(
-            position,
+        Some(MovePicker::qsearch(
             tt_move,
             qsearch_see_threshold(context.options.use_see_pruning),
             searches_quiet_checks,
             ordering,
-        )
+        ))
     };
     let mut searched = 0usize;
     let mut best_move = None;
-    let mut child_pv = Vec::new();
-    for mv in moves {
+    let mut child_pv = PvLine::new();
+    // Built on the first move that reaches the check test rather than per node: most
+    // qsearch moves resolve before it, and the cache pays for itself only when read.
+    let mut check_info: Option<CheckInfo> = None;
+    let mut evasion_index = 0usize;
+    while let Some(mv) = if in_check {
+        (evasion_index < evasions.len()).then(|| {
+            let mv = evasions[evasion_index];
+            evasion_index += 1;
+            mv
+        })
+    } else {
+        qsearch_picker
+            .as_mut()
+            .expect("the non-check branch owns the picker")
+            .next(position)
+    } {
         // Delta pruning: a capture that cannot lift the standing pat to alpha even after
         // winning its victim outright is not worth a node. Checking moves and promotions
         // are exempt -- their value is not bounded by the material they capture -- and
@@ -2207,7 +3067,9 @@ fn quiescence(
             && mv.flag().promotion().is_none()
             && !is_mate_score(alpha)
             && raw_static_eval + QSEARCH_DELTA_MARGIN + captured_material(position, mv) <= alpha
-            && !move_gives_check(position, mv)
+            && !check_info
+                .get_or_insert_with(|| CheckInfo::new(position))
+                .gives_check(position, mv)
         {
             continue;
         }
@@ -2241,9 +3103,11 @@ fn quiescence(
         if score > best_score {
             best_score = score;
             best_move = Some(mv);
-            pv.clear();
-            pv.push(mv);
-            pv.extend_from_slice(&child_pv);
+            // Same gate as the interior search: the PV is an output consumed only
+            // through the PV-node chain rooted at the root search.
+            if pv_node {
+                pv.load(mv, &child_pv);
+            }
         }
         alpha = alpha.max(score);
         if alpha >= beta {
@@ -2255,11 +3119,14 @@ fn quiescence(
         best_score
     } else if in_check {
         // A checkmate is exact at any depth, so it is stored under the checks domain and
-        // is legitimately readable by capture-domain probes as well.
+        // is legitimately readable by capture-domain probes as well. The in-check node
+        // searched EVERY evasion, so "none searched" is a real mate.
         -MATE_SCORE + ply as i32
-    } else if has_legal_move(position) {
+    } else if has_legal_move_in_place(position) {
         best_score
     } else {
+        // Same captures-first probe as the stand-pat exit: a captureless leaf with no
+        // legal move at all is a stalemate, scored as the draw it is.
         0
     };
 
@@ -2356,6 +3223,60 @@ fn scaled_time_percent(stability_percent: u32, effort_percent: u32) -> u32 {
     (stability_percent * effort_percent / 100).min(TIME_SCALE_MAX_PERCENT)
 }
 
+fn interpolate(x: f64, x0: f64, x1: f64, y0: f64, y1: f64) -> f64 {
+    y0 + (x - x0) * (y1 - y0) / (x1 - x0)
+}
+
+fn falling_eval_factor(previous_average: i32, older_score: i32, best_score: i32) -> f64 {
+    ((11.48
+        + 2.30 * (f64::from(previous_average) - f64::from(best_score))
+        + 1.1 * (f64::from(older_score) - f64::from(best_score)))
+        / 100.0)
+        .clamp(0.576, 1.728)
+}
+
+fn time_reduction_factor(depth_since_change: u32) -> f64 {
+    interpolate(f64::from(depth_since_change), 4.96, 18.79, 0.639, 1.712).clamp(0.629, 1.544)
+}
+
+fn stability_time_factor(depth_since_change: u32) -> f64 {
+    1.0 / time_reduction_factor(depth_since_change)
+}
+
+fn best_move_instability_factor(best_move_changes: u32, worker_count: usize) -> f64 {
+    1.077 + 2.229 * f64::from(best_move_changes) / worker_count.max(1) as f64
+}
+
+fn root_effort_factor(nodes_effort: u32) -> f64 {
+    interpolate(f64::from(nodes_effort), 75_800.0, 104_510.0, 0.969, 0.714).clamp(0.693, 0.838)
+}
+
+fn interpolated_time_scale_percent(
+    previous_average: i32,
+    older_score: i32,
+    best_score: i32,
+    depth_since_best_move_change: u32,
+    best_move_changes: u32,
+    worker_count: usize,
+    nodes_effort: u32,
+) -> u32 {
+    let scale = falling_eval_factor(previous_average, older_score, best_score)
+        * stability_time_factor(depth_since_best_move_change)
+        * best_move_instability_factor(best_move_changes, worker_count)
+        * root_effort_factor(nodes_effort);
+    (scale * 100.0)
+        .round()
+        .clamp(1.0, f64::from(TIME_SCALE_MAX_PERCENT)) as u32
+}
+
+fn interpolated_time_management_active(limits: &SearchLimits, options: &SearchOptions) -> bool {
+    options.use_interpolated_time_management && limits.use_clock_management && options.multi_pv == 1
+}
+
+fn search_again_depth_active(limits: &SearchLimits, options: &SearchOptions) -> bool {
+    options.use_search_again_depth && limits.use_clock_management && options.multi_pv == 1
+}
+
 /// Encodes a search depth into the biased `u8` the TT entry carries.
 #[inline]
 fn tt_stored_depth(depth: i32) -> u8 {
@@ -2412,7 +3333,7 @@ fn tt_cutoff_is_safe(
     let Some(tt_move) = entry.best_move else {
         return true;
     };
-    if !generate_legal_moves(position).contains(&tt_move) {
+    if !is_legal(position, tt_move) {
         return true;
     }
 
@@ -2448,6 +3369,10 @@ fn razoring_margin(parameters: &SearchParameters, depth: i32) -> i32 {
 ///
 /// `improving` shortens the effective depth by a ply, because a node whose eval is
 /// rising is likelier to hold up; a node the TT marked PV pays a surcharge.
+///
+/// `corrplexity` is the corrhist blend's magnitude: a large learned residual means the
+/// static eval is unreliable here, so the cutoff demands a larger margin before it
+/// trusts that eval to stand in for a search.
 #[inline]
 fn reverse_futility_margin(
     parameters: &SearchParameters,
@@ -2455,10 +3380,12 @@ fn reverse_futility_margin(
     improving: bool,
     cut_node: bool,
     tt_pv: bool,
+    corrplexity: i32,
 ) -> i32 {
     let effective_depth = depth - i32::from(improving && !cut_node);
     parameters.rfp_margin_per_depth * effective_depth.max(0)
         + parameters.rfp_tt_pv_margin * i32::from(tt_pv)
+        + corrplexity / parameters.rfp_corrplexity_divisor
 }
 
 #[inline]
@@ -2501,6 +3428,7 @@ fn late_move_reduction(
     cut_node: bool,
     tt_pv: bool,
     history_score: i32,
+    corrplexity: i32,
 ) -> i32 {
     let depth_index = depth.clamp(1, MAX_SEARCH_PLY as i32) as usize;
     let move_index = move_count.clamp(1, MAX_SEARCH_PLY);
@@ -2516,6 +3444,10 @@ fn late_move_reduction(
         reduction -= parameters.lmr_tt_pv_reduction;
     }
     reduction -= history_score * parameters.lmr_history_numerator / 4096;
+    // A large corrhist residual marks the position as one the static eval keeps
+    // getting wrong, so a late move here is searched less shallowly than the table
+    // alone would say (reference: `r -= ... |correctionValue| / 26310`).
+    reduction -= corrplexity / parameters.lmr_corrplexity_divisor;
     reduction.max(0)
 }
 
@@ -2562,6 +3494,7 @@ fn capture_late_move_reduction(
     tt_pv: bool,
     captured_material: i32,
     capture_history: i32,
+    corrplexity: i32,
 ) -> i32 {
     late_move_reduction(
         table,
@@ -2572,6 +3505,7 @@ fn capture_late_move_reduction(
         cut_node,
         tt_pv,
         capture_stat_score(parameters, captured_material, capture_history),
+        corrplexity,
     )
 }
 
@@ -2716,6 +3650,20 @@ fn singular_beta(
             / 63
 }
 
+/// The ttMove-history term subtracted from the singular double-extension margin.
+///
+/// A TT move that keeps being best raises the scalar and SHRINKS the margin, making the
+/// double extension harder to earn: a reliably-best TT move needs no extra depth to be
+/// trusted. This is the scalar's ONLY consumer, and the read is what
+/// `use_tt_move_history` gates; maintenance is unconditional.
+#[inline]
+fn tt_move_history_margin_adjustment(options: &SearchOptions, history: &TtMoveHistory) -> i32 {
+    if !options.use_tt_move_history {
+        return 0;
+    }
+    TT_MOVE_HISTORY_MARGIN_NUMERATOR * history.value() / TT_MOVE_HISTORY_MARGIN_DIVISOR
+}
+
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn singular_extension(
@@ -2727,11 +3675,18 @@ fn singular_extension(
     cut_node: bool,
     tt_score: i32,
     beta: i32,
+    double_margin_adjustment: i32,
+    corrplexity: i32,
 ) -> i32 {
     if value < singular_beta {
+        // A large corrhist residual shrinks the margin like a reliable ttMove-history
+        // scalar does: where the static eval is untrustworthy, extra depth on the
+        // singular move is cheap insurance (reference: `- |correctionValue| / 198368`).
         let double_margin = parameters.singular_double_margin
             + parameters.singular_double_margin_pv_bonus * i32::from(pv_node)
-            + parameters.singular_double_margin_quiet_bonus * i32::from(!tt_capture);
+            + parameters.singular_double_margin_quiet_bonus * i32::from(!tt_capture)
+            - double_margin_adjustment
+            - corrplexity / parameters.singular_corrplexity_divisor;
         1 + i32::from(value < singular_beta - double_margin)
     } else if tt_score >= beta && !is_mate_score(value) {
         -3
@@ -2792,6 +3747,113 @@ fn has_other_non_pawn_material(position: &Position, color: Color, mv: Move) -> b
         let count = position.pieces(color, kind).count();
         count > u32::from(kind == moved_kind)
     })
+}
+
+/// Per-node cache answering "does this move give check?" (the reference engine's
+/// `CheckInfo` pattern).
+///
+/// [`move_gives_check`] rebuilds occupancy and five attack sets per MOVE; this builds
+/// them once per NODE and answers each normal move with two bitboard tests. Castling,
+/// en passant, and promotions still take the slow path: each changes the board in a
+/// way the cached sets cannot describe (a rook appears mid-line, a captured pawn
+/// vanishes from a third square, the arriving piece changes kind).
+pub(crate) struct CheckInfo {
+    enemy_king: Option<Square>,
+    /// Squares from which a piece of each kind checks the enemy king, given the
+    /// occupancy at node entry.
+    check_squares: [Bitboard; 6],
+    /// Pieces (of either colour) that are the sole blocker between one of the moving
+    /// side's sliders and the enemy king. Only the mover's own pieces can ever
+    /// coincide with a move's origin square, so enemy blockers are harmless here.
+    discovered_candidates: Bitboard,
+}
+
+impl CheckInfo {
+    pub(crate) fn new(position: &Position) -> Self {
+        let color = position.side_to_move();
+        let Some(enemy_king) = position.pieces(!color, PieceKind::King).first() else {
+            return Self {
+                enemy_king: None,
+                check_squares: [Bitboard::EMPTY; 6],
+                discovered_candidates: Bitboard::EMPTY,
+            };
+        };
+        let occupancy = position.occupancy();
+        let bishop_rays = bishop_attacks(enemy_king, occupancy);
+        let rook_rays = rook_attacks(enemy_king, occupancy);
+        let mut check_squares = [Bitboard::EMPTY; 6];
+        check_squares[PieceKind::Pawn.index()] = pawn_attacks(enemy_king, !color);
+        check_squares[PieceKind::Knight.index()] = knight_attacks(enemy_king);
+        check_squares[PieceKind::Bishop.index()] = bishop_rays;
+        check_squares[PieceKind::Rook.index()] = rook_rays;
+        check_squares[PieceKind::Queen.index()] = bishop_rays | rook_rays;
+        check_squares[PieceKind::King.index()] = king_attacks(enemy_king);
+
+        let straight =
+            position.pieces(color, PieceKind::Rook) | position.pieces(color, PieceKind::Queen);
+        let diagonal =
+            position.pieces(color, PieceKind::Bishop) | position.pieces(color, PieceKind::Queen);
+        let snipers = (rook_attacks(enemy_king, Bitboard::EMPTY) & straight)
+            | (bishop_attacks(enemy_king, Bitboard::EMPTY) & diagonal);
+        let mut discovered_candidates = Bitboard::EMPTY;
+        for sniper in snipers {
+            let blockers = between_squares(sniper, enemy_king) & occupancy;
+            if blockers.count() == 1 {
+                discovered_candidates |= blockers;
+            }
+        }
+        Self {
+            enemy_king: Some(enemy_king),
+            check_squares,
+            discovered_candidates,
+        }
+    }
+
+    /// Answers exactly as [`move_gives_check`] would for any move of the position this
+    /// cache was built from; the parity test below pins that over every pseudo-legal
+    /// move of a random-walk corpus.
+    ///
+    /// A direct check reads the cached attack set of the moving kind. A discovered
+    /// check happens when the origin square is a sole blocker and the move leaves the
+    /// blocked line; a move ALONG the line keeps blocking it (a slider cannot cross
+    /// the endpoints, a knight is never collinear with its origin), and any check the
+    /// arriving piece then gives is the direct test's to answer.
+    #[inline]
+    pub(crate) fn gives_check(&self, position: &Position, mv: Move) -> bool {
+        let flag = mv.flag();
+        if flag.is_castling() || flag.is_en_passant() || flag.promotion().is_some() {
+            return move_gives_check(position, mv);
+        }
+        let Some(enemy_king) = self.enemy_king else {
+            return false;
+        };
+        let moved = position
+            .piece_at(mv.from())
+            .expect("candidate move must have a moving piece");
+        self.check_squares[moved.kind().index()].contains(mv.to())
+            || (self.discovered_candidates.contains(mv.from())
+                && !collinear(mv.from(), mv.to(), enemy_king))
+    }
+}
+
+/// Squares strictly between two squares known to share a rank, file, or diagonal.
+fn between_squares(a: Square, b: Square) -> Bitboard {
+    if a.file() == b.file() || a.rank() == b.rank() {
+        rook_attacks(a, b.bitboard()) & rook_attacks(b, a.bitboard())
+    } else {
+        bishop_attacks(a, b.bitboard()) & bishop_attacks(b, a.bitboard())
+    }
+}
+
+/// Whether three squares lie on one line. Callers pass two squares already known to
+/// share a chess line (rank, file, or diagonal), so plain collinearity is exact: every
+/// lattice point on a line of slope 0, infinity, or +/-1 is a square of that line.
+#[inline]
+fn collinear(a: Square, b: Square, c: Square) -> bool {
+    let (af, ar) = (i32::from(a.file()), i32::from(a.rank()));
+    let (bf, br) = (i32::from(b.file()), i32::from(b.rank()));
+    let (cf, cr) = (i32::from(c.file()), i32::from(c.rank()));
+    (bf - af) * (cr - ar) == (br - ar) * (cf - af)
 }
 
 #[inline]
@@ -2916,6 +3978,9 @@ fn update_histories(
     if quiet {
         context.killers.record_killer(ply, cutoff_move);
         history.update_butterfly(mover, cutoff_move, bonus);
+        // Low-ply history follows the butterfly bonus/malus stream at plies below 5;
+        // `update` is a no-op deeper down.
+        context.low_ply_history.update(ply, cutoff_move, bonus);
         let planes = context.continuation_planes(ply);
         if let Some(piece) = position.piece_at(cutoff_move.from()) {
             history.update_pawn(pawn_key, piece, cutoff_move.to(), bonus);
@@ -2923,6 +3988,7 @@ fn update_histories(
         }
         for &previous in searched_quiets {
             history.update_butterfly(mover, previous, malus);
+            context.low_ply_history.update(ply, previous, malus);
             if let Some(piece) = position.piece_at(previous.from()) {
                 history.update_pawn(pawn_key, piece, previous.to(), malus);
                 update_continuation_histories(history, &planes, piece, previous.to(), malus);
@@ -3013,6 +4079,37 @@ fn correction_value(position: &Position, context: &SearchContext<'_>, ply: usize
         }
     }
     value + CORRECTION_CONTINUATION_WEIGHT * continuation
+}
+
+#[cfg(feature = "corrhist-regression")]
+fn correction_features(
+    position: &Position,
+    context: &SearchContext<'_>,
+    ply: usize,
+) -> CorrectionFeatures {
+    let color = position.side_to_move();
+    let source = |index| {
+        context
+            .history
+            .correction_score(index, correction_key(position, index), color) as i16
+    };
+    let entry = context.previous_continuation_key(ply);
+    let planes = context.correction_continuation_planes(ply);
+    let continuation_at = |slot| match (planes[slot], entry) {
+        (Some(plane), Some(entry)) => context
+            .history
+            .correction_continuation_score(slot, plane, entry)
+            as i16,
+        _ => 0,
+    };
+    CorrectionFeatures {
+        pawn: source(CORRECTION_PAWN),
+        minor: source(CORRECTION_MINOR),
+        major: source(CORRECTION_MAJOR),
+        material: source(CORRECTION_MATERIAL),
+        continuation_2: continuation_at(0),
+        continuation_4: continuation_at(1),
+    }
 }
 
 /// Applies the learned residual to a static evaluation.
@@ -3208,6 +4305,67 @@ fn value_from_tt(score: i32, ply: usize, rule50: u16) -> i32 {
     score
 }
 
+#[derive(Default)]
+struct RootTimeStatistics {
+    effort: Vec<(Move, u64)>,
+    total_effort: u64,
+    current_best_move: Option<Move>,
+    best_move_changes: u32,
+}
+
+impl RootTimeStatistics {
+    fn begin_iteration(&mut self, interpolated: bool) {
+        if interpolated {
+            self.effort.clear();
+            self.total_effort = 0;
+            self.current_best_move = None;
+            self.best_move_changes = 0;
+        }
+    }
+
+    fn begin_root_search(&mut self, interpolated: bool) {
+        if !interpolated {
+            self.effort.clear();
+            self.total_effort = 0;
+        }
+    }
+
+    fn record_effort(&mut self, mv: Move, nodes: u64) {
+        self.total_effort = self.total_effort.saturating_add(nodes);
+        if let Some(entry) = self.effort.iter_mut().find(|(move_, _)| *move_ == mv) {
+            entry.1 = entry.1.saturating_add(nodes);
+        } else {
+            self.effort.push((mv, nodes));
+        }
+    }
+
+    fn record_best_move(&mut self, mv: Move, line_one: bool, interpolated: bool) {
+        if !interpolated || !line_one {
+            return;
+        }
+        if self.current_best_move.is_some_and(|current| current != mv) {
+            self.best_move_changes = self.best_move_changes.saturating_add(1);
+        }
+        self.current_best_move = Some(mv);
+    }
+
+    fn nodes_effort(&self, best_move: Option<Move>) -> u32 {
+        if self.total_effort == 0 {
+            return 0;
+        }
+        let Some(best_move) = best_move else {
+            return 0;
+        };
+        let best_nodes = self
+            .effort
+            .iter()
+            .find(|(move_, _)| *move_ == best_move)
+            .map_or(0, |(_, nodes)| *nodes);
+        ((u128::from(best_nodes.min(self.total_effort)) * 100_000) / u128::from(self.total_effort))
+            as u32
+    }
+}
+
 struct SearchContext<'a> {
     transposition_table: &'a TranspositionTable,
     stop: &'a AtomicBool,
@@ -3219,13 +4377,20 @@ struct SearchContext<'a> {
     lmr_table: [i32; LMR_TABLE_SIZE],
     started: Option<Instant>,
     worker_id: usize,
-    node_counters: &'a [AtomicU64],
+    node_counters: &'a [NodeCounter],
     nodes: u64,
     seldepth: u32,
     iterations: Vec<IterationInfo>,
     history: &'a SharedHistory,
     evaluator: SearchEvaluator<'a>,
     killers: KillerTable,
+    /// Per-worker low-ply ordering history, owned by the worker loop and refilled with
+    /// its prior between root iterations. Borrowed rather than owned so `ordering` can
+    /// hand the move picker a reference that does not borrow the whole context.
+    low_ply_history: &'a LowPlyHistory,
+    /// Per-worker "is my TT move usually best right now?" scalar. Fresh per search,
+    /// like `killers`.
+    tt_move_history: TtMoveHistory,
     static_evals: [Option<i32>; MAX_SEARCH_PLY],
     repetition_history: RepetitionHistory,
     current_moves: [Option<Move>; MAX_SEARCH_PLY],
@@ -3235,18 +4400,21 @@ struct SearchContext<'a> {
     /// move" is meaningless when the opponent did not move.
     continuation_keys: [Option<ContinuationKey>; MAX_SEARCH_PLY],
     nmp_min_ply: usize,
+    /// Syzygy tablebases, absent when the caller loaded none.
+    tablebases: Option<&'a Tablebases>,
+    /// Published tbhits slots parallel to `node_counters`, absent without tablebases.
+    tb_hit_counters: Option<&'a [NodeCounter]>,
+    /// This worker's successful tablebase probes.
+    tb_hits: u64,
+    /// Root moves the DTZ probe allows; when set, `root_search` skips every other move.
+    root_move_filter: Option<Vec<Move>>,
+    /// The `go ponder` latch, absent outside a ponder search.
+    ponder: Option<&'a PonderState>,
     stopped: bool,
     soft_time_reached: bool,
     /// Percentage the soft limit is scaled by, updated between iterations.
     time_scale_percent: u32,
-    /// Nodes spent under each root move during the CURRENT root search, and their sum.
-    ///
-    /// A flat vector rather than a map: a root move list is at most 218 entries and is
-    /// walked once per iteration, so a linear scan is cheaper than hashing. Reset at
-    /// the start of every root search, so an aspiration re-search replaces the previous
-    /// distribution rather than adding to it.
-    root_effort: Vec<(Move, u64)>,
-    root_effort_total: u64,
+    root_time_statistics: RootTimeStatistics,
     generation: u8,
     /// Sink for `currmove` progress, set only for the worker that owns the clock.
     ///
@@ -3254,6 +4422,8 @@ struct SearchContext<'a> {
     /// of the search; adding a type parameter for a callback used once per root move
     /// would infect the whole recursion for no benefit.
     root_move_reporter: Option<Box<dyn FnMut(RootMoveInfo) + 'a>>,
+    #[cfg(feature = "corrhist-regression")]
+    correction_sample_reporter: Option<Box<dyn FnMut(CorrectionSample) + 'a>>,
 }
 
 impl<'a> SearchContext<'a> {
@@ -3266,10 +4436,11 @@ impl<'a> SearchContext<'a> {
         position: &Position,
         position_history: &[u64],
         history: &'a SharedHistory,
+        low_ply_history: &'a LowPlyHistory,
         options: SearchOptions,
         worker_id: usize,
         generation: u8,
-        node_counters: &'a [AtomicU64],
+        node_counters: &'a [NodeCounter],
         network: &'a Network,
     ) -> Self {
         Self {
@@ -3287,18 +4458,26 @@ impl<'a> SearchContext<'a> {
             history,
             evaluator: SearchEvaluator::new(network, position),
             killers: KillerTable::new(),
+            low_ply_history,
+            tt_move_history: TtMoveHistory::new(),
             static_evals: [None; MAX_SEARCH_PLY],
             repetition_history: RepetitionHistory::new(position, position_history),
             current_moves: [None; MAX_SEARCH_PLY],
             continuation_keys: [None; MAX_SEARCH_PLY],
             nmp_min_ply: 0,
+            tablebases: None,
+            tb_hit_counters: None,
+            tb_hits: 0,
+            root_move_filter: None,
+            ponder: None,
             stopped: false,
             soft_time_reached: false,
             time_scale_percent: 100,
-            root_effort: Vec::new(),
-            root_effort_total: 0,
+            root_time_statistics: RootTimeStatistics::default(),
             generation,
             root_move_reporter: None,
+            #[cfg(feature = "corrhist-regression")]
+            correction_sample_reporter: None,
         }
     }
 
@@ -3325,12 +4504,15 @@ impl<'a> SearchContext<'a> {
     fn ordering(&self, position: &Position, ply: usize) -> OrderingContext<'a> {
         OrderingContext {
             history: self.history,
+            low_ply_history: self.low_ply_history,
+            ply,
             pawn_key: position.zobrist().pawn(),
             continuation: self.continuation_planes(ply),
             use_butterfly_history: self.options.use_butterfly_history,
             use_capture_history: self.options.use_capture_history,
             use_pawn_history: self.options.use_pawn_history,
             use_continuation_history: self.options.use_continuation_history,
+            use_low_ply_history: self.options.use_low_ply_history,
         }
     }
 
@@ -3360,11 +4542,14 @@ impl<'a> SearchContext<'a> {
                 return false;
             }
         }
-        if self.worker_id == 0 && self.nodes.is_multiple_of(TIME_CHECK_INTERVAL) {
+        if self.worker_id == 0
+            && self.nodes.is_multiple_of(TIME_CHECK_INTERVAL)
+            // A pondering search must not answer, so its time budget is not in force:
+            // the clock only starts when `ponderhit` re-bases it.
+            && !self.is_pondering()
+        {
             let elapsed = self.elapsed();
-            self.soft_time_reached = self
-                .scaled_soft_time()
-                .is_some_and(|limit| elapsed >= limit);
+            self.recompute_soft_time_reached();
             if self.limits.hard_time.is_some_and(|limit| elapsed >= limit) {
                 self.stopped = true;
                 return false;
@@ -3373,10 +4558,15 @@ impl<'a> SearchContext<'a> {
         true
     }
 
+    /// Whether the attached `go ponder` latch, if any, is still armed.
+    fn is_pondering(&self) -> bool {
+        self.ponder.is_some_and(PonderState::is_pondering)
+    }
+
     fn should_stop_after_iteration(&self) -> bool {
         self.stopped
             || self.limits.nodes.is_some_and(|limit| self.nodes >= limit)
-            || self.soft_time_reached
+            || (self.soft_time_reached && !self.is_pondering())
     }
 
     /// Sets the percentage the soft limit is scaled by before the next iteration.
@@ -3384,20 +4574,30 @@ impl<'a> SearchContext<'a> {
         self.time_scale_percent = percent;
     }
 
+    fn uses_interpolated_time_management(&self) -> bool {
+        interpolated_time_management_active(&self.limits, &self.options)
+    }
+
+    fn begin_root_iteration(&mut self) {
+        let interpolated = self.uses_interpolated_time_management();
+        self.root_time_statistics.begin_iteration(interpolated);
+    }
+
     /// Discards the previous root search's per-move node distribution.
     fn begin_root_effort(&mut self) {
-        self.root_effort.clear();
-        self.root_effort_total = 0;
+        let interpolated = self.uses_interpolated_time_management();
+        self.root_time_statistics.begin_root_search(interpolated);
     }
 
     /// Credits `nodes` to `mv`'s subtree in the current root search.
     fn record_root_effort(&mut self, mv: Move, nodes: u64) {
-        self.root_effort_total = self.root_effort_total.saturating_add(nodes);
-        if let Some(entry) = self.root_effort.iter_mut().find(|(move_, _)| *move_ == mv) {
-            entry.1 = entry.1.saturating_add(nodes);
-        } else {
-            self.root_effort.push((mv, nodes));
-        }
+        self.root_time_statistics.record_effort(mv, nodes);
+    }
+
+    fn record_root_best_move(&mut self, mv: Move, line_one: bool) {
+        let interpolated = self.uses_interpolated_time_management();
+        self.root_time_statistics
+            .record_best_move(mv, line_one, interpolated);
     }
 
     /// The effort factor for the move the finished iteration chose.
@@ -3416,11 +4616,12 @@ impl<'a> SearchContext<'a> {
             return TIME_EFFORT_NEUTRAL_PERCENT;
         };
         let best_nodes = self
-            .root_effort
+            .root_time_statistics
+            .effort
             .iter()
             .find(|(move_, _)| *move_ == best_move)
             .map_or(0, |(_, nodes)| *nodes);
-        time_effort_percent(best_nodes, self.root_effort_total)
+        time_effort_percent(best_nodes, self.root_time_statistics.total_effort)
     }
 
     /// The soft limit actually in force, after stability scaling.
@@ -3438,8 +4639,21 @@ impl<'a> SearchContext<'a> {
         })
     }
 
+    fn recompute_soft_time_reached(&mut self) {
+        if self.is_pondering() {
+            self.soft_time_reached = false;
+            return;
+        }
+        self.soft_time_reached = self
+            .scaled_soft_time()
+            .is_some_and(|limit| self.elapsed() >= limit);
+    }
+
     fn publish_nodes(&self) {
         self.node_counters[self.worker_id].store(self.nodes, Ordering::Relaxed);
+        if let Some(counters) = self.tb_hit_counters {
+            counters[self.worker_id].store(self.tb_hits, Ordering::Relaxed);
+        }
     }
 
     fn reported_nodes(&self) -> u64 {
@@ -3450,9 +4664,23 @@ impl<'a> SearchContext<'a> {
         }
     }
 
+    fn reported_tb_hits(&self) -> u64 {
+        match self.tb_hit_counters {
+            Some(counters) if self.worker_id == 0 => published_node_total(counters),
+            _ => self.tb_hits,
+        }
+    }
+
     fn elapsed(&self) -> Duration {
-        self.started
-            .map_or(Duration::ZERO, |started| started.elapsed())
+        // A ponder search's time budget counts from `ponderhit`, not from spawn: the
+        // engine was thinking on the opponent's time until the predicted move was
+        // actually played. Until the latch flips (and when there is no latch) the spawn
+        // instant stands.
+        let started = self
+            .ponder
+            .and_then(PonderState::rebased_start)
+            .or(self.started);
+        started.map_or(Duration::ZERO, |started| started.elapsed())
     }
 
     fn push_position(
@@ -3588,6 +4816,116 @@ mod tests {
         build_lmr_table(&shipped())
     }
 
+    #[test]
+    fn search_again_counter_repeats_depth_before_advancing() {
+        let effective_depths = (5..=12)
+            .zip(1..=8)
+            .map(|(nominal, counter)| effective_search_depth(nominal, counter, true))
+            .collect::<Vec<_>>();
+
+        assert_eq!(effective_depths, [4, 4, 4, 5, 5, 5, 5, 6]);
+    }
+
+    #[test]
+    fn effective_depth_never_falls_below_one() {
+        assert_eq!(effective_search_depth(1, u32::MAX, true), 1);
+        assert_eq!(effective_search_depth(2, u32::MAX, true), 1);
+    }
+
+    #[test]
+    fn disabled_search_again_depth_returns_the_nominal_depth() {
+        assert_eq!(effective_search_depth(17, u32::MAX, false), 17);
+    }
+
+    #[test]
+    fn false_decision_increments_before_the_next_effective_depth_is_computed() {
+        assert_eq!(search_again_iteration(8, 0, true, false), (1, 7));
+    }
+
+    #[test]
+    fn search_again_depth_activation_is_strictly_timed_single_pv() {
+        let options = SearchOptions {
+            use_search_again_depth: true,
+            ..SearchOptions::default()
+        };
+        let timed = SearchLimits {
+            soft_time: Some(Duration::from_millis(100)),
+            hard_time: Some(Duration::from_millis(400)),
+            use_clock_management: true,
+            ..SearchLimits::default()
+        };
+
+        assert!(search_again_depth_active(&timed, &options));
+        assert!(!search_again_depth_active(
+            &SearchLimits {
+                use_clock_management: false,
+                ..timed
+            },
+            &options
+        ));
+        assert!(!search_again_depth_active(
+            &timed,
+            &SearchOptions {
+                multi_pv: 2,
+                ..options
+            }
+        ));
+        assert!(!search_again_depth_active(
+            &timed,
+            &SearchOptions {
+                use_search_again_depth: false,
+                ..options
+            }
+        ));
+    }
+
+    #[test]
+    fn ponder_searches_always_allow_depth_growth() {
+        assert!(should_increase_search_depth(
+            true,
+            Duration::from_secs(10),
+            Some(Duration::from_millis(100))
+        ));
+    }
+
+    #[test]
+    fn late_timed_iteration_repeats_effective_depth_next() {
+        assert!(!should_increase_search_depth(
+            false,
+            Duration::from_millis(51),
+            Some(Duration::from_millis(100))
+        ));
+        assert!(should_increase_search_depth(
+            false,
+            Duration::from_millis(50),
+            Some(Duration::from_millis(100))
+        ));
+    }
+
+    #[test]
+    fn interpolated_scale_precedes_the_search_again_depth_decision() {
+        let nominal_soft_time = Duration::from_millis(100);
+        let scale = interpolated_time_scale_percent(0, 0, 0, 0, 0, 1, 75_800);
+        let scaled_soft_time = nominal_soft_time.saturating_mul(scale) / 100;
+        let elapsed = Duration::from_millis(45);
+
+        assert_eq!(scale, 83);
+        assert!(should_increase_search_depth(
+            false,
+            elapsed,
+            Some(nominal_soft_time)
+        ));
+        assert!(!should_increase_search_depth(
+            false,
+            elapsed,
+            Some(scaled_soft_time)
+        ));
+
+        let first = search_again_iteration(7, 0, true, true);
+        let second = search_again_iteration(8, first.0, true, false);
+        assert_eq!((first.1, second.1), (7, 7));
+    }
+
     fn local_network() -> Option<&'static mf_nnue::Network> {
         static NETWORK: OnceLock<Option<mf_nnue::Network>> = OnceLock::new();
         NETWORK
@@ -3602,6 +4940,110 @@ mod tests {
                 }))
             })
             .as_ref()
+    }
+
+    #[test]
+    fn multipv_exclusion_filter_removes_found_moves_from_the_existing_allowed_set() {
+        let legal_moves = generate_legal_moves(&Position::startpos());
+        let base_allowed = vec![legal_moves[1], legal_moves[3], legal_moves[5]];
+        let found = [legal_moves[1], legal_moves[5]];
+
+        assert_eq!(
+            multipv_allowed_moves(&legal_moves, Some(&base_allowed), &found),
+            vec![legal_moves[3]]
+        );
+        assert_eq!(
+            multipv_allowed_moves(&legal_moves, None, &found),
+            legal_moves
+                .iter()
+                .copied()
+                .filter(|mv| !found.contains(mv))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn interrupted_secondary_pass_keeps_the_current_depth_primary_result() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position = Position::startpos();
+        let expected_table = TranspositionTable::new(1).expect("test TT should allocate");
+        let expected = search(
+            &position,
+            &expected_table,
+            SearchLimits {
+                depth: Some(1),
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            network,
+        );
+        assert!(
+            expected.nodes < 30,
+            "the node limit must leave room to begin a secondary pass"
+        );
+
+        let interrupted_table = TranspositionTable::new(1).expect("test TT should allocate");
+        let interrupted = search(
+            &position,
+            &interrupted_table,
+            SearchLimits {
+                nodes: Some(30),
+                ..SearchLimits::default()
+            },
+            SearchOptions {
+                multi_pv: 2,
+                ..SearchOptions::default()
+            },
+            network,
+        );
+
+        assert_eq!(interrupted.nodes, 30);
+        assert_eq!(interrupted.depth, expected.depth);
+        assert_eq!(interrupted.score, expected.score);
+        assert_eq!(interrupted.best_move, expected.best_move);
+        assert_eq!(interrupted.pv, expected.pv);
+        assert_eq!(interrupted.iterations.len(), 1);
+        assert_eq!(interrupted.iterations[0].multipv_index, 1);
+        assert_eq!(interrupted.iterations[0].pv, expected.pv);
+        assert_eq!(
+            interrupted_table
+                .probe(tt_key(&position, interrupted.depth as i32))
+                .expect("interrupted root search should leave a TT entry")
+                .best_move,
+            expected.best_move
+        );
+    }
+
+    #[test]
+    fn multipv_secondary_passes_leave_the_primary_move_in_the_root_tt() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position = Position::startpos();
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let result = search(
+            &position,
+            &table,
+            SearchLimits {
+                depth: Some(4),
+                ..SearchLimits::default()
+            },
+            SearchOptions {
+                multi_pv: 3,
+                ..SearchOptions::default()
+            },
+            network,
+        );
+
+        assert_eq!(
+            table
+                .probe(tt_key(&position, result.depth as i32))
+                .expect("root search should leave a TT entry")
+                .best_move,
+            result.best_move
+        );
     }
 
     #[test]
@@ -3688,9 +5130,10 @@ mod tests {
         let mut position = Position::startpos();
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
@@ -3699,6 +5142,7 @@ mod tests {
             &position,
             &history,
             &shared_history,
+            &low_ply_history,
             SearchOptions::default(),
             0,
             0,
@@ -3763,9 +5207,10 @@ mod tests {
                 Position::from_fen(fen, chess960).expect("verification FEN should parse");
             let table = TranspositionTable::new(4).expect("test TT should allocate");
             let stop = AtomicBool::new(false);
-            let counters = [AtomicU64::new(0)];
+            let counters = [NodeCounter::new(0)];
             let history = [position.repetition_key()];
             let shared_history = SharedHistory::new();
+            let low_ply_history = LowPlyHistory::new();
             let mut context = SearchContext::new(
                 &table,
                 SearchLimits {
@@ -3777,6 +5222,7 @@ mod tests {
                 &position,
                 &history,
                 &shared_history,
+                &low_ply_history,
                 SearchOptions::default(),
                 0,
                 0,
@@ -3786,7 +5232,7 @@ mod tests {
             let root_state = context.evaluator.current().clone();
             context.evaluator.enable_verification();
 
-            let result = root_search(&position, 4, -INFINITY, INFINITY, &mut context);
+            let result = root_search(&position, 4, -INFINITY, INFINITY, true, &mut context);
 
             assert!(result.is_some());
             assert_eq!(context.evaluator.depth(), 0);
@@ -3834,7 +5280,7 @@ mod tests {
 
     #[test]
     fn aggregate_nodes_sum_published_worker_counts() {
-        let counters = [AtomicU64::new(10), AtomicU64::new(20)];
+        let counters = [NodeCounter::new(10), NodeCounter::new(20)];
         assert_eq!(published_node_total(&counters), 30);
     }
 
@@ -3887,7 +5333,7 @@ mod tests {
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
 
@@ -3919,9 +5365,10 @@ mod tests {
         let stop = AtomicBool::new(false);
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
 
         for limit in [1_023, 1_024, 1_025] {
-            let counters = [AtomicU64::new(0)];
+            let counters = [NodeCounter::new(0)];
             let mut context = SearchContext::new(
                 &table,
                 SearchLimits {
@@ -3933,6 +5380,7 @@ mod tests {
                 &position,
                 &history,
                 &shared_history,
+                &low_ply_history,
                 SearchOptions::default(),
                 0,
                 0,
@@ -3958,7 +5406,7 @@ mod tests {
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(1_000), AtomicU64::new(0)];
+        let counters = [NodeCounter::new(1_000), NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
 
@@ -3988,7 +5436,7 @@ mod tests {
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0), AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0), NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
 
@@ -4021,7 +5469,7 @@ mod tests {
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0), AtomicU64::new(37)];
+        let counters = [NodeCounter::new(0), NodeCounter::new(37)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
         let mut reported_nodes = None;
@@ -4051,7 +5499,7 @@ mod tests {
         let position = Position::startpos();
         let table = TranspositionTable::new(1).unwrap();
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
 
@@ -4265,26 +5713,137 @@ mod tests {
         // for 392cp at depth 1, which is most of a minor piece.
         let parameters = shipped();
         assert_eq!(
-            reverse_futility_margin(&parameters, 1, false, false, false),
+            reverse_futility_margin(&parameters, 1, false, false, false, 0),
             95
         );
         assert_eq!(
-            reverse_futility_margin(&parameters, 6, false, false, false),
+            reverse_futility_margin(&parameters, 6, false, false, false, 0),
             570
         );
         // A rising eval is worth a ply of margin, but not at an expected cut node.
         assert_eq!(
-            reverse_futility_margin(&parameters, 6, true, false, false),
+            reverse_futility_margin(&parameters, 6, true, false, false, 0),
             475
         );
         assert_eq!(
-            reverse_futility_margin(&parameters, 6, true, true, false),
+            reverse_futility_margin(&parameters, 6, true, true, false, 0),
             570
         );
         // A TT-PV node pays a surcharge.
         assert_eq!(
-            reverse_futility_margin(&parameters, 6, false, false, true),
+            reverse_futility_margin(&parameters, 6, false, false, true, 0),
             570 + 22
+        );
+    }
+
+    /// The complexity proxy must make the RFP cutoff HARDER and LMR SOFTER, never the
+    /// other way round: an unreliable eval is a reason to search more, not less.
+    #[test]
+    fn a_larger_correction_magnitude_never_shrinks_the_rfp_margin_or_deepens_lmr() {
+        let parameters = shipped();
+        let table = shipped_lmr_table();
+        // CORRECTION_MAX (1_024) saturated across every weighted source bounds the
+        // real blend; sweep to well past it so the property covers the whole range.
+        let magnitudes = [0, 50_000, 200_000, 400_000, 800_000, 1_600_000];
+        for window in magnitudes.windows(2) {
+            let (smaller, larger) = (window[0], window[1]);
+            assert!(
+                reverse_futility_margin(&parameters, 6, false, false, false, larger)
+                    >= reverse_futility_margin(&parameters, 6, false, false, false, smaller),
+                "a larger |correction| must never shrink the RFP margin"
+            );
+            assert!(
+                late_move_reduction(&table, &parameters, 8, 8, true, false, false, 0, larger)
+                    <= late_move_reduction(
+                        &table,
+                        &parameters,
+                        8,
+                        8,
+                        true,
+                        false,
+                        false,
+                        0,
+                        smaller
+                    ),
+                "a larger |correction| must never increase the LMR reduction"
+            );
+            assert!(
+                capture_late_move_reduction(
+                    &table,
+                    &parameters,
+                    12,
+                    12,
+                    true,
+                    false,
+                    false,
+                    100,
+                    0,
+                    larger
+                ) <= capture_late_move_reduction(
+                    &table,
+                    &parameters,
+                    12,
+                    12,
+                    true,
+                    false,
+                    false,
+                    100,
+                    0,
+                    smaller
+                ),
+                "a larger |correction| must never increase the capture LMR reduction"
+            );
+        }
+        // And the divisors actually bite: a magnitude past one divisor moves each site.
+        assert!(
+            reverse_futility_margin(&parameters, 6, false, false, false, 800_000)
+                > reverse_futility_margin(&parameters, 6, false, false, false, 0)
+        );
+        assert!(
+            late_move_reduction(&table, &parameters, 8, 8, true, false, false, 0, 800_000)
+                < late_move_reduction(&table, &parameters, 8, 8, true, false, false, 0, 0)
+        );
+    }
+
+    /// A large proxy must make the DOUBLE extension easier to earn (margin shrinks),
+    /// and must never turn an extension into a reduction elsewhere in the ladder.
+    #[test]
+    fn a_larger_correction_magnitude_only_widens_the_singular_double_extension() {
+        let parameters = shipped();
+        let singular_beta = singular_beta(&parameters, 200, 8, false, false);
+        // 10 below singular_beta: inside the shipped 16-point margin (single
+        // extension), outside it once the proxy shrinks the margin below 10.
+        let value = singular_beta - 10;
+        assert_eq!(
+            singular_extension(
+                &parameters,
+                value,
+                singular_beta,
+                false,
+                true,
+                false,
+                200,
+                300,
+                0,
+                0
+            ),
+            1
+        );
+        assert_eq!(
+            singular_extension(
+                &parameters,
+                value,
+                singular_beta,
+                false,
+                true,
+                false,
+                200,
+                300,
+                0,
+                4_000_000
+            ),
+            2,
+            "a large |correction| must shrink the double margin and earn the second ply"
         );
     }
 
@@ -4336,9 +5895,10 @@ mod tests {
         let key = position.repetition_key();
         let history = [key; 6];
         let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0)];
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
@@ -4347,6 +5907,7 @@ mod tests {
             &position,
             &history,
             &shared_history,
+            &low_ply_history,
             SearchOptions::default(),
             0,
             0,
@@ -4396,6 +5957,7 @@ mod tests {
                 cut,
                 tt_pv,
                 history,
+                0,
             )
         };
         let baseline = reduction(8, 8, true, false, false, 0);
@@ -4422,13 +5984,24 @@ mod tests {
         let table = shipped_lmr_table();
         let parameters = shipped();
         let capture = |victim| {
-            capture_late_move_reduction(&table, &parameters, 12, 12, true, false, false, victim, 0)
+            capture_late_move_reduction(
+                &table,
+                &parameters,
+                12,
+                12,
+                true,
+                false,
+                false,
+                victim,
+                0,
+                0,
+            )
         };
         let pawn = capture(material_value(PieceKind::Pawn));
         let knight = capture(material_value(PieceKind::Knight));
         let rook = capture(material_value(PieceKind::Rook));
         let queen = capture(material_value(PieceKind::Queen));
-        let quiet = late_move_reduction(&table, &parameters, 12, 12, true, false, false, 0);
+        let quiet = late_move_reduction(&table, &parameters, 12, 12, true, false, false, 0, 0);
 
         assert!(queen < rook && rook < knight && knight < pawn);
         // Even the cheapest victim buys some protection relative to a no-history quiet.
@@ -4469,6 +6042,7 @@ mod tests {
                 tt_pv,
                 pawn,
                 history,
+                0,
             )
         };
         let baseline = reduction(12, 12, true, false, false, 0);
@@ -4505,9 +6079,20 @@ mod tests {
                     true,
                     false,
                     victim,
-                    history
+                    history,
+                    0
                 ),
-                late_move_reduction(&table, &parameters, 14, 9, false, true, false, stat_score)
+                late_move_reduction(
+                    &table,
+                    &parameters,
+                    14,
+                    9,
+                    false,
+                    true,
+                    false,
+                    stat_score,
+                    0
+                )
             );
         }
     }
@@ -4773,6 +6358,137 @@ mod tests {
     }
 
     #[test]
+    fn interpolation_reaches_both_anchor_values() {
+        assert_eq!(interpolate(2.0, 2.0, 6.0, 10.0, 30.0), 10.0);
+        assert_eq!(interpolate(6.0, 2.0, 6.0, 10.0, 30.0), 30.0);
+    }
+
+    #[test]
+    fn interpolated_time_factors_are_clamped_to_reference_ranges() {
+        assert_eq!(falling_eval_factor(i32::MIN, i32::MIN, i32::MAX), 0.576);
+        assert_eq!(falling_eval_factor(i32::MAX, i32::MAX, i32::MIN), 1.728);
+        assert_eq!(time_reduction_factor(0), 0.629);
+        assert_eq!(time_reduction_factor(u32::MAX), 1.544);
+        assert_eq!(root_effort_factor(0), 0.838);
+        assert_eq!(root_effort_factor(u32::MAX), 0.693);
+    }
+
+    #[test]
+    fn interpolated_time_factor_is_converted_once_and_bounded() {
+        assert_eq!(
+            interpolated_time_scale_percent(0, 0, 0, 0, 0, 1, 75_800),
+            83
+        );
+        assert_eq!(
+            interpolated_time_scale_percent(i32::MAX, i32::MAX, i32::MIN, u32::MAX, u32::MAX, 1, 0),
+            TIME_SCALE_MAX_PERCENT
+        );
+    }
+
+    #[test]
+    fn falling_scores_receive_more_time_than_rising_scores() {
+        let falling = falling_eval_factor(100, 120, 0);
+        let unchanged = falling_eval_factor(100, 100, 100);
+        let rising = falling_eval_factor(0, -20, 100);
+
+        assert!(falling > unchanged);
+        assert!(unchanged >= rising);
+    }
+
+    #[test]
+    fn stable_best_moves_receive_less_time_than_recent_changes() {
+        assert!(stability_time_factor(18) < stability_time_factor(4));
+    }
+
+    #[test]
+    fn increasing_stable_duration_progressively_lowers_time() {
+        let factors = [0, 5, 10, 15, 20].map(stability_time_factor);
+        assert!(factors.windows(2).all(|pair| pair[1] < pair[0]));
+    }
+
+    #[test]
+    fn interpolated_time_management_requires_a_clock_managed_single_pv_search() {
+        let clock = SearchLimits {
+            use_clock_management: true,
+            ..SearchLimits::default()
+        };
+        let enabled = SearchOptions {
+            use_interpolated_time_management: true,
+            ..SearchOptions::default()
+        };
+
+        assert!(interpolated_time_management_active(&clock, &enabled));
+        assert!(!interpolated_time_management_active(
+            &SearchLimits::default(),
+            &enabled
+        ));
+        assert!(!interpolated_time_management_active(
+            &clock,
+            &SearchOptions {
+                multi_pv: 2,
+                ..enabled
+            }
+        ));
+    }
+
+    #[test]
+    fn concentrated_root_effort_receives_less_time() {
+        assert_eq!(root_effort_factor(75_800), 0.838);
+        assert_eq!(root_effort_factor(104_510), 0.714);
+        assert!(root_effort_factor(95_000) < root_effort_factor(75_800));
+    }
+
+    #[test]
+    fn aspiration_researches_accumulate_root_effort_when_interpolated_tm_is_enabled() {
+        let position = Position::startpos();
+        let moves = generate_legal_moves(&position);
+        let mut statistics = RootTimeStatistics::default();
+
+        statistics.begin_iteration(true);
+        statistics.begin_root_search(true);
+        statistics.record_effort(moves[0], 100);
+        statistics.begin_root_search(true);
+        statistics.record_effort(moves[0], 200);
+        statistics.record_effort(moves[1], 100);
+
+        assert_eq!(statistics.total_effort, 400);
+        assert_eq!(statistics.nodes_effort(Some(moves[0])), 75_000);
+    }
+
+    #[test]
+    fn legacy_mode_resets_root_effort_for_each_root_search() {
+        let position = Position::startpos();
+        let moves = generate_legal_moves(&position);
+        let mut statistics = RootTimeStatistics::default();
+
+        statistics.begin_root_search(false);
+        statistics.record_effort(moves[0], 100);
+        statistics.begin_root_search(false);
+        statistics.record_effort(moves[1], 50);
+
+        assert_eq!(statistics.total_effort, 50);
+        assert_eq!(statistics.nodes_effort(Some(moves[0])), 0);
+        assert_eq!(statistics.nodes_effort(Some(moves[1])), 100_000);
+    }
+
+    #[test]
+    fn root_best_move_replacements_increment_instability_only_for_line_one() {
+        let position = Position::startpos();
+        let moves = generate_legal_moves(&position);
+        let mut statistics = RootTimeStatistics::default();
+
+        statistics.begin_iteration(true);
+        statistics.record_best_move(moves[0], true, true);
+        statistics.record_best_move(moves[1], false, true);
+        statistics.record_best_move(moves[1], true, true);
+        statistics.record_best_move(moves[1], true, true);
+        statistics.record_best_move(moves[2], true, true);
+        statistics.record_best_move(moves[3], true, false);
+
+        assert_eq!(statistics.best_move_changes, 2);
+    }
+
+    #[test]
     fn the_effort_factor_extends_time_while_the_rivals_are_still_expensive() {
         // A best move owning half the tree or less leaves the other root moves costing
         // the other half: they are still being taken seriously, so keep thinking.
@@ -4825,9 +6541,10 @@ mod tests {
         };
         let position = Position::startpos();
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let mut context = SearchContext::new(
             &table,
@@ -4837,6 +6554,7 @@ mod tests {
             &position,
             &history,
             &shared_history,
+            &low_ply_history,
             // Explicitly ENABLED: the technique ships off after measuring -17.39 Elo,
             // and this test is about the factor's arithmetic, not its default.
             SearchOptions {
@@ -4886,9 +6604,10 @@ mod tests {
         };
         let position = Position::startpos();
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let mut context = SearchContext::new(
             &table,
@@ -4902,6 +6621,7 @@ mod tests {
             &position,
             &history,
             &shared_history,
+            &low_ply_history,
             SearchOptions::default(),
             0,
             0,
@@ -4916,6 +6636,64 @@ mod tests {
         // 180% of 100ms is 180ms, but the hard limit is the promise not to forfeit.
         context.set_time_scale(TIME_SCALE_MAX_PERCENT);
         assert_eq!(context.scaled_soft_time(), Some(Duration::from_millis(150)));
+    }
+
+    #[test]
+    fn interpolated_soft_limit_waits_for_the_ponder_clock_rebase() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position = Position::startpos();
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let ponder = PonderState::new();
+        let pre_hit_started = Instant::now() - Duration::from_millis(200);
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits {
+                soft_time: Some(Duration::from_millis(100)),
+                hard_time: Some(Duration::from_millis(400)),
+                use_clock_management: true,
+                ..SearchLimits::default()
+            },
+            Some(pre_hit_started),
+            &stop,
+            &position,
+            &history,
+            &shared_history,
+            &low_ply_history,
+            SearchOptions {
+                use_interpolated_time_management: true,
+                ..SearchOptions::default()
+            },
+            0,
+            0,
+            &counters,
+            network,
+        );
+        context.ponder = Some(&ponder);
+
+        context.recompute_soft_time_reached();
+        assert!(!context.soft_time_reached);
+
+        ponder.ponderhit();
+        context.recompute_soft_time_reached();
+        assert!(
+            !context.soft_time_reached,
+            "ponderhit must rebase elapsed time instead of charging the 200 ms pre-hit interval"
+        );
+
+        *ponder
+            .rebased_start
+            .lock()
+            .expect("ponder clock lock should not be poisoned") =
+            Some(Instant::now() - Duration::from_millis(150));
+        context.recompute_soft_time_reached();
+        assert!(context.soft_time_reached);
     }
 
     #[test]
@@ -4946,12 +6724,25 @@ mod tests {
                 true,
                 false,
                 200,
-                300
+                300,
+                0,
+                0
             ),
             1
         );
         assert_eq!(
-            singular_extension(&parameters, 150, singular_beta, true, true, false, 200, 300),
+            singular_extension(
+                &parameters,
+                150,
+                singular_beta,
+                true,
+                true,
+                false,
+                200,
+                300,
+                0,
+                0
+            ),
             2
         );
         assert_eq!(
@@ -4963,12 +6754,25 @@ mod tests {
                 true,
                 false,
                 400,
-                300
+                300,
+                0,
+                0
             ),
             -3
         );
         assert_eq!(
-            singular_extension(&parameters, 210, singular_beta, false, true, true, 200, 300),
+            singular_extension(
+                &parameters,
+                210,
+                singular_beta,
+                false,
+                true,
+                true,
+                200,
+                300,
+                0,
+                0
+            ),
             -2
         );
         assert_eq!(singular_multicut_value(350, 300, 320), Some(350));
@@ -5002,9 +6806,10 @@ mod tests {
         assert_eq!(tt_entry_for_node(&table, key, false), Some(original));
         assert_eq!(tt_entry_for_node(&table, key, true), None);
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
@@ -5013,6 +6818,7 @@ mod tests {
             &position,
             &history,
             &shared_history,
+            &low_ply_history,
             SearchOptions::default(),
             0,
             0,
@@ -5020,7 +6826,7 @@ mod tests {
             network,
         );
         let mut searched = position.clone();
-        let mut pv = Vec::new();
+        let mut pv = PvLine::new();
 
         let result = pvs(
             &mut searched,
@@ -5052,9 +6858,10 @@ mod tests {
         let excluded_move = legal_moves[0];
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let stop = AtomicBool::new(false);
-        let counters = [AtomicU64::new(0)];
+        let counters = [NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
         let mut context = SearchContext::new(
             &table,
             SearchLimits::default(),
@@ -5063,6 +6870,7 @@ mod tests {
             &position,
             &history,
             &shared_history,
+            &low_ply_history,
             SearchOptions::default(),
             0,
             0,
@@ -5070,7 +6878,7 @@ mod tests {
             network,
         );
         let mut searched = position.clone();
-        let mut pv = Vec::new();
+        let mut pv = PvLine::new();
 
         let result = pvs(
             &mut searched,
@@ -5145,5 +6953,173 @@ mod tests {
 
         assert!(is_in_check(&after, after.side_to_move()));
         assert!(move_gives_check(&position, mv));
+    }
+
+    /// The per-node cache must answer exactly as the slow function for EVERY move --
+    /// direct, discovered, castling, en passant, promotion -- across hand-picked
+    /// positions and a long random walk. The fast path is the one the search takes,
+    /// so any disagreement moves the bench signature.
+    #[test]
+    fn cached_check_info_agrees_with_move_gives_check_on_every_pseudo_legal_move() {
+        let mut positions = vec![
+            Position::startpos(),
+            Position::from_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", false).unwrap(),
+            Position::from_fen("4k3/8/8/8/8/8/4B3/4R1K1 w - - 0 1", false).unwrap(),
+            Position::from_fen("8/8/8/R2pP2k/8/8/8/K7 w - d6 0 1", false).unwrap(),
+            Position::from_fen("8/4P3/8/8/7k/8/8/K7 w - - 0 1", false).unwrap(),
+            Position::from_fen(
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+                false,
+            )
+            .unwrap(),
+        ];
+        let mut random_walk = Position::startpos();
+        for sample in 0..512 {
+            positions.push(random_walk.clone());
+            let moves = generate_legal_moves(&random_walk);
+            if moves.is_empty() {
+                random_walk = Position::startpos();
+            } else {
+                random_walk.make_move(moves[(sample * 17 + 3) % moves.len()]);
+            }
+        }
+
+        for position in positions {
+            let check_info = CheckInfo::new(&position);
+            for &mv in &mf_core::generate_pseudo_legal_moves(&position) {
+                assert_eq!(
+                    check_info.gives_check(&position, mv),
+                    move_gives_check(&position, mv),
+                    "{position:?} {mv:?}"
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "corrhist-regression")]
+    #[test]
+    fn correction_features_reproduce_the_existing_blend_with_independent_missing_continuations() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position = Position::startpos();
+        let position_history = [position.repetition_key()];
+        let transposition_table =
+            TranspositionTable::new(1).expect("test transposition table should allocate");
+        let stop = AtomicBool::new(false);
+        let node_counters = [NodeCounter::new(0)];
+        let history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
+        let options = SearchOptions {
+            use_correction_sources: [true; CORRECTION_SOURCES + 1],
+            ..SearchOptions::default()
+        };
+        let mut context = SearchContext::new(
+            &transposition_table,
+            SearchLimits::default(),
+            None,
+            &stop,
+            &position,
+            &position_history,
+            &history,
+            &low_ply_history,
+            options,
+            0,
+            0,
+            &node_counters,
+            network,
+        );
+
+        for source in 0..CORRECTION_SOURCES {
+            history.update_correction(
+                source,
+                correction_key(&position, source),
+                position.side_to_move(),
+                64 * (source as i32 + 1),
+            );
+        }
+
+        let ply = 5;
+        let entry = ContinuationKey::new(
+            mf_core::Piece::new(Color::White, PieceKind::Knight),
+            Square::new(20).expect("test square"),
+        );
+        let near = ContinuationKey::new(
+            mf_core::Piece::new(Color::Black, PieceKind::Bishop),
+            Square::new(30).expect("test square"),
+        );
+        let far = ContinuationKey::new(
+            mf_core::Piece::new(Color::White, PieceKind::Rook),
+            Square::new(40).expect("test square"),
+        );
+        context.continuation_keys[ply - 1] = Some(entry);
+        context.continuation_keys[ply - 2] = Some(near);
+        context.continuation_keys[ply - 4] = Some(far);
+        history.update_correction_continuation(0, near, entry, 128);
+        history.update_correction_continuation(1, far, entry, 256);
+
+        let features = correction_features(&position, &context, ply);
+        assert_eq!(
+            correction_value(&position, &context, ply),
+            CORRECTION_WEIGHTS[CORRECTION_PAWN] * i32::from(features.pawn)
+                + CORRECTION_WEIGHTS[CORRECTION_MINOR] * i32::from(features.minor)
+                + CORRECTION_WEIGHTS[CORRECTION_MAJOR] * i32::from(features.major)
+                + CORRECTION_WEIGHTS[CORRECTION_MATERIAL] * i32::from(features.material)
+                + CORRECTION_CONTINUATION_WEIGHT
+                    * (i32::from(features.continuation_2) + i32::from(features.continuation_4))
+        );
+
+        context.continuation_keys[ply - 2] = None;
+        let without_near = correction_features(&position, &context, ply);
+        assert_eq!(without_near.continuation_2, 0);
+        assert_eq!(without_near.continuation_4, features.continuation_4);
+
+        context.continuation_keys[ply - 2] = Some(near);
+        context.continuation_keys[ply - 4] = None;
+        let without_far = correction_features(&position, &context, ply);
+        assert_eq!(without_far.continuation_2, features.continuation_2);
+        assert_eq!(without_far.continuation_4, 0);
+    }
+
+    #[cfg(feature = "corrhist-regression")]
+    #[test]
+    fn snapshotted_correction_features_do_not_change_after_history_updates() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position = Position::startpos();
+        let position_history = [position.repetition_key()];
+        let transposition_table =
+            TranspositionTable::new(1).expect("test transposition table should allocate");
+        let stop = AtomicBool::new(false);
+        let node_counters = [NodeCounter::new(0)];
+        let history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
+        let context = SearchContext::new(
+            &transposition_table,
+            SearchLimits::default(),
+            None,
+            &stop,
+            &position,
+            &position_history,
+            &history,
+            &low_ply_history,
+            SearchOptions::default(),
+            0,
+            0,
+            &node_counters,
+            network,
+        );
+
+        let snapshot = correction_features(&position, &context, 0);
+        history.update_correction(
+            CORRECTION_PAWN,
+            correction_key(&position, CORRECTION_PAWN),
+            position.side_to_move(),
+            512,
+        );
+
+        assert_eq!(snapshot.pawn, 0);
+        assert_ne!(correction_features(&position, &context, 0).pawn, 0);
     }
 }

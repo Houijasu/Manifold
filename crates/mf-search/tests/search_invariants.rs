@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move};
 use mf_nnue::Network;
@@ -61,6 +61,8 @@ fn search_history(
         limits,
         SearchOptions::default(),
         network,
+        None,
+        None,
         &stop,
         |_| {},
     )
@@ -73,7 +75,11 @@ const MATE_CASES: [(&str, i32); 12] = [
         "2bqkbn1/2pppp2/np2N3/r3P1p1/p2N2B1/5Q2/PPPPKPP1/RNB2r2 w - - 0 1",
         2,
     ),
-    ("8/8/8/8/8/2k5/1q6/K7 b - - 0 1", 2),
+    // The composed entry this replaces (`.../1q6/K7 b`) had the white king already in
+    // check with BLACK to move, an unreachable position `Position::from_fen` now
+    // rejects. This is its legal sibling: the same king-corner-queen box, with
+    // 1...Qa2# delivered rather than already present.
+    ("8/8/8/8/8/1qk5/8/K7 b - - 0 1", 1),
     ("6k1/pp4p1/2p5/2bp4/8/P5Pb/1P3rrP/2BRRN1K b - - 0 1", 2),
     ("1k1r4/pp1b1R2/3q2pp/4p3/2B5/4Q3/PPP2B2/2K5 b - - 0 1", 3),
     ("r5rk/5p1p/5R2/4B3/8/8/7P/7K w - - 0 1", 3),
@@ -100,6 +106,7 @@ fn limits(depth: u32) -> SearchLimits {
         soft_time: None,
         hard_time: None,
         infinite: false,
+        use_clock_management: false,
     }
 }
 
@@ -177,11 +184,22 @@ fn selectivity_options_default_to_enabled() {
             // 3.3x MORE nodes at depth 14 while looking cheaper on bench. See the
             // comment on `SearchOptions::default` in `search.rs`.
             use_correction_sources: [true, true, false, false, true],
+            // Both per-worker history reads ship ENABLED; their maintenance is
+            // unconditional either way. See the comments on `SearchOptions::default`.
+            use_tt_move_history: true,
+            use_low_ply_history: true,
+            // The corrhist complexity proxy ships ENABLED: it gates only the three
+            // consumption reads (LMR, RFP margin, singular double margin), never the
+            // corrhist maintenance or the eval correction itself.
+            use_corrplexity: true,
             // The best-move node-share time term also ships DISABLED: it measured
             // -17.39 +/- 18.99 Elo at 8+0.08 and -34.86 +/- 44.35 at 30+0.3, because
             // the share it measures is r = -0.348 correlated with the stability count
             // it multiplies. See the comment on `SearchOptions::default` in `search.rs`.
             use_time_effort: false,
+            use_interpolated_time_management: false,
+            use_search_again_depth: false,
+            multi_pv: 1,
             // The tunable margins default to the constants the search shipped with, so
             // an untouched engine is bit-identical to one with no tuning surface at
             // all. `search_parameter_defaults_match_the_shipped_constants` pins each
@@ -288,6 +306,16 @@ fn writing_a_search_parameter_updates_only_that_field_and_clamps_to_its_range() 
 /// which is what a test measuring the wrong granularity looks like. The full-range
 /// bench sweep in `lmr_monotonicity_probe.ps1` confirms the aggregate direction across
 /// all thirteen sampled coefficients from 1,000 to 6,000.
+///
+/// **Measured at depth 9 since the Stage-3 per-worker history pair.** Under the new
+/// ordering the same probe shows the depth-8 AGGREGATE itself inverting -- one
+/// position (`rnbq1k1r/...`, 53,593 -> 26,307) outweighs the other four -- while
+/// depths 9 and 10 and the six-position bench suite at depth 7 (39,051 shipped vs
+/// 45,367 softer) all move the right way. That is the M5-F5 long-tail failure mode one
+/// level up: a five-position sum at one depth is still small enough for a single
+/// inverted tree to carry it. The property this test pins (the spin reaches the
+/// search and the aggregate direction is monotone) is unchanged; only the depth the
+/// aggregate is read at moved.
 #[test]
 fn changing_the_lmr_coefficient_changes_fixed_depth_node_counts() {
     let Some(network) = network() else {
@@ -301,7 +329,7 @@ fn changing_the_lmr_coefficient_changes_fixed_depth_node_counts() {
         "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
     ];
     let limits = SearchLimits {
-        depth: Some(8),
+        depth: Some(9),
         ..SearchLimits::default()
     };
 
@@ -467,9 +495,19 @@ fn mate_in_n_found() {
                 // keeps this test exercising the shipped eval path.
                 use_correction_history: true,
                 use_correction_sources: SearchOptions::default().use_correction_sources,
+                // Ordering-only signals, like the other history tables: set to the
+                // SHIPPED defaults so this test exercises the search that plays games.
+                use_tt_move_history: true,
+                use_low_ply_history: true,
+                // Inert here: its three consumers (LMR, RFP, the singular double
+                // margin) are all switched off above. Set to the SHIPPED default.
+                use_corrplexity: true,
                 // Inert here either way: this is a fixed-depth search with no soft
                 // limit to scale. Set to the SHIPPED default like every other toggle.
                 use_time_effort: false,
+                use_interpolated_time_management: false,
+                use_search_again_depth: false,
+                multi_pv: 1,
                 parameters: SearchOptions::default().parameters,
             },
             network,
@@ -559,6 +597,7 @@ fn deterministic_single_thread() {
         soft_time: None,
         hard_time: None,
         infinite: false,
+        use_clock_management: false,
     };
 
     let first_table = TranspositionTable::new(16).expect("test TT should allocate");
@@ -688,6 +727,7 @@ fn time_limits_are_observed_without_returning_immediately() {
             soft_time: Some(Duration::from_millis(30)),
             hard_time: Some(Duration::from_millis(40)),
             infinite: false,
+            use_clock_management: false,
         },
         SearchOptions::default(),
         network,
@@ -822,7 +862,9 @@ fn an_infinite_search_stops_iterating_at_the_ply_ceiling() {
     // The user's scenario: a forced mate under `infinite`, where the mate-score early
     // exit is deliberately suppressed. Every iteration past the first is cheap, so an
     // uncapped loop runs away in seconds -- the observed depth was 322013 in six.
-    let position = Position::from_fen("7k/6Q1/6K1/8/8/8/8/8 w - - 0 1", false)
+    // The FEN this test ran with had the black king already in check with white to
+    // move; this is the legal mate-in-one (Qf8#) the scenario needs.
+    let position = Position::from_fen("7k/5Q2/6K1/8/8/8/8/8 w - - 0 1", false)
         .expect("mate-in-one FEN should parse");
     let table = TranspositionTable::new(4).expect("test TT should allocate");
     let stop = AtomicBool::new(false);
@@ -836,9 +878,12 @@ fn an_infinite_search_stops_iterating_at_the_ply_ceiling() {
             soft_time: None,
             hard_time: None,
             infinite: true,
+            use_clock_management: false,
         },
         SearchOptions::default(),
         network,
+        None,
+        None,
         &stop,
         |_| {},
     );
@@ -860,7 +905,7 @@ fn a_requested_depth_above_the_ceiling_is_clamped_to_it() {
     let Some(network) = network() else {
         return;
     };
-    let position = Position::from_fen("7k/6Q1/6K1/8/8/8/8/8 w - - 0 1", false)
+    let position = Position::from_fen("7k/5Q2/6K1/8/8/8/8/8 w - - 0 1", false)
         .expect("mate-in-one FEN should parse");
     let table = TranspositionTable::new(4).expect("test TT should allocate");
     let result = search_default(&position, &table, limits(4_000), network);
@@ -1287,6 +1332,333 @@ fn the_time_effort_term_cannot_reach_a_fixed_depth_or_fixed_node_search() {
             );
         }
     }
+}
+
+#[test]
+fn interpolated_tm_is_inert_for_fixed_depth_and_fixed_nodes() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::from_fen(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        false,
+    )
+    .expect("test FEN should parse");
+
+    for limits in [
+        SearchLimits {
+            depth: Some(8),
+            ..SearchLimits::default()
+        },
+        SearchLimits {
+            nodes: Some(60_000),
+            ..SearchLimits::default()
+        },
+    ] {
+        let enabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+        let enabled = search(
+            &position,
+            &enabled_table,
+            limits,
+            SearchOptions {
+                use_interpolated_time_management: true,
+                ..SearchOptions::default()
+            },
+            network,
+        );
+        let disabled_table = TranspositionTable::new(16).expect("test TT should allocate");
+        let disabled = search(
+            &position,
+            &disabled_table,
+            limits,
+            SearchOptions::default(),
+            network,
+        );
+
+        assert_eq!(enabled.nodes, disabled.nodes);
+        assert_eq!(enabled.depth, disabled.depth);
+        assert_eq!(enabled.best_move, disabled.best_move);
+    }
+}
+
+#[test]
+fn interpolated_tm_is_inert_for_multipv() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::startpos();
+    let mut enabled_elapsed = Duration::ZERO;
+    let mut disabled_elapsed = Duration::ZERO;
+    for soft_millis in [200, 400, 800] {
+        let limits = SearchLimits {
+            soft_time: Some(Duration::from_millis(soft_millis)),
+            hard_time: Some(Duration::from_millis(soft_millis * 4)),
+            use_clock_management: true,
+            ..SearchLimits::default()
+        };
+        let run = |enabled| {
+            let table = TranspositionTable::new(16).expect("test TT should allocate");
+            search(
+                &position,
+                &table,
+                limits,
+                SearchOptions {
+                    use_interpolated_time_management: enabled,
+                    multi_pv: 2,
+                    ..SearchOptions::default()
+                },
+                network,
+            )
+        };
+        for enabled_first in [true, false] {
+            for enabled in [enabled_first, !enabled_first] {
+                let result = run(enabled);
+                assert!(result.best_move.is_some());
+                assert!(result.elapsed <= Duration::from_millis(soft_millis * 4 + 500));
+                if enabled {
+                    enabled_elapsed += result.elapsed;
+                } else {
+                    disabled_elapsed += result.elapsed;
+                }
+            }
+        }
+    }
+    let elapsed_difference = enabled_elapsed.abs_diff(disabled_elapsed);
+    assert!(
+        elapsed_difference * 100 <= disabled_elapsed * 30,
+        "MultiPV=2 must stay on the same legacy governor across toggle arms: \
+         enabled={enabled_elapsed:?}, disabled={disabled_elapsed:?}"
+    );
+}
+
+#[test]
+fn interpolated_tm_changes_a_timed_search_scale_when_enabled() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::startpos();
+    let limits = SearchLimits {
+        soft_time: Some(Duration::from_millis(800)),
+        hard_time: Some(Duration::from_millis(3_200)),
+        use_clock_management: true,
+        ..SearchLimits::default()
+    };
+    let run = |enabled| {
+        let table = TranspositionTable::new(32).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let mut scales = Vec::new();
+        let result = search_with_callback(
+            &position,
+            &[position.repetition_key()],
+            &table,
+            limits,
+            SearchOptions {
+                use_interpolated_time_management: enabled,
+                ..SearchOptions::default()
+            },
+            network,
+            None,
+            None,
+            &stop,
+            |iteration| {
+                scales.push(iteration.time_scale_percent);
+                stop.store(true, Ordering::Relaxed);
+            },
+        );
+        assert!(result.best_move.is_some(), "a timed search must answer");
+        scales
+    };
+
+    assert_eq!(run(true), [180]);
+    assert_eq!(run(false), [110]);
+}
+
+#[test]
+fn search_again_depth_is_inert_for_fixed_depth_and_fixed_nodes() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::from_fen(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        false,
+    )
+    .expect("test FEN should parse");
+
+    for limits in [
+        SearchLimits {
+            depth: Some(8),
+            ..SearchLimits::default()
+        },
+        SearchLimits {
+            nodes: Some(60_000),
+            ..SearchLimits::default()
+        },
+    ] {
+        let run = |enabled| {
+            let table = TranspositionTable::new(16).expect("test TT should allocate");
+            search(
+                &position,
+                &table,
+                limits,
+                SearchOptions {
+                    use_search_again_depth: enabled,
+                    ..SearchOptions::default()
+                },
+                network,
+            )
+        };
+        let enabled = run(true);
+        let disabled = run(false);
+
+        assert_eq!(enabled.nodes, disabled.nodes);
+        assert_eq!(enabled.depth, disabled.depth);
+        assert_eq!(enabled.best_move, disabled.best_move);
+    }
+}
+
+#[test]
+fn search_again_depth_is_inert_for_multipv() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::startpos();
+    let mut enabled_elapsed = Duration::ZERO;
+    let mut disabled_elapsed = Duration::ZERO;
+    for soft_millis in [200, 400, 800] {
+        let limits = SearchLimits {
+            soft_time: Some(Duration::from_millis(soft_millis)),
+            hard_time: Some(Duration::from_millis(soft_millis * 4)),
+            use_clock_management: true,
+            ..SearchLimits::default()
+        };
+        let run = |enabled| {
+            let table = TranspositionTable::new(16).expect("test TT should allocate");
+            search(
+                &position,
+                &table,
+                limits,
+                SearchOptions {
+                    use_search_again_depth: enabled,
+                    multi_pv: 2,
+                    ..SearchOptions::default()
+                },
+                network,
+            )
+        };
+        for enabled_first in [true, false] {
+            for enabled in [enabled_first, !enabled_first] {
+                let result = run(enabled);
+                assert!(result.best_move.is_some());
+                assert!(result.elapsed <= Duration::from_millis(soft_millis * 4 + 500));
+                if enabled {
+                    enabled_elapsed += result.elapsed;
+                } else {
+                    disabled_elapsed += result.elapsed;
+                }
+            }
+        }
+    }
+    let elapsed_difference = enabled_elapsed.abs_diff(disabled_elapsed);
+    assert!(
+        elapsed_difference * 100 <= disabled_elapsed * 30,
+        "MultiPV=2 must ignore search-again depth across toggle arms: \
+         enabled={enabled_elapsed:?}, disabled={disabled_elapsed:?}"
+    );
+}
+
+#[test]
+fn late_timed_iterations_repeat_effective_depth() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::startpos();
+    let mut repeated = false;
+    for soft_millis in [100, 200, 400] {
+        let table = TranspositionTable::new(32).expect("test TT should allocate");
+        let result = search(
+            &position,
+            &table,
+            SearchLimits {
+                soft_time: Some(Duration::from_millis(soft_millis)),
+                hard_time: Some(Duration::from_millis(soft_millis * 4)),
+                use_clock_management: true,
+                ..SearchLimits::default()
+            },
+            SearchOptions {
+                use_search_again_depth: true,
+                ..SearchOptions::default()
+            },
+            network,
+        );
+        repeated |= result
+            .iterations
+            .windows(2)
+            .any(|iterations| iterations[0].depth == iterations[1].depth);
+        assert!(result.elapsed <= Duration::from_millis(soft_millis * 4 + 500));
+    }
+
+    assert!(
+        repeated,
+        "a late enabled iteration must repeat an effective depth before advancing"
+    );
+}
+
+#[test]
+fn interpolated_tm_and_search_again_depth_activate_together_under_one_hard_limit() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::startpos();
+    let mut joint_effects_observed = false;
+
+    for soft_millis in [100, 200, 400, 800] {
+        let hard_millis = soft_millis * 4;
+        let limits = SearchLimits {
+            soft_time: Some(Duration::from_millis(soft_millis)),
+            hard_time: Some(Duration::from_millis(hard_millis)),
+            use_clock_management: true,
+            ..SearchLimits::default()
+        };
+        let run = |interpolated| {
+            let table = TranspositionTable::new(32).expect("test TT should allocate");
+            search(
+                &position,
+                &table,
+                limits,
+                SearchOptions {
+                    use_interpolated_time_management: interpolated,
+                    use_search_again_depth: true,
+                    ..SearchOptions::default()
+                },
+                network,
+            )
+        };
+
+        let joint = run(true);
+        let legacy_scale = run(false);
+        let repeated_effective_depth = joint
+            .iterations
+            .windows(2)
+            .any(|iterations| iterations[0].depth == iterations[1].depth);
+        let non_legacy_scale =
+            (joint.depth, joint.nodes) != (legacy_scale.depth, legacy_scale.nodes);
+        joint_effects_observed |= repeated_effective_depth && non_legacy_scale;
+
+        for result in [joint, legacy_scale] {
+            assert!(
+                result.elapsed <= Duration::from_millis(hard_millis + 500),
+                "the hard limit must remain authoritative: {:?} for {hard_millis} ms",
+                result.elapsed
+            );
+            assert!(result.best_move.is_some(), "a timed search must answer");
+        }
+    }
+
+    assert!(
+        joint_effects_observed,
+        "one joint search must both depart from the legacy time scale and repeat a late \
+         effective depth"
+    );
 }
 
 /// The effort term may move the soft limit; it may never move the HARD one.

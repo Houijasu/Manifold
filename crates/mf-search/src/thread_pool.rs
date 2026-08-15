@@ -1,15 +1,23 @@
 use core::fmt;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+#[cfg(test)]
+use std::sync::Mutex;
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 
-use mf_core::Position;
+use mf_core::{Move, Position};
 use mf_nnue::Network;
+use mf_tb::Tablebases;
 
 use crate::history::SharedHistory;
-use crate::search::{RootMoveInfo, WorkerParameters, search_worker_with_history_callback_options};
+#[cfg(test)]
+use crate::search::SearchAgainObservation;
+use crate::search::{
+    NodeCounter, PonderState, RootMoveInfo, WorkerParameters,
+    search_worker_with_history_callback_options,
+};
 use crate::vote::select_best_result;
 use crate::{IterationInfo, SearchLimits, SearchOptions, SearchResult, TranspositionTable};
 
@@ -37,13 +45,24 @@ impl std::error::Error for PoolError {}
 
 pub struct SearchPool {
     workers: Vec<WorkerHandle>,
-    node_counters: Arc<[AtomicU64]>,
+    node_counters: Arc<[NodeCounter]>,
+    /// Published tablebase-hit counters, one per worker, mirroring `node_counters`.
+    tb_hit_counters: Arc<[NodeCounter]>,
     /// Shared across every worker. Thread-private history tables are obsolete: one
     /// worker reuses the ordering knowledge another worker already paid for, and the
     /// table is sized to the pool so the per-thread capacity stays constant.
     history: Arc<SharedHistory>,
     active: AtomicBool,
     generation: AtomicU8,
+    #[cfg(test)]
+    search_again_test_control: Mutex<Option<SearchAgainTestControl>>,
+}
+
+#[cfg(test)]
+struct SearchAgainTestControl {
+    increase_depth: bool,
+    initial_counters: Vec<u32>,
+    observations: mpsc::Sender<SearchAgainObservation>,
 }
 
 impl SearchPool {
@@ -60,6 +79,13 @@ impl SearchPool {
             let (sender, receiver) = mpsc::channel();
             let thread = thread::Builder::new()
                 .name(format!("mf-search-{worker_id}"))
+                // The search keeps its per-node state (PV lines, move lists, the move
+                // picker's score arrays) on the stack, and `pvs` recurses to
+                // `MAX_SEARCH_PLY` with same-ply re-entries for singular and null-move
+                // verification searches. 8 MiB matches the reference engine's worker
+                // stacks and leaves an order of magnitude of headroom over the
+                // measured worst case.
+                .stack_size(8 * 1024 * 1024)
                 .spawn(move || worker_loop(receiver));
             match thread {
                 Ok(handle) => workers.push(WorkerHandle {
@@ -74,15 +100,22 @@ impl SearchPool {
         }
 
         let node_counters = (0..thread_count)
-            .map(|_| AtomicU64::new(0))
+            .map(|_| NodeCounter::new(0))
+            .collect::<Vec<_>>()
+            .into();
+        let tb_hit_counters = (0..thread_count)
+            .map(|_| NodeCounter::new(0))
             .collect::<Vec<_>>()
             .into();
         Ok(Self {
             workers,
             node_counters,
+            tb_hit_counters,
             history: Arc::new(SharedHistory::new()),
             active: AtomicBool::new(false),
             generation: AtomicU8::new(0),
+            #[cfg(test)]
+            search_again_test_control: Mutex::new(None),
         })
     }
 
@@ -136,6 +169,8 @@ impl SearchPool {
         options: SearchOptions,
         stop: Arc<AtomicBool>,
         network: Arc<Network>,
+        tablebases: Option<Arc<Tablebases>>,
+        root_moves: Option<Vec<Move>>,
         on_iteration: F,
     ) -> Result<PoolSearchResult, PoolError>
     where
@@ -149,6 +184,9 @@ impl SearchPool {
             options,
             stop,
             network,
+            tablebases,
+            root_moves,
+            None,
             DispatchMode::AllWorkers,
             on_iteration,
             |_| {},
@@ -159,7 +197,9 @@ impl SearchPool {
     ///
     /// Separate from [`Self::search_with_history_callback`] so the many callers that only
     /// want analysis lines keep their existing signature; `currmove` is a UCI display
-    /// concern that only the protocol layer cares about.
+    /// concern that only the protocol layer cares about. This is also the entry point
+    /// that carries the `go ponder` latch, because pondering is a UCI protocol state and
+    /// this is the method the protocol layer drives.
     #[allow(clippy::too_many_arguments)]
     pub fn search_with_history_progress<F, G>(
         &self,
@@ -170,6 +210,9 @@ impl SearchPool {
         options: SearchOptions,
         stop: Arc<AtomicBool>,
         network: Arc<Network>,
+        tablebases: Option<Arc<Tablebases>>,
+        root_moves: Option<Vec<Move>>,
+        ponder: Option<Arc<PonderState>>,
         on_iteration: F,
         on_current_move: G,
     ) -> Result<PoolSearchResult, PoolError>
@@ -185,6 +228,9 @@ impl SearchPool {
             options,
             stop,
             network,
+            tablebases,
+            root_moves,
+            ponder,
             DispatchMode::AllWorkers,
             on_iteration,
             on_current_move,
@@ -202,6 +248,8 @@ impl SearchPool {
         options: SearchOptions,
         stop: Arc<AtomicBool>,
         network: Arc<Network>,
+        tablebases: Option<Arc<Tablebases>>,
+        root_moves: Option<Vec<Move>>,
         on_iteration: F,
     ) -> Result<PoolSearchResult, PoolError>
     where
@@ -215,6 +263,9 @@ impl SearchPool {
             options,
             stop,
             network,
+            tablebases,
+            root_moves,
+            None,
             DispatchMode::WorkerZeroOnly,
             on_iteration,
             |_| {},
@@ -232,6 +283,8 @@ impl SearchPool {
         options: SearchOptions,
         stop: Arc<AtomicBool>,
         network: Arc<Network>,
+        tablebases: Option<Arc<Tablebases>>,
+        root_moves: Option<Vec<Move>>,
         on_iteration: F,
     ) -> Result<PoolSearchResult, PoolError>
     where
@@ -245,6 +298,9 @@ impl SearchPool {
             options,
             stop,
             network,
+            tablebases,
+            root_moves,
+            None,
             DispatchMode::AllWorkers,
             on_iteration,
             |_| {},
@@ -261,6 +317,9 @@ impl SearchPool {
         options: SearchOptions,
         stop: Arc<AtomicBool>,
         network: Arc<Network>,
+        tablebases: Option<Arc<Tablebases>>,
+        root_moves: Option<Vec<Move>>,
+        ponder: Option<Arc<PonderState>>,
         dispatch_mode: DispatchMode,
         mut on_iteration: F,
         mut on_current_move: G,
@@ -288,10 +347,17 @@ impl SearchPool {
             counter.store(0, Ordering::Relaxed);
         }
         let counters = match dispatch_mode {
-            DispatchMode::WorkerZeroOnly => Arc::<[AtomicU64]>::from([AtomicU64::new(0)]),
+            DispatchMode::WorkerZeroOnly => Arc::<[NodeCounter]>::from([NodeCounter::new(0)]),
             DispatchMode::AllWorkers => Arc::clone(&self.node_counters),
         };
         for counter in counters.iter() {
+            counter.store(0, Ordering::Relaxed);
+        }
+        let tb_hit_counters = match dispatch_mode {
+            DispatchMode::WorkerZeroOnly => Arc::<[NodeCounter]>::from([NodeCounter::new(0)]),
+            DispatchMode::AllWorkers => Arc::clone(&self.tb_hit_counters),
+        };
+        for counter in tb_hit_counters.iter() {
             counter.store(0, Ordering::Relaxed);
         }
 
@@ -304,19 +370,24 @@ impl SearchPool {
             .wrapping_add(1)
             & 31;
         let history: Arc<[u64]> = history.into();
+        #[cfg(test)]
+        let search_again_test_control = self
+            .search_again_test_control
+            .lock()
+            .expect("test control lock should not be poisoned")
+            .take();
+        #[cfg(test)]
+        let increase_depth = Arc::new(AtomicBool::new(
+            search_again_test_control
+                .as_ref()
+                .is_none_or(|control| control.increase_depth),
+        ));
+        #[cfg(not(test))]
+        let increase_depth = Arc::new(AtomicBool::new(true));
         let (events, event_receiver) = mpsc::channel();
         let mut dispatched = 0;
 
         for worker_id in 0..participating_workers {
-            let worker_limits = if worker_id == 0 {
-                limits
-            } else {
-                SearchLimits {
-                    soft_time: None,
-                    hard_time: None,
-                    ..limits
-                }
-            };
             let job = SearchJob {
                 worker_id,
                 generation,
@@ -324,11 +395,26 @@ impl SearchPool {
                 history: Arc::clone(&history),
                 shared_history: Arc::clone(&self.history),
                 table: Arc::clone(&table),
-                limits: worker_limits,
+                limits,
                 options,
                 stop: Arc::clone(&stop),
                 network: Arc::clone(&network),
+                tablebases: tablebases.clone(),
+                root_moves: root_moves.clone(),
+                ponder: ponder.clone(),
+                increase_depth: Arc::clone(&increase_depth),
+                #[cfg(test)]
+                search_again_counter: search_again_test_control
+                    .as_ref()
+                    .and_then(|control| control.initial_counters.get(worker_id))
+                    .copied()
+                    .unwrap_or(0),
+                #[cfg(test)]
+                search_again_observer: search_again_test_control
+                    .as_ref()
+                    .map(|control| control.observations.clone()),
                 counters: Arc::clone(&counters),
+                tb_hit_counters: Arc::clone(&tb_hit_counters),
                 events: events.clone(),
             };
             if self.workers[worker_id]
@@ -396,12 +482,19 @@ impl SearchPool {
             .ok_or(PoolError::WorkerUnavailable)?;
         let selected_worker = match dispatch_mode {
             DispatchMode::WorkerZeroOnly => 0,
+            // Only worker 0 owns the ordered MultiPV line set. Selecting a helper
+            // would append its single-PV result after those lines and make bestmove
+            // disagree with worker 0's line 1.
+            DispatchMode::AllWorkers if options.multi_pv > 1 => 0,
             DispatchMode::AllWorkers => select_best_result(&results),
         };
         let worker_zero = &results[0];
         let mut result = results[selected_worker].clone();
         result.nodes = results.iter().fold(0_u64, |total, worker_result| {
             total.saturating_add(worker_result.nodes)
+        });
+        result.tbhits = results.iter().fold(0_u64, |total, worker_result| {
+            total.saturating_add(worker_result.tbhits)
         });
         result.hashfull = table.hashfull_per_mille();
         result.elapsed = worker_zero.elapsed;
@@ -470,7 +563,16 @@ struct SearchJob {
     options: SearchOptions,
     stop: Arc<AtomicBool>,
     network: Arc<Network>,
-    counters: Arc<[AtomicU64]>,
+    tablebases: Option<Arc<Tablebases>>,
+    root_moves: Option<Vec<Move>>,
+    ponder: Option<Arc<PonderState>>,
+    increase_depth: Arc<AtomicBool>,
+    #[cfg(test)]
+    search_again_counter: u32,
+    #[cfg(test)]
+    search_again_observer: Option<mpsc::Sender<SearchAgainObservation>>,
+    counters: Arc<[NodeCounter]>,
+    tb_hit_counters: Arc<[NodeCounter]>,
     events: mpsc::Sender<WorkerEvent>,
 }
 
@@ -499,7 +601,26 @@ fn worker_loop(receiver: mpsc::Receiver<WorkerCommand>) {
                     &job.counters,
                     &job.shared_history,
                     &job.network,
-                );
+                )
+                .with_increase_depth(&job.increase_depth);
+                #[cfg(test)]
+                if let Some(observer) = job.search_again_observer.as_ref() {
+                    parameters =
+                        parameters.with_search_again_test_state(job.search_again_counter, observer);
+                }
+                if let Some(tablebases) = job.tablebases.as_deref() {
+                    parameters = parameters.with_tablebases(tablebases, &job.tb_hit_counters);
+                }
+                if let Some(root_moves) = job.root_moves.clone() {
+                    parameters = parameters.with_root_moves(root_moves);
+                }
+                // Only worker 0 owns the clock, so only worker 0 needs the latch;
+                // helpers already search without time limits.
+                if let Some(ponder) = job.ponder.as_deref()
+                    && job.worker_id == 0
+                {
+                    parameters = parameters.with_ponder(ponder);
+                }
                 // Only worker 0 reports `currmove`. Helpers search the same root moves in
                 // their own order, so letting them report too would interleave
                 // contradictory "now searching" updates for one depth.
@@ -550,5 +671,94 @@ fn shutdown_workers(workers: &mut [WorkerHandle]) {
         if let Some(handle) = worker.handle.take() {
             let _ = handle.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use super::*;
+
+    fn local_network() -> Option<Arc<Network>> {
+        let path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+            || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+            PathBuf::from,
+        );
+        if !path.is_file() {
+            eprintln!(
+                "SKIPPED: search-again dispatch test needs {}",
+                path.display()
+            );
+            return None;
+        }
+        Some(Arc::new(Network::load(&path).unwrap_or_else(|error| {
+            panic!("test NNUE network {}: {error}", path.display())
+        })))
+    }
+
+    #[test]
+    fn search_pool_dispatches_one_shared_decision_with_independent_worker_counters() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let pool = SearchPool::new(2).expect("test workers should start");
+        let (observations, received) = mpsc::channel();
+        *pool
+            .search_again_test_control
+            .lock()
+            .expect("test control lock should not be poisoned") = Some(SearchAgainTestControl {
+            increase_depth: false,
+            initial_counters: vec![0, 4],
+            observations,
+        });
+        let position = Position::startpos();
+        let table = Arc::new(TranspositionTable::new(1).expect("test TT should allocate"));
+
+        pool.search_with_history_callback(
+            &position,
+            &[position.repetition_key()],
+            table,
+            SearchLimits {
+                depth: Some(1),
+                soft_time: Some(Duration::from_secs(1)),
+                hard_time: Some(Duration::from_secs(4)),
+                use_clock_management: true,
+                ..SearchLimits::default()
+            },
+            SearchOptions {
+                use_search_again_depth: true,
+                ..SearchOptions::default()
+            },
+            Arc::new(AtomicBool::new(false)),
+            network,
+            None,
+            None,
+            |_| {},
+        )
+        .expect("test search should complete");
+
+        let mut observations = received.try_iter().collect::<Vec<_>>();
+        observations.sort_by_key(|observation| observation.worker_id);
+        assert_eq!(observations.len(), 2);
+        assert_eq!(
+            observations
+                .iter()
+                .map(|observation| observation.increase_depth)
+                .collect::<Vec<_>>(),
+            [false, false]
+        );
+        assert_eq!(
+            observations
+                .iter()
+                .map(|observation| observation.search_again_counter)
+                .collect::<Vec<_>>(),
+            [1, 5]
+        );
+        assert_eq!(
+            observations[0].increase_depth_address,
+            observations[1].increase_depth_address
+        );
     }
 }

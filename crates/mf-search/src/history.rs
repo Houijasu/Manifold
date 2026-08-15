@@ -519,6 +519,96 @@ pub(crate) fn captured_kind(position: &Position, mv: Move) -> Option<PieceKind> 
     position.piece_at(mv.to()).map(|piece| piece.kind())
 }
 
+/// Gravity saturation bound for the per-worker ttMove-history scalar.
+const TT_MOVE_MAX: i32 = 8_192;
+
+/// Per-worker scalar answering "is my TT move usually best right now?".
+///
+/// A single gravity-bounded value, not a table: it aggregates over the whole tree this
+/// worker is currently searching, and its only consumer is the singular
+/// double-extension margin. Per-worker state like [`KillerTable`], reset at search
+/// start by construction.
+pub(crate) struct TtMoveHistory(AtomicI16);
+
+impl TtMoveHistory {
+    pub(crate) fn new() -> Self {
+        Self(AtomicI16::new(0))
+    }
+
+    pub(crate) fn value(&self) -> i32 {
+        load(&self.0)
+    }
+
+    pub(crate) fn apply(&self, bonus: i32) {
+        apply(&self.0, bonus, TT_MOVE_MAX);
+    }
+}
+
+/// Plies from the root covered by low-ply history.
+pub(crate) const LOW_PLY_HISTORY_PLIES: usize = 5;
+/// Gravity saturation bound for low-ply history, shared with butterfly history: both
+/// are per-move statistics unconditioned on a predecessor move.
+const LOW_PLY_MAX: i32 = 7_183;
+/// One slot per raw 16-bit move encoding.
+const LOW_PLY_MOVE_SLOTS: usize = 1 << 16;
+/// The tuned nonzero prior every entry is refilled to between root iterations.
+const LOW_PLY_PRIOR: i16 = 102;
+/// The reference's `712/1024` scaling of the butterfly bonus/malus stream.
+const LOW_PLY_UPDATE_NUMERATOR: i32 = 712;
+
+/// Per-worker ordering history for the first [`LOW_PLY_HISTORY_PLIES`] plies, indexed
+/// `[ply][move.raw()]`.
+///
+/// Near the root a worker revisits the same few positions on every iteration, so a
+/// statistic keyed on the ply itself outranks the position-agnostic butterfly average
+/// there. Per-worker like [`KillerTable`], deliberately NOT part of [`SharedHistory`]:
+/// helpers search the root moves in different orders, so their near-root preferences
+/// describe different trees. Allocated once per worker per search (~640 KiB) and
+/// refilled in place between root iterations, never in a hot path. Entries are
+/// relaxed atomics purely so the worker can refill and update the table through a
+/// shared reference; the table itself is never shared across threads.
+pub(crate) struct LowPlyHistory {
+    table: Box<[AtomicI16]>,
+}
+
+impl LowPlyHistory {
+    pub(crate) fn new() -> Self {
+        Self {
+            table: zeroed(LOW_PLY_HISTORY_PLIES * LOW_PLY_MOVE_SLOTS),
+        }
+    }
+
+    /// Refills every entry with the prior, in place.
+    ///
+    /// Run at the top of each iterative-deepening iteration: the previous iteration's
+    /// near-root preferences are stale once the depth moves on, and the reference's
+    /// tuned prior is mildly positive rather than zero.
+    pub(crate) fn fill_prior(&self) {
+        for entry in self.table.iter() {
+            entry.store(LOW_PLY_PRIOR, Ordering::Relaxed);
+        }
+    }
+
+    /// Ordering score for a move at a ply below [`LOW_PLY_HISTORY_PLIES`].
+    pub(crate) fn score(&self, ply: usize, mv: Move) -> i32 {
+        debug_assert!(ply < LOW_PLY_HISTORY_PLIES);
+        load(&self.table[ply * LOW_PLY_MOVE_SLOTS + usize::from(mv.raw())])
+    }
+
+    /// Applies the butterfly bonus/malus stream, scaled by `712/1024`, when the
+    /// cutoff happened below [`LOW_PLY_HISTORY_PLIES`]; a no-op deeper down.
+    pub(crate) fn update(&self, ply: usize, mv: Move, bonus: i32) {
+        if ply >= LOW_PLY_HISTORY_PLIES {
+            return;
+        }
+        apply(
+            &self.table[ply * LOW_PLY_MOVE_SLOTS + usize::from(mv.raw())],
+            bonus * LOW_PLY_UPDATE_NUMERATOR / 1_024,
+            LOW_PLY_MAX,
+        );
+    }
+}
+
 /// Per-worker ordering state. Killers are ply-indexed scratch that is meaningless
 /// across workers searching different subtrees, so they stay thread-private while the
 /// statistical tables are shared.
@@ -553,12 +643,15 @@ mod tests {
 
     use mf_core::{Color, Move, MoveFlag, Piece, PieceKind, Position, Square};
 
+    use crate::MAX_SEARCH_PLY;
+
     use super::{
         BUTTERFLY_MAX, CAPTURE_MAX, CONTINUATION_MAX, CONTINUATION_PLIES, CONTINUATION_WEIGHTS,
         CORRECTION_BUCKETS, CORRECTION_CONTINUATION_PLIES, CORRECTION_CONTINUATION_UPDATE_WEIGHTS,
         CORRECTION_MAJOR, CORRECTION_MATERIAL, CORRECTION_MAX, CORRECTION_MINOR, CORRECTION_PAWN,
         CORRECTION_SOURCES, CORRECTION_UPDATE_WEIGHTS, CORRECTION_WEIGHTS, ContinuationKey,
-        KillerTable, PAWN_BUCKETS, PAWN_MAX, SharedHistory, captured_kind,
+        KillerTable, LOW_PLY_HISTORY_PLIES, LOW_PLY_PRIOR, LowPlyHistory, PAWN_BUCKETS, PAWN_MAX,
+        SharedHistory, TT_MOVE_MAX, TtMoveHistory, captured_kind,
     };
 
     fn square(index: u8) -> Square {
@@ -571,6 +664,83 @@ mod tests {
 
     fn second_move() -> Move {
         Move::new(square(9), square(17), MoveFlag::QUIET)
+    }
+
+    #[test]
+    fn tt_move_history_moves_toward_the_saturation_bound_and_stays_clamped() {
+        let history = TtMoveHistory::new();
+        assert_eq!(history.value(), 0);
+
+        // A stream of "the TT move was best" bonuses climbs toward +max without ever
+        // crossing it.
+        let mut previous = history.value();
+        for _ in 0..200 {
+            history.apply(918);
+            assert!(history.value() <= TT_MOVE_MAX);
+            assert!(history.value() >= previous);
+            previous = history.value();
+        }
+        assert!(
+            history.value() > TT_MOVE_MAX / 2,
+            "repeated bonuses must approach the bound, got {}",
+            history.value()
+        );
+
+        // Multicut penalties drive it toward -max, again clamped.
+        for _ in 0..400 {
+            history.apply(-421 - 110 * 8);
+            assert!(history.value() >= -TT_MOVE_MAX);
+        }
+        assert!(
+            history.value() < -TT_MOVE_MAX / 2,
+            "repeated maluses must approach the negative bound, got {}",
+            history.value()
+        );
+
+        // A sentinel-sized update saturates exactly at the bound in one step.
+        history.apply(i32::MAX);
+        assert_eq!(history.value(), TT_MOVE_MAX);
+        history.apply(i32::MIN);
+        assert_eq!(history.value(), -TT_MOVE_MAX);
+    }
+
+    #[test]
+    fn low_ply_history_is_keyed_on_ply_and_raw_move_and_ignores_deep_plies() {
+        let history = LowPlyHistory::new();
+        let mv = first_move();
+        let other = second_move();
+
+        history.update(0, mv, 1_024);
+        // The reference 712/1024 scaling applies before the gravity update lands.
+        assert_eq!(history.score(0, mv), 1_024 * 712 / 1_024);
+        assert_eq!(history.score(0, other), 0);
+        assert_eq!(history.score(1, mv), 0);
+
+        // Updates at or beyond the ply ceiling are no-ops rather than out-of-bounds.
+        history.update(LOW_PLY_HISTORY_PLIES, mv, 1_024);
+        history.update(MAX_SEARCH_PLY - 1, mv, 1_024);
+        for ply in 0..LOW_PLY_HISTORY_PLIES {
+            assert_eq!(
+                history.score(ply, other),
+                0,
+                "a deep update must not land anywhere in the table"
+            );
+        }
+    }
+
+    #[test]
+    fn low_ply_history_refills_to_the_prior_not_zero_and_not_stale() {
+        let history = LowPlyHistory::new();
+        let mv = first_move();
+        history.update(2, mv, 4_000);
+        assert_ne!(history.score(2, mv), i32::from(LOW_PLY_PRIOR));
+
+        history.fill_prior();
+
+        for ply in 0..LOW_PLY_HISTORY_PLIES {
+            assert_eq!(history.score(ply, mv), i32::from(LOW_PLY_PRIOR));
+            assert_eq!(history.score(ply, second_move()), i32::from(LOW_PLY_PRIOR));
+        }
     }
 
     #[test]

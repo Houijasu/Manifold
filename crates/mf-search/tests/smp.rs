@@ -45,6 +45,7 @@ fn depth_limits(depth: u32) -> SearchLimits {
         soft_time: None,
         hard_time: None,
         infinite: false,
+        use_clock_management: false,
     }
 }
 
@@ -55,6 +56,7 @@ fn infinite_limits() -> SearchLimits {
         soft_time: None,
         hard_time: None,
         infinite: true,
+        use_clock_management: false,
     }
 }
 
@@ -123,6 +125,8 @@ fn fixed_depth_public_path_uses_worker_zero_from_a_larger_pool() {
                 SearchOptions::default(),
                 Arc::clone(&stop),
                 Arc::clone(&network),
+                None,
+                None,
                 |iteration| callback_depths.push(iteration.depth),
             )
             .expect("worker-zero search should complete");
@@ -135,6 +139,8 @@ fn fixed_depth_public_path_uses_worker_zero_from_a_larger_pool() {
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
                 Arc::clone(&network),
+                None,
+                None,
                 |_| {},
             )
             .expect("baseline search should complete");
@@ -182,6 +188,8 @@ fn explicit_fixed_depth_smp_path_returns_a_legal_result() {
                 SearchOptions::default(),
                 Arc::clone(&stop),
                 Arc::clone(&network),
+                None,
+                None,
                 |_| {},
             )
             .expect("SMP search should complete");
@@ -211,6 +219,8 @@ fn nnue_fixed_depth_is_identical_across_pool_sizes() {
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
                 Arc::clone(&network),
+                None,
+                None,
                 |_| {},
             )
             .expect("single worker NNUE search should complete");
@@ -223,6 +233,8 @@ fn nnue_fixed_depth_is_identical_across_pool_sizes() {
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
                 network,
+                None,
+                None,
                 |_| {},
             )
             .expect("eight worker NNUE search should complete");
@@ -253,6 +265,8 @@ fn nnue_fixed_depth_smp_uses_a_network_on_every_worker() {
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
                 network,
+                None,
+                None,
                 |_| {},
             )
             .expect("SMP NNUE search should complete");
@@ -285,6 +299,8 @@ fn external_stop_ends_an_infinite_smp_search() {
             SearchOptions::default(),
             search_stop,
             Arc::clone(&network),
+            None,
+            None,
             |_| {
                 let _ = started_tx.try_send(());
             },
@@ -326,6 +342,8 @@ fn callback_panic_drains_workers_before_pool_reuse_and_drop() {
                 SearchOptions::default(),
                 stop,
                 Arc::clone(&network),
+                None,
+                None,
                 |_| {
                     callback_count += 1;
                     panic!("callback failure");
@@ -346,6 +364,8 @@ fn callback_panic_drains_workers_before_pool_reuse_and_drop() {
                 SearchOptions::default(),
                 Arc::new(AtomicBool::new(false)),
                 Arc::clone(&network),
+                None,
+                None,
                 |_| {},
             )
             .expect("search after callback panic should complete");
@@ -379,10 +399,13 @@ fn infinite_search_ignores_embedded_limits_until_external_stop() {
                 soft_time: Some(Duration::from_millis(1)),
                 hard_time: Some(Duration::from_millis(1)),
                 infinite: true,
+                use_clock_management: false,
             },
             SearchOptions::default(),
             search_stop,
             Arc::clone(&network),
+            None,
+            None,
             |_| {
                 let _ = started_tx.try_send(());
             },
@@ -442,6 +465,8 @@ fn concurrent_pool_calls_are_rejected_as_busy() {
                 SearchOptions::default(),
                 search_stop,
                 search_network,
+                None,
+                None,
                 |_| {
                     let _ = started_tx.try_send(());
                 },
@@ -464,6 +489,8 @@ fn concurrent_pool_calls_are_rejected_as_busy() {
             SearchOptions::default(),
             Arc::new(AtomicBool::new(false)),
             Arc::clone(&network),
+            None,
+            None,
             |_| {},
         );
         assert!(matches!(second, Err(PoolError::Busy)));
@@ -539,6 +566,8 @@ fn eight_thread_pool_survives_representative_position_stress() {
                         SearchOptions::default(),
                         Arc::new(AtomicBool::new(false)),
                         Arc::clone(&network),
+                        None,
+                        None,
                         |_| {},
                     )
                     .expect("stress search should complete");

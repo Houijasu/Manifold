@@ -99,6 +99,7 @@ mod tests {
             seldepth: depth,
             nodes: 0,
             hashfull: 0,
+            tbhits: 0,
             elapsed: Duration::ZERO,
             pv: best_move.into_iter().cycle().take(pv_len).collect(),
             iterations: Vec::new(),

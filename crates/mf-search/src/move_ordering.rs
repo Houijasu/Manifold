@@ -1,9 +1,12 @@
 use mf_core::{
-    Color, Move, Piece, PieceKind, Position, Square, generate_pseudo_legal_moves, material_value,
-    static_exchange_evaluation,
+    Color, Move, MoveList, Piece, PieceKind, Position, Square, generate_pseudo_legal_captures,
+    generate_pseudo_legal_quiets, is_pseudo_legal, material_value, static_exchange_evaluation,
 };
 
-use crate::history::{CONTINUATION_PLIES, ContinuationKey, SharedHistory, captured_kind};
+use crate::history::{
+    CONTINUATION_PLIES, ContinuationKey, LOW_PLY_HISTORY_PLIES, LowPlyHistory, SharedHistory,
+    captured_kind,
+};
 
 /// Middle-game piece-square values used purely to order quiet moves.
 ///
@@ -87,9 +90,17 @@ const PAWN_HISTORY_WEIGHT: i32 = 2;
 const STAT_SCORE_BUTTERFLY_WEIGHT: i32 = 2_048;
 const STAT_SCORE_CONTINUATION_WEIGHTS: [i32; 2] = [1_126, 1_093];
 
+/// Weight of a low-ply entry in the combined quiet score, before the `1 + ply` decay.
+const LOW_PLY_WEIGHT: i32 = 8;
+
 #[derive(Clone, Copy)]
 pub(crate) struct OrderingContext<'a> {
     pub(crate) history: &'a SharedHistory,
+    /// This worker's low-ply table; consulted only while `ply` is below
+    /// [`LOW_PLY_HISTORY_PLIES`].
+    pub(crate) low_ply_history: &'a LowPlyHistory,
+    /// Distance from the root of the node being ordered.
+    pub(crate) ply: usize,
     pub(crate) pawn_key: u64,
     /// The predecessor plane at each lookback distance in `CONTINUATION_PLIES`, or
     /// `None` where the stack does not reach back that far or a null move broke the
@@ -99,6 +110,7 @@ pub(crate) struct OrderingContext<'a> {
     pub(crate) use_capture_history: bool,
     pub(crate) use_pawn_history: bool,
     pub(crate) use_continuation_history: bool,
+    pub(crate) use_low_ply_history: bool,
 }
 
 impl OrderingContext<'_> {
@@ -113,6 +125,13 @@ impl OrderingContext<'_> {
         } else {
             0
         };
+        // Ordering read ONLY: low-ply history feeds neither `pruning_history` nor the
+        // LMR `quiet_history` stat-score. The `1 + ply` decay fades the near-root
+        // signal out before the table's ply ceiling cuts it off.
+        if self.use_low_ply_history && self.ply < LOW_PLY_HISTORY_PLIES {
+            score +=
+                LOW_PLY_WEIGHT * self.low_ply_history.score(self.ply, mv) / (1 + self.ply as i32);
+        }
         let Some(piece) = position.piece_at(mv.from()) else {
             return score;
         };
@@ -208,117 +227,387 @@ impl OrderingContext<'_> {
     }
 }
 
-pub(crate) struct MovePicker {
+const MAX_MOVES: usize = 256;
+
+/// A 256-slot bitmask replacing a `[bool; 256]` in the picker's hot storage: same
+/// answers, one eighth the stack footprint per array.
+#[derive(Clone, Copy, Default)]
+struct MoveMask([u64; 4]);
+
+impl MoveMask {
+    #[inline]
+    fn get(&self, index: usize) -> bool {
+        self.0[index >> 6] & (1u64 << (index & 63)) != 0
+    }
+
+    #[inline]
+    fn set(&mut self, index: usize) {
+        self.0[index >> 6] |= 1u64 << (index & 63);
+    }
+}
+
+/// Score storage for one move family. Left uninitialized for the same reason
+/// `MoveList` is: one of these lives in every picker, so zeroing it on construction
+/// is a per-node memset. Only slots below the family list's length are ever written
+/// (at scoring time) or read (at selection time).
+type ScoreBuffer = [core::mem::MaybeUninit<i32>; MAX_MOVES];
+
+#[inline]
+const fn uninit_scores() -> ScoreBuffer {
+    [core::mem::MaybeUninit::uninit(); MAX_MOVES]
+}
+
+#[inline]
+fn read_score(scores: &ScoreBuffer, index: usize) -> i32 {
+    // SAFETY: every caller passes an index below the scored list's length, and each
+    // such slot was written when its list entry was scored.
+    unsafe { scores[index].assume_init() }
+}
+
+/// Lazily staged move picker with stack storage.
+///
+/// Generation and scoring are DEFERRED, Stockfish-style: the TT move is yielded with
+/// no generation at all, captures are generated and scored only if the TT move did not
+/// already cut off, and quiets are generated and scored only when the good captures
+/// are exhausted. A node that cuts off on its TT move or an early capture — the
+/// common case at cut nodes — never pays for quiet generation or scoring at all.
+///
+/// This deliberately reads the history tables WARM. The search updates them mid-loop
+/// (beta-cutoff bonuses in subtrees, the post-LMR continuation bonus), so a quiet
+/// scored at stage four can see different history than it would have seen at node
+/// entry. An earlier eager design froze every score at construction to keep the bench
+/// signature bit-exact; lazy staging traded that away on purpose for per-node
+/// throughput (the signature moved from `34_516` to `35_886` with it), matching the
+/// reference engine, which also scores each stage at the moment it is reached.
+///
+/// Because generation is deferred, the picker holds no position borrow: `next` takes
+/// the position each call. That is sound at every call site because `make_move`/
+/// `unmake_move` restore the position bit-for-bit before the loop asks for the next
+/// move (the make/unmake tests pin this), so each `next` call sees the node's own
+/// position.
+pub(crate) struct MovePicker<'a> {
     tt_move: Option<Move>,
-    good_captures: Vec<Move>,
-    quiets: Vec<Move>,
-    bad_captures: Vec<Move>,
+    killers: [Option<Move>; 2],
+    ordering: OrderingContext<'a>,
+    captures_only: bool,
     stage: Stage,
-    index: usize,
+    captures: MoveList,
+    capture_scores: ScoreBuffer,
+    capture_sees: ScoreBuffer,
+    capture_good: MoveMask,
+    capture_yielded: MoveMask,
+    quiets: MoveList,
+    quiet_scores: ScoreBuffer,
+    quiet_yielded: MoveMask,
+    /// SEE gate for the qsearch variant: `Some(threshold)` drops every non-promotion
+    /// capture whose exchange stands below `threshold` while the capture stage loads;
+    /// `None` in the full and ProbCut variants, which gate nothing.
+    qsearch_see_threshold: Option<i32>,
+    /// Whether the qsearch variant appends its quiet-checks stage after the bad
+    /// captures. Only `MovePicker::qsearch` ever sets this.
+    quiet_checks_after_captures: bool,
+    quiet_check_moves: MoveList,
+    quiet_check_index: usize,
+    /// Exact SEE of the most recently yielded move when it came from the captures
+    /// family (captures and promotions), `None` after a quiet. `load_captures` already
+    /// walks the full exchange once per capture; exposing the value lets search call
+    /// sites compare it against their own thresholds instead of re-walking it. A TT
+    /// capture's SEE is computed at yield time, before any generation.
+    current_capture_see: Option<i32>,
 }
 
 #[derive(Clone, Copy)]
 enum Stage {
     Tt,
+    GenerateCaptures,
     GoodCaptures,
+    GenerateQuiets,
     Quiets,
     BadCaptures,
+    GenerateQuietChecks,
+    QuietChecks,
     Done,
 }
 
-impl MovePicker {
+impl<'a> MovePicker<'a> {
     pub(crate) fn new(
-        position: &Position,
         tt_move: Option<Move>,
         killers: [Option<Move>; 2],
-        ordering: OrderingContext<'_>,
+        ordering: OrderingContext<'a>,
     ) -> Self {
-        let pseudo_legal = generate_pseudo_legal_moves(position);
-        let tt_move = tt_move.filter(|mv| pseudo_legal.contains(mv));
-        let mut good_captures = Vec::new();
-        let mut quiets = Vec::new();
-        let mut bad_captures = Vec::new();
+        Self::staged(tt_move, killers, ordering, false)
+    }
 
-        for &mv in &pseudo_legal {
-            if Some(mv) == tt_move {
-                continue;
-            }
-            if mv.flag().is_capture() || mv.flag().promotion().is_some() {
-                if static_exchange_evaluation(position, mv) >= 0 {
-                    good_captures.push(mv);
-                } else {
-                    bad_captures.push(mv);
-                }
-            } else {
-                quiets.push(mv);
-            }
-        }
+    /// Captures-and-promotions iteration for ProbCut: the quiet stages are skipped
+    /// entirely, so quiets are never generated or scored. Bad captures ARE yielded,
+    /// after the good ones, preserving the eager picker's captures-only sequence.
+    pub(crate) fn captures_only(tt_move: Option<Move>, ordering: OrderingContext<'a>) -> Self {
+        Self::staged(tt_move, [None, None], ordering, true)
+    }
 
-        // `sort_by_cached_key` scores each move ONCE. `sort_unstable_by_key` would
-        // re-evaluate the key on every comparison, which turned each history read into
-        // O(n log n) dependent loads and cost ~12% NPS.
-        let color = position.side_to_move();
-        good_captures
-            .sort_by_cached_key(|&mv| core::cmp::Reverse(capture_score(position, mv, ordering)));
-        bad_captures
-            .sort_by_cached_key(|&mv| core::cmp::Reverse(capture_score(position, mv, ordering)));
-        quiets.sort_by_cached_key(|&mv| {
-            (
-                core::cmp::Reverse(quiet_score(position, mv, killers, color, ordering)),
-                mv.raw(),
-            )
-        });
+    /// Staged iteration for the non-check quiescence loop, replacing the old eager
+    /// generate-score-sort-gate qsearch path. The TT move — when it is a capture or
+    /// promotion —
+    /// yields with no generation at all; the capture stages then load with the qsearch
+    /// SEE gate applied at load time; the quiet-check widening generates only if the
+    /// captures did not satisfy the loop. A node that cuts off on its TT capture or
+    /// the first good capture never pays for the widening, exactly as the interior
+    /// search never pays for quiet generation on a TT-move cutoff.
+    ///
+    /// Gate contract, carried over verbatim from the eager path this replaces:
+    /// - the TT move is searched first and is exempt from the gate: the entry that
+    ///   named it was produced by a search, which is strictly better evidence than a
+    ///   static exchange estimate;
+    /// - captures below `see_threshold` are dropped, not deferred, except promotions,
+    ///   which are always kept (dropping one because the pawn is recaptured loses the
+    ///   tactic the qsearch exists to find);
+    /// - quiet checks, when enabled, yield after every capture — never interleaved.
+    pub(crate) fn qsearch(
+        tt_move: Option<Move>,
+        see_threshold: i32,
+        include_quiet_checks: bool,
+        ordering: OrderingContext<'a>,
+    ) -> Self {
+        let mut picker = Self::staged(tt_move, [None, None], ordering, true);
+        picker.qsearch_see_threshold = Some(see_threshold);
+        picker.quiet_checks_after_captures = include_quiet_checks;
+        picker
+    }
 
+    fn staged(
+        tt_move: Option<Move>,
+        killers: [Option<Move>; 2],
+        ordering: OrderingContext<'a>,
+        captures_only: bool,
+    ) -> Self {
         Self {
             tt_move,
-            good_captures,
-            quiets,
-            bad_captures,
+            killers,
+            ordering,
+            captures_only,
             stage: Stage::Tt,
-            index: 0,
+            captures: MoveList::new(),
+            capture_scores: uninit_scores(),
+            capture_sees: uninit_scores(),
+            capture_good: MoveMask::default(),
+            capture_yielded: MoveMask::default(),
+            quiets: MoveList::new(),
+            quiet_scores: uninit_scores(),
+            quiet_yielded: MoveMask::default(),
+            qsearch_see_threshold: None,
+            quiet_checks_after_captures: false,
+            quiet_check_moves: MoveList::new(),
+            quiet_check_index: 0,
+            current_capture_see: None,
         }
     }
-}
 
-impl Iterator for MovePicker {
-    type Item = Move;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    /// Yields the next move, or `None` when every stage is exhausted.
+    ///
+    /// `position` must be the same position the picker was constructed for; the search
+    /// guarantees this by unmaking every child move before asking for the next one.
+    pub(crate) fn next(&mut self, position: &Position) -> Option<Move> {
         loop {
             match self.stage {
                 Stage::Tt => {
-                    self.stage = Stage::GoodCaptures;
-                    if self.tt_move.is_some() {
-                        return self.tt_move;
-                    }
-                }
-                Stage::GoodCaptures => {
-                    if let Some(mv) = self.good_captures.get(self.index).copied() {
-                        self.index += 1;
+                    self.stage = Stage::GenerateCaptures;
+                    if let Some(mv) = self.validate_tt_move(position) {
                         return Some(mv);
                     }
+                }
+                Stage::GenerateCaptures => {
+                    self.load_captures(position);
+                    self.stage = Stage::GoodCaptures;
+                }
+                Stage::GoodCaptures => {
+                    if let Some(mv) = self.next_good_capture() {
+                        return Some(mv);
+                    }
+                    self.stage = if self.captures_only {
+                        Stage::BadCaptures
+                    } else {
+                        Stage::GenerateQuiets
+                    };
+                }
+                Stage::GenerateQuiets => {
+                    self.load_quiets(position);
                     self.stage = Stage::Quiets;
-                    self.index = 0;
                 }
                 Stage::Quiets => {
-                    if let Some(mv) = self.quiets.get(self.index).copied() {
-                        self.index += 1;
+                    if let Some(mv) = self.next_quiet() {
                         return Some(mv);
                     }
                     self.stage = Stage::BadCaptures;
-                    self.index = 0;
                 }
                 Stage::BadCaptures => {
-                    if let Some(mv) = self.bad_captures.get(self.index).copied() {
-                        self.index += 1;
+                    if let Some(mv) = self.next_bad_capture() {
+                        return Some(mv);
+                    }
+                    self.stage = if self.quiet_checks_after_captures {
+                        Stage::GenerateQuietChecks
+                    } else {
+                        Stage::Done
+                    };
+                }
+                Stage::GenerateQuietChecks => {
+                    // The widening generates only here, so a node whose loop ends
+                    // inside the captures never pays for it. The list arrives already
+                    // gated and ordered by `quiet_checks`.
+                    self.quiet_check_moves = quiet_checks(position, self.ordering);
+                    self.quiet_check_index = 0;
+                    self.stage = Stage::QuietChecks;
+                }
+                Stage::QuietChecks => {
+                    if self.quiet_check_index < self.quiet_check_moves.len() {
+                        let mv = self.quiet_check_moves[self.quiet_check_index];
+                        self.quiet_check_index += 1;
+                        self.current_capture_see = None;
                         return Some(mv);
                     }
                     self.stage = Stage::Done;
-                    self.index = 0;
                 }
                 Stage::Done => return None,
             }
         }
+    }
+
+    fn load_captures(&mut self, position: &Position) {
+        self.captures = generate_pseudo_legal_captures(position);
+        for (index, &mv) in self.captures.iter().enumerate() {
+            // The TT move was already yielded at the TT stage (with its own SEE), so
+            // its slot is masked out and never scored.
+            if Some(mv) == self.tt_move {
+                self.capture_yielded.set(index);
+                continue;
+            }
+            // One SEE per capture: the score, the good/bad split, the qsearch gate,
+            // and the value the search reads back through `current_capture_see` all
+            // share it.
+            let see = static_exchange_evaluation(position, mv);
+            // The qsearch gate drops below-threshold captures outright — they are
+            // never deferred to a later stage. Promotions are exempt: a promotion
+            // changes the material on the board by more than the exchange it
+            // initiates, and dropping one because the pawn is recaptured loses the
+            // tactic the qsearch exists to find. The TT move is exempt by construction:
+            // its slot is masked out above, before this gate runs.
+            if let Some(threshold) = self.qsearch_see_threshold
+                && mv.flag().promotion().is_none()
+                && see < threshold
+            {
+                self.capture_yielded.set(index);
+                continue;
+            }
+            self.capture_scores[index].write(capture_score_with_see(
+                position,
+                mv,
+                see,
+                self.ordering,
+            ));
+            self.capture_sees[index].write(see);
+            if see >= 0 {
+                self.capture_good.set(index);
+            }
+        }
+    }
+
+    fn load_quiets(&mut self, position: &Position) {
+        self.quiets = generate_pseudo_legal_quiets(position);
+        let color = position.side_to_move();
+        for (index, &mv) in self.quiets.iter().enumerate() {
+            if Some(mv) == self.tt_move {
+                self.quiet_yielded.set(index);
+                continue;
+            }
+            self.quiet_scores[index].write(quiet_score(
+                position,
+                mv,
+                self.killers,
+                color,
+                self.ordering,
+            ));
+        }
+    }
+
+    /// Validates the TT move WITHOUT generating anything: `is_pseudo_legal` is pinned
+    /// (exhaustively, in mf-core) to agree with generated-list containment, which is
+    /// the same check the eager picker ran against its generated lists. A validated TT
+    /// move stays in `self.tt_move` so the later generation stages mask it out; an
+    /// invalid one is cleared so nothing masks a real move by accident.
+    fn validate_tt_move(&mut self, position: &Position) -> Option<Move> {
+        let tt_move = self.tt_move?;
+        let capture_family = tt_move.flag().is_capture() || tt_move.flag().promotion().is_some();
+        if (self.captures_only && !capture_family) || !is_pseudo_legal(position, tt_move) {
+            self.tt_move = None;
+            return None;
+        }
+        self.current_capture_see = if capture_family {
+            // Exempt from generation, not from the SEE contract: ProbCut thresholds
+            // every capture-family yield through `current_capture_see`.
+            Some(static_exchange_evaluation(position, tt_move))
+        } else {
+            None
+        };
+        Some(tt_move)
+    }
+
+    /// Yields the highest-scored un-yielded good capture. First-max-wins on ties, which
+    /// reproduces the eager stable sort's generation-order tie-break exactly.
+    fn next_good_capture(&mut self) -> Option<Move> {
+        self.pick_best_capture(true)
+    }
+
+    fn next_bad_capture(&mut self) -> Option<Move> {
+        self.pick_best_capture(false)
+    }
+
+    fn pick_best_capture(&mut self, good: bool) -> Option<Move> {
+        let mut best: Option<usize> = None;
+        for index in 0..self.captures.len() {
+            if self.capture_yielded.get(index) || self.capture_good.get(index) != good {
+                continue;
+            }
+            if best.is_none_or(|chosen| {
+                read_score(&self.capture_scores, index) > read_score(&self.capture_scores, chosen)
+            }) {
+                best = Some(index);
+            }
+        }
+        let index = best?;
+        self.capture_yielded.set(index);
+        self.current_capture_see = Some(read_score(&self.capture_sees, index));
+        Some(self.captures[index])
+    }
+
+    /// Yields the quiet with the highest score, breaking ties on the lower raw move
+    /// encoding, reproducing the eager sort's `(Reverse(score), raw)` key.
+    fn next_quiet(&mut self) -> Option<Move> {
+        let mut best: Option<usize> = None;
+        for index in 0..self.quiets.len() {
+            if self.quiet_yielded.get(index) {
+                continue;
+            }
+            if best.is_none_or(|chosen| {
+                read_score(&self.quiet_scores, index) > read_score(&self.quiet_scores, chosen)
+                    || (read_score(&self.quiet_scores, index)
+                        == read_score(&self.quiet_scores, chosen)
+                        && self.quiets[index].raw() < self.quiets[chosen].raw())
+            }) {
+                best = Some(index);
+            }
+        }
+        let index = best?;
+        self.quiet_yielded.set(index);
+        self.current_capture_see = None;
+        Some(self.quiets[index])
+    }
+
+    /// Exact SEE of the move most recently yielded by `next`, when that move belongs
+    /// to the captures family; `None` after a quiet. The value is the one
+    /// `load_captures` computed, identical to calling
+    /// `static_exchange_evaluation(position, mv)` at the node's root position.
+    #[inline]
+    pub(crate) fn current_capture_see(&self) -> Option<i32> {
+        self.current_capture_see
     }
 }
 
@@ -338,76 +627,54 @@ const QUIET_CHECK_SEE_THRESHOLD: i32 = 0;
 /// Castling is excluded: `static_exchange_evaluation` refuses castling by assertion
 /// (it is not an exchange), and a castling check is not the tactic a first-ply
 /// widening exists to find.
-fn quiet_checks(position: &Position, ordering: OrderingContext<'_>) -> Vec<Move> {
-    let mut checks: Vec<_> = generate_pseudo_legal_moves(position)
-        .iter()
-        .copied()
-        .filter(|mv| {
-            !mv.flag().is_capture() && mv.flag().promotion().is_none() && !mv.flag().is_castling()
-        })
-        // `move_gives_check` before the SEE call on purpose: it rejects the large
-        // majority of quiets for a handful of attack-table lookups, while SEE walks a
-        // whole recapture sequence.
-        .filter(|&mv| crate::search::move_gives_check(position, mv))
-        .filter(|&mv| static_exchange_evaluation(position, mv) >= QUIET_CHECK_SEE_THRESHOLD)
-        .collect();
+fn quiet_checks(position: &Position, ordering: OrderingContext<'_>) -> MoveList {
+    // The Quiets family is documented to preserve full-generation relative order and
+    // contains no captures or promotions, so filtering it here yields exactly the
+    // sequence the old full generation produced after its capture/promotion filter.
     let color = position.side_to_move();
-    checks.sort_by_cached_key(|&mv| {
-        core::cmp::Reverse(ordering.ordering_history(position, color, mv))
-    });
-    checks
+    let mut checks = MoveList::new();
+    let mut scores = uninit_scores();
+    let check_info = crate::search::CheckInfo::new(position);
+    for &mv in &generate_pseudo_legal_quiets(position) {
+        if mv.flag().is_castling() {
+            continue;
+        }
+        // The check test before the SEE call on purpose: it rejects the large
+        // majority of quiets for a couple of bitboard tests, while SEE walks a
+        // whole recapture sequence.
+        if !check_info.gives_check(position, mv)
+            || static_exchange_evaluation(position, mv) < QUIET_CHECK_SEE_THRESHOLD
+        {
+            continue;
+        }
+        scores[checks.len()].write(ordering.ordering_history(position, color, mv));
+        checks.push(mv);
+    }
+    // First-max selection with strict `>` reproduces the previous stable sort exactly:
+    // descending score, generation order on ties, and each key evaluated once.
+    sorted_by_score_descending(&checks, &scores)
 }
 
-pub(crate) fn quiescence_moves(
-    position: &Position,
-    tt_move: Option<Move>,
-    see_threshold: i32,
-    include_quiet_checks: bool,
-    ordering: OrderingContext<'_>,
-) -> Vec<Move> {
-    let pseudo_legal = generate_pseudo_legal_moves(position);
-    // The TT move is the one move qsearch has actual evidence about, so it is searched
-    // first and is exempt from the SEE gate: the entry that named it was produced by a
-    // search, which is strictly better evidence than a static exchange estimate.
-    let tt_move = tt_move.filter(|mv| {
-        pseudo_legal.contains(mv) && (mv.flag().is_capture() || mv.flag().promotion().is_some())
-    });
-    let mut moves: Vec<_> = pseudo_legal
-        .iter()
-        .copied()
-        .filter(|mv| Some(*mv) != tt_move)
-        .filter(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some())
-        // Promotions are exempt from the SEE gate. A promotion changes the material on
-        // the board by more than the exchange it initiates, and dropping one because the
-        // pawn is recaptured loses the tactic the qsearch exists to find.
-        .filter(|&mv| {
-            mv.flag().promotion().is_some()
-                || static_exchange_evaluation(position, mv) >= see_threshold
-        })
-        .collect();
-    // `sort_by_cached_key` for the same reason as the main loop above, and this site is
-    // the more expensive of the two: `capture_score` opens with a full
-    // `static_exchange_evaluation()` and closes with a capture-history table read, and
-    // `sort_unstable_by_key` re-evaluates its key on EVERY comparison. That made both
-    // the SEE and the table read run O(n log n) times per qsearch node instead of O(n),
-    // and qsearch is the majority of nodes (mission AGENTS.md 4.54 trap 1).
-    moves.sort_by_cached_key(|&mv| core::cmp::Reverse(capture_score(position, mv, ordering)));
-    // Quiet checks are appended AFTER every capture rather than interleaved with them.
-    // A capture resolves material immediately and a quiet check does not, so a check
-    // must never displace a capture that could raise the standing pat first: qsearch
-    // cuts off on the first move that reaches beta, and searching the cheap resolving
-    // move first is what keeps the widening affordable.
-    if include_quiet_checks {
-        moves.extend(
-            quiet_checks(position, ordering)
-                .into_iter()
-                .filter(|mv| Some(*mv) != tt_move),
-        );
+/// Yields `moves` in descending `scores` order, first-in-generation-order on ties,
+/// which is bit-for-bit the order of a stable sort on `Reverse(score)`.
+fn sorted_by_score_descending(moves: &MoveList, scores: &ScoreBuffer) -> MoveList {
+    let mut sorted = MoveList::new();
+    let mut yielded = [false; MAX_MOVES];
+    for _ in 0..moves.len() {
+        let mut best: Option<usize> = None;
+        for (index, &done) in yielded.iter().enumerate().take(moves.len()) {
+            if done {
+                continue;
+            }
+            if best.is_none_or(|chosen| read_score(scores, index) > read_score(scores, chosen)) {
+                best = Some(index);
+            }
+        }
+        let index = best.expect("selection must find an un-yielded move");
+        yielded[index] = true;
+        sorted.push(moves[index]);
     }
-    if let Some(tt_move) = tt_move {
-        moves.insert(0, tt_move);
-    }
-    moves
+    sorted
 }
 
 /// Material a capture stands to win, used by the qsearch delta-pruning margin.
@@ -428,7 +695,25 @@ pub(crate) fn captured_material(position: &Position, mv: Move) -> i32 {
     victim + promotion
 }
 
+#[cfg(test)]
 fn capture_score(position: &Position, mv: Move, ordering: OrderingContext<'_>) -> i32 {
+    capture_score_with_see(
+        position,
+        mv,
+        static_exchange_evaluation(position, mv),
+        ordering,
+    )
+}
+
+/// `capture_score` with the SEE value supplied by the caller, so a site that already
+/// paid for the exchange walk (the good/bad split, the qsearch gate) does not pay
+/// twice.
+fn capture_score_with_see(
+    position: &Position,
+    mv: Move,
+    see: i32,
+    ordering: OrderingContext<'_>,
+) -> i32 {
     let victim = if mv.flag().is_en_passant() {
         PieceKind::Pawn
     } else {
@@ -443,8 +728,7 @@ fn capture_score(position: &Position, mv: Move, ordering: OrderingContext<'_>) -
     let promotion = mv.flag().promotion().map_or(0, |kind| {
         material_value(kind) - material_value(PieceKind::Pawn)
     });
-    static_exchange_evaluation(position, mv) * 32 + material_value(victim) * 16
-        - material_value(attacker)
+    see * 32 + material_value(victim) * 16 - material_value(attacker)
         + promotion
         + ordering.capture_history(position, mv)
 }
@@ -478,20 +762,30 @@ mod tests {
     use mf_core::{Position, generate_legal_moves, generate_pseudo_legal_moves, is_in_check};
 
     use super::*;
-    use crate::history::{CONTINUATION_PLIES, SharedHistory};
+    use crate::history::{CONTINUATION_PLIES, LowPlyHistory, SharedHistory};
     use crate::search::move_gives_check;
+
+    /// A shared zeroed low-ply table for ordering tests. Never written to, so sharing
+    /// it across tests cannot bias an order.
+    fn empty_low_ply_history() -> &'static LowPlyHistory {
+        static TABLE: std::sync::OnceLock<LowPlyHistory> = std::sync::OnceLock::new();
+        TABLE.get_or_init(LowPlyHistory::new)
+    }
 
     /// Ordering context with every history table live but empty, so the generator
     /// tests exercise the shipped code path without a warmed table biasing the order.
     fn empty_ordering<'a>(history: &'a SharedHistory, position: &Position) -> OrderingContext<'a> {
         OrderingContext {
             history,
+            low_ply_history: empty_low_ply_history(),
+            ply: 0,
             pawn_key: position.zobrist().pawn(),
             continuation: [None; CONTINUATION_PLIES.len()],
             use_butterfly_history: true,
             use_capture_history: true,
             use_pawn_history: false,
             use_continuation_history: true,
+            use_low_ply_history: true,
         }
     }
 
@@ -572,7 +866,7 @@ mod tests {
                 continue;
             }
             let ordering = empty_ordering(&history, &position);
-            for mv in quiet_checks(&position, ordering) {
+            for &mv in &quiet_checks(&position, ordering) {
                 assert!(!mv.flag().is_capture(), "{position:?} {mv:?}");
                 assert!(mv.flag().promotion().is_none(), "{position:?} {mv:?}");
                 assert!(!mv.flag().is_castling(), "{position:?} {mv:?}");
@@ -634,8 +928,16 @@ mod tests {
                 continue;
             }
             let ordering = empty_ordering(&history, &position);
-            let captures = quiescence_moves(&position, None, 0, false, ordering);
-            let widened = quiescence_moves(&position, None, 0, true, ordering);
+            let drain_qsearch = |include_quiet_checks: bool| {
+                let mut picker = MovePicker::qsearch(None, 0, include_quiet_checks, ordering);
+                let mut moves = Vec::new();
+                while let Some(mv) = picker.next(&position) {
+                    moves.push(mv);
+                }
+                moves
+            };
+            let captures = drain_qsearch(false);
+            let widened = drain_qsearch(true);
 
             assert_eq!(
                 widened[..captures.len()],
@@ -643,11 +945,464 @@ mod tests {
                 "widening must not reorder or drop a capture: {position:?}"
             );
             assert_eq!(
-                widened[captures.len()..].to_vec(),
-                quiet_checks(&position, ordering),
+                widened[captures.len()..],
+                quiet_checks(&position, ordering)
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>()[..],
                 "{position:?}"
             );
         }
+    }
+
+    /// The qsearch picker's gate contract, in order of authority:
+    ///
+    /// 1. SET equality: the yielded moves are exactly the valid TT capture (when one
+    ///    was supplied), every capture surviving the SEE gate, and — only when the
+    ///    widening is enabled — the gated quiet checks.
+    /// 2. TT FIRST: a capture-family TT move is yielded before anything else and is
+    ///    exempt from the gate, so it is present even when its own SEE sits below the
+    ///    threshold.
+    /// 3. STAGE order: good captures (SEE >= 0) before bad captures, every capture
+    ///    before every quiet check, no interleaving.
+    /// 4. WITHIN-stage order: each capture stage descends by `capture_score`.
+    /// 5. GATE: no non-promotion capture below the threshold is ever yielded, while
+    ///    every promotion is yielded regardless of its SEE.
+    /// 6. SEE contract: every capture-family yield exposes its exact SEE through
+    ///    `current_capture_see`, every quiet exposes `None`.
+    #[test]
+    fn qsearch_picker_honors_the_gate_exemptions_and_stage_order() {
+        let history = SharedHistory::new();
+        for position in generator_positions() {
+            if is_in_check(&position, position.side_to_move()) {
+                continue;
+            }
+            let ordering = empty_ordering(&history, &position);
+            for threshold in [-50, 0, 50] {
+                for include_quiet_checks in [false, true] {
+                    for tt_move in tt_scenarios(&position) {
+                        let mut picker =
+                            MovePicker::qsearch(tt_move, threshold, include_quiet_checks, ordering);
+                        let yielded = drain(&mut picker, &position);
+
+                        let pseudo_captures = generate_pseudo_legal_captures(&position);
+                        let tt_capture = tt_move
+                            .filter(|mv| is_capture_family(*mv) && pseudo_captures.contains(mv));
+                        let mut expected: Vec<_> = tt_capture
+                            .into_iter()
+                            .chain(pseudo_captures.iter().copied().filter(|mv| {
+                                Some(*mv) != tt_capture
+                                    && (mv.flag().promotion().is_some()
+                                        || static_exchange_evaluation(&position, *mv) >= threshold)
+                            }))
+                            .collect();
+                        if include_quiet_checks {
+                            expected.extend(quiet_checks(&position, ordering).iter().copied());
+                        }
+
+                        // 1. Set equality, each surviving move exactly once.
+                        let mut yielded_raw: Vec<_> =
+                            yielded.iter().map(|(mv, _)| mv.raw()).collect();
+                        let mut expected_raw: Vec<_> = expected.iter().map(|mv| mv.raw()).collect();
+                        yielded_raw.sort_unstable();
+                        expected_raw.sort_unstable();
+                        assert_eq!(
+                            yielded_raw, expected_raw,
+                            "{position:?} tt={tt_move:?} t={threshold} q={include_quiet_checks}"
+                        );
+
+                        // 2. The TT capture is yielded first — and, the lazy point of
+                        // the staging, without generating anything: a qsearch node
+                        // that cuts off on its TT capture must not pay for the
+                        // capture stage at all.
+                        if let Some(tt) = tt_capture {
+                            let mut picker = MovePicker::qsearch(
+                                tt_move,
+                                threshold,
+                                include_quiet_checks,
+                                ordering,
+                            );
+                            assert_eq!(
+                                picker.next(&position),
+                                Some(tt),
+                                "{position:?}: TT capture must be yielded first"
+                            );
+                            assert!(
+                                picker.captures.is_empty() && picker.quiet_check_moves.is_empty(),
+                                "{position:?}: yielding the TT capture must not generate any list"
+                            );
+                            assert_eq!(yielded[0].0, tt, "{position:?}");
+                        }
+
+                        // 3. Stage order: good captures, then bad captures, then
+                        // (optionally) quiet checks — never interleaved.
+                        let stages: Vec<_> = yielded
+                            .iter()
+                            .map(|(mv, _)| {
+                                if is_capture_family(*mv) {
+                                    if static_exchange_evaluation(&position, *mv) >= 0 {
+                                        0
+                                    } else {
+                                        1
+                                    }
+                                } else {
+                                    2
+                                }
+                            })
+                            .collect();
+                        assert!(
+                            stages.windows(2).all(|pair| pair[0] <= pair[1]),
+                            "stages interleave: {position:?} tt={tt_move:?} \
+                             t={threshold} q={include_quiet_checks} stages={stages:?}"
+                        );
+
+                        // 4. Within-stage order descends by capture score. The TT
+                        // capture is exempt: it is yielded first on search evidence,
+                        // not on score, so the pair straddling it is skipped just as
+                        // the full-picker invariant test slices it off.
+                        for pair in yielded.windows(2) {
+                            let (a, _) = pair[0];
+                            let (b, _) = pair[1];
+                            if Some(a) == tt_capture || Some(b) == tt_capture {
+                                continue;
+                            }
+                            if is_capture_family(a)
+                                && is_capture_family(b)
+                                && (static_exchange_evaluation(&position, a) >= 0)
+                                    == (static_exchange_evaluation(&position, b) >= 0)
+                            {
+                                assert!(
+                                    capture_score(&position, a, ordering)
+                                        >= capture_score(&position, b, ordering),
+                                    "capture order violated: {position:?} {a:?} {b:?}"
+                                );
+                            }
+                        }
+
+                        // 5. The gate itself: nothing below threshold except
+                        // promotions and the TT capture; every promotion kept.
+                        for &(mv, _) in &yielded {
+                            if Some(mv) == tt_capture || mv.flag().promotion().is_some() {
+                                continue;
+                            }
+                            if is_capture_family(mv) {
+                                assert!(
+                                    static_exchange_evaluation(&position, mv) >= threshold,
+                                    "below-threshold capture yielded: {position:?} {mv:?}"
+                                );
+                            }
+                        }
+                        for &mv in pseudo_captures.iter() {
+                            if mv.flag().promotion().is_some() && Some(mv) != tt_capture {
+                                assert!(
+                                    yielded.iter().any(|(seen, _)| *seen == mv),
+                                    "promotion dropped by the gate: {position:?} {mv:?}"
+                                );
+                            }
+                        }
+
+                        // 6. The SEE contract on every yield, including the TT move.
+                        for &(mv, see) in &yielded {
+                            let expected_see = is_capture_family(mv)
+                                .then(|| static_exchange_evaluation(&position, mv));
+                            assert_eq!(see, expected_see, "{position:?} {mv:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Drains the staged picker, recording each yielded move together with the
+    /// `current_capture_see` the search would read after it.
+    fn drain(picker: &mut MovePicker<'_>, position: &Position) -> Vec<(Move, Option<i32>)> {
+        let mut yielded = Vec::new();
+        while let Some(mv) = picker.next(position) {
+            yielded.push((mv, picker.current_capture_see()));
+        }
+        yielded
+    }
+
+    fn is_capture_family(mv: Move) -> bool {
+        mv.flag().is_capture() || mv.flag().promotion().is_some()
+    }
+
+    /// Classifies one yielded move into the stage it must have come from.
+    fn stage_of(position: &Position, mv: Move) -> u8 {
+        if is_capture_family(mv) {
+            if static_exchange_evaluation(position, mv) >= 0 {
+                0 // good capture
+            } else {
+                2 // bad capture
+            }
+        } else {
+            1 // quiet
+        }
+    }
+
+    /// The staged invariants every full drain must satisfy:
+    ///
+    /// 1. SET equality: the yielded moves are exactly the pseudo-legal moves, each
+    ///    once (the TT move deduplicated, a corrupt TT entry dropped).
+    /// 2. STAGE order: a validated TT move first, then good captures (SEE >= 0), then
+    ///    quiets, then bad captures, with no interleaving.
+    /// 3. WITHIN-stage order: captures descend by `capture_score`; quiets descend by
+    ///    `quiet_score` with the raw-encoding ascending tie-break.
+    /// 4. SEE contract: every capture-family yield exposes its exact SEE through
+    ///    `current_capture_see`, every quiet exposes `None`.
+    ///
+    /// Deliberately NOT asserted: identity with an eager reference sequence. The lazy
+    /// picker scores each stage when it is reached, and in the search the history
+    /// tables are warm by then, so order-identity with node-entry scores is no longer
+    /// the contract.
+    fn assert_staged_invariants(
+        position: &Position,
+        tt_move: Option<Move>,
+        killers: [Option<Move>; 2],
+        ordering: OrderingContext<'_>,
+        yielded: &[(Move, Option<i32>)],
+    ) {
+        let pseudo_legal = generate_pseudo_legal_moves(position);
+        let tt_move = tt_move.filter(|mv| pseudo_legal.contains(mv));
+
+        // 1. Set equality, each move exactly once.
+        let mut yielded_raw: Vec<_> = yielded.iter().map(|(mv, _)| mv.raw()).collect();
+        let mut expected_raw: Vec<_> = pseudo_legal.iter().map(|mv| mv.raw()).collect();
+        yielded_raw.sort_unstable();
+        expected_raw.sort_unstable();
+        assert_eq!(yielded_raw, expected_raw, "{position:?} tt={tt_move:?}");
+
+        // 2. Stage order: TT first, then stages 0 -> 1 -> 2 monotonically.
+        let mut rest = yielded;
+        if let Some(tt) = tt_move {
+            assert_eq!(
+                yielded[0].0, tt,
+                "{position:?}: TT move must be yielded first"
+            );
+            rest = &yielded[1..];
+        }
+        let stages: Vec<_> = rest.iter().map(|(mv, _)| stage_of(position, *mv)).collect();
+        assert!(
+            stages.windows(2).all(|pair| pair[0] <= pair[1]),
+            "stages interleave: {position:?} tt={tt_move:?} stages={stages:?}"
+        );
+
+        // 3. Within-stage order.
+        let color = position.side_to_move();
+        for pair in rest.windows(2) {
+            let (a, _) = pair[0];
+            let (b, _) = pair[1];
+            let (stage_a, stage_b) = (stage_of(position, a), stage_of(position, b));
+            if stage_a != stage_b {
+                continue;
+            }
+            if stage_a == 1 {
+                let (score_a, score_b) = (
+                    quiet_score(position, a, killers, color, ordering),
+                    quiet_score(position, b, killers, color, ordering),
+                );
+                assert!(
+                    score_a > score_b || (score_a == score_b && a.raw() < b.raw()),
+                    "quiet order violated: {position:?} {a:?} {b:?}"
+                );
+            } else {
+                assert!(
+                    capture_score(position, a, ordering) >= capture_score(position, b, ordering),
+                    "capture order violated: {position:?} {a:?} {b:?}"
+                );
+            }
+        }
+
+        // 4. The SEE contract on every yield, including the TT move.
+        for &(mv, see) in yielded {
+            let expected = is_capture_family(mv).then(|| static_exchange_evaluation(position, mv));
+            assert_eq!(see, expected, "{position:?} {mv:?}");
+        }
+    }
+
+    fn tt_scenarios(position: &Position) -> Vec<Option<Move>> {
+        let pseudo_legal = generate_pseudo_legal_moves(position);
+        let first_capture = pseudo_legal
+            .iter()
+            .copied()
+            .find(|mv| mv.flag().is_capture() || mv.flag().promotion().is_some());
+        let first_quiet = pseudo_legal
+            .iter()
+            .copied()
+            .find(|mv| !mv.flag().is_capture() && mv.flag().promotion().is_none());
+        let garbage = Move::new(
+            Square::new(0).unwrap(),
+            Square::new(63).unwrap(),
+            mf_core::MoveFlag::QUIET,
+        );
+        vec![None, first_capture, first_quiet, Some(garbage)]
+    }
+
+    /// A full drain of the staged picker must satisfy the staged invariants for every
+    /// TT scenario, including a corrupt entry that must be dropped without generating
+    /// a phantom move.
+    #[test]
+    fn staged_picker_satisfies_the_staged_invariants() {
+        let history = SharedHistory::new();
+        for position in generator_positions() {
+            let ordering = empty_ordering(&history, &position);
+            let first_quiet = generate_pseudo_legal_moves(&position)
+                .iter()
+                .copied()
+                .find(|mv| !mv.flag().is_capture() && mv.flag().promotion().is_none());
+            for tt_move in tt_scenarios(&position) {
+                for killers in [[None, None], [first_quiet, None]] {
+                    let mut picker = MovePicker::new(tt_move, killers, ordering);
+                    let yielded = drain(&mut picker, &position);
+                    assert_staged_invariants(&position, tt_move, killers, ordering, &yielded);
+                }
+            }
+        }
+    }
+
+    /// ProbCut's capture-only iteration must yield exactly the pseudo-legal captures
+    /// and promotions — good ones (SEE >= 0) before bad ones, each stage descending by
+    /// `capture_score`, every yield exposing its exact SEE — and must not be derailed
+    /// by a quiet TT entry, which it neither yields nor lets suppress a real move.
+    #[test]
+    fn captures_only_picker_yields_exactly_the_capture_family_in_stage_order() {
+        let history = SharedHistory::new();
+        for position in generator_positions() {
+            let ordering = empty_ordering(&history, &position);
+            for tt_move in tt_scenarios(&position) {
+                let mut picker = MovePicker::captures_only(tt_move, ordering);
+                let yielded = drain(&mut picker, &position);
+
+                let pseudo_legal = generate_pseudo_legal_moves(&position);
+                let mut yielded_raw: Vec<_> = yielded.iter().map(|(mv, _)| mv.raw()).collect();
+                let mut expected_raw: Vec<_> = pseudo_legal
+                    .iter()
+                    .copied()
+                    .filter(|&mv| is_capture_family(mv))
+                    .map(|mv| mv.raw())
+                    .collect();
+                yielded_raw.sort_unstable();
+                expected_raw.sort_unstable();
+                assert_eq!(yielded_raw, expected_raw, "{position:?} tt={tt_move:?}");
+
+                let tt_capture =
+                    tt_move.filter(|&mv| is_capture_family(mv) && pseudo_legal.contains(&mv));
+                let mut rest = yielded.as_slice();
+                if let Some(tt) = tt_capture {
+                    assert_eq!(yielded[0].0, tt, "{position:?}: TT capture must be first");
+                    rest = &yielded[1..];
+                }
+                let stages: Vec<_> = rest
+                    .iter()
+                    .map(|(mv, _)| stage_of(&position, *mv))
+                    .collect();
+                assert!(
+                    stages.windows(2).all(|pair| pair[0] <= pair[1]),
+                    "stages interleave: {position:?} tt={tt_move:?}"
+                );
+                for pair in rest.windows(2) {
+                    let ((a, _), (b, _)) = (pair[0], pair[1]);
+                    if stage_of(&position, a) == stage_of(&position, b) {
+                        assert!(
+                            capture_score(&position, a, ordering)
+                                >= capture_score(&position, b, ordering),
+                            "capture order violated: {position:?} {a:?} {b:?}"
+                        );
+                    }
+                }
+                for &(mv, see) in &yielded {
+                    assert_eq!(
+                        see,
+                        Some(static_exchange_evaluation(&position, mv)),
+                        "{position:?} {mv:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The lazy point of the staging: a picker that stops before its quiet stage must
+    /// never have scored a quiet, and one that stops at the TT move must not even have
+    /// generated captures. Observed through the score buffers' write masks rather than
+    /// timing, so the property is deterministic.
+    #[test]
+    fn stages_are_not_generated_until_reached() {
+        let history = SharedHistory::new();
+        for position in generator_positions() {
+            let ordering = empty_ordering(&history, &position);
+            let pseudo_legal = generate_pseudo_legal_moves(&position);
+            let Some(tt_move) = pseudo_legal.first().copied() else {
+                continue;
+            };
+
+            // Only the TT move drawn: nothing may have been generated.
+            let mut picker = MovePicker::new(Some(tt_move), [None, None], ordering);
+            assert_eq!(picker.next(&position), Some(tt_move));
+            assert!(
+                picker.captures.is_empty() && picker.quiets.is_empty(),
+                "{position:?}: yielding the TT move must not generate any list"
+            );
+
+            // Drawn past the TT move but not past the good captures: quiets must not
+            // have been generated.
+            let mut picker = MovePicker::new(Some(tt_move), [None, None], ordering);
+            picker.next(&position);
+            if picker.next(&position).is_some_and(is_capture_family) {
+                assert!(
+                    picker.quiets.is_empty(),
+                    "{position:?}: quiets generated while good captures remain"
+                );
+            }
+        }
+    }
+
+    /// A quiet rewarded in low-ply history is yielded ahead of the piece-square
+    /// favourite below the ply ceiling, and the reward is invisible at and beyond it.
+    ///
+    /// With every shared table empty the startpos picker leads with b1c3, the best
+    /// piece-square delta on the board. Rewarding the rim move g1h3 -- strictly worse
+    /// on every other ordering term -- must put it first at plies 0 through 4 and
+    /// change nothing from ply 5 up.
+    #[test]
+    fn low_ply_history_reorders_equal_quiets_below_the_ply_ceiling_only() {
+        let position = Position::startpos();
+        let history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
+        let b1c3 = mf_core::parse_uci_move(&position, "b1c3", false).expect("legal quiet");
+        let g1h3 = mf_core::parse_uci_move(&position, "g1h3", false).expect("legal quiet");
+
+        for ply in 0..LOW_PLY_HISTORY_PLIES {
+            low_ply_history.update(ply, g1h3, 1_024);
+        }
+
+        let ordering_at = |ply: usize, use_low_ply_history: bool| OrderingContext {
+            history: &history,
+            low_ply_history: &low_ply_history,
+            ply,
+            pawn_key: position.zobrist().pawn(),
+            continuation: [None; CONTINUATION_PLIES.len()],
+            use_butterfly_history: true,
+            use_capture_history: true,
+            use_pawn_history: false,
+            use_continuation_history: true,
+            use_low_ply_history,
+        };
+        let first_of = |ordering: OrderingContext<'_>| {
+            let mut picker = MovePicker::new(None, [None, None], ordering);
+            picker.next(&position).expect("startpos has quiet moves")
+        };
+
+        for ply in 0..LOW_PLY_HISTORY_PLIES {
+            assert_eq!(
+                first_of(ordering_at(ply, true)),
+                g1h3,
+                "the rewarded quiet must lead at ply {ply}"
+            );
+        }
+        // At the ceiling the table is no longer consulted, so piece-square order wins.
+        assert_eq!(first_of(ordering_at(LOW_PLY_HISTORY_PLIES, true)), b1c3);
+        // The toggle gates the read: with it off the reward is invisible at any ply.
+        assert_eq!(first_of(ordering_at(0, false)), b1c3);
     }
 
     /// No sort site in this module may re-evaluate its key per comparison.
@@ -659,8 +1414,9 @@ mod tests {
     /// 4.54 trap 1).
     ///
     /// It has now been introduced twice. M4-F1 hit it on the three main-loop sites for
-    /// -12% NPS. M4-F2 fixed those three and missed `quiescence_moves`, whose key calls
-    /// `static_exchange_evaluation()` AND `capture_history()`; qsearch is the majority
+    /// -12% NPS. M4-F2 fixed those three and missed the eager qsearch list builder,
+    /// whose key calls `static_exchange_evaluation()` AND `capture_history()`;
+    /// qsearch is the majority
     /// of nodes and SEE is far dearer than a table read, so that one line cost 6.7% NPS
     /// on a capture-rich position (`experiments/M4-F3-defects/`). The defect appears at
     /// a call site nobody edited, whenever a term is added to a scoring function, which
@@ -688,9 +1444,9 @@ mod tests {
         let cached = ["sort_by", "_cached_key("].concat();
         assert_eq!(
             source.lines().filter(|line| line.contains(&cached)).count(),
-            5,
-            "the five sort sites are three in MovePicker::new, one in quiescence_moves, \
-             and one in quiet_checks"
+            0,
+            "no comparison sort remains in this module; the shipped paths select from \
+             stack arrays with precomputed scores"
         );
     }
 }

@@ -7,14 +7,20 @@ authors.workspace = true
 
 [features]
 default = []
+corrhist-regression = []
 # Forwards to the NNUE update counters so `nnue_update_profile` can read them. Kept off by
 # default: the counters add an rdtsc pair to the hottest loop in the engine.
-instrumentation = ["mf-nnue/instrumentation"]
+instrumentation = ["mf-nnue/instrumentation", "mf-core/instrumentation"]
 
 [dependencies]
 mf-core = { path = "../mf-core" }
 mf-nnue = { path = "../mf-nnue" }
+mf-tb = { path = "../mf-tb" }
 
 [[example]]
 name = "nnue_update_profile"
+required-features = ["instrumentation"]
+
+[[example]]
+name = "see_profile"
 required-features = ["instrumentation"]

@@ -236,8 +236,216 @@ const _: () = assert!(
 const _: () = assert!(size_of::<Cluster>() == CACHE_LINE_BYTES);
 const _: () = assert!(align_of::<Cluster>() == CACHE_LINE_BYTES);
 
+/// The table's backing memory: either an ordinary heap allocation or a Windows
+/// large-page region.
+///
+/// Random probes over a multi-hundred-megabyte table touch a new 4 KiB page almost
+/// every time, so the TLB misses along with the cache. 2 MiB pages cut the page walk
+/// out of most probes. The large-page path needs `SeLockMemoryPrivilege`, which most
+/// accounts do not hold, so failure of any kind falls back silently to the heap path
+/// -- the cluster count is decided BEFORE the allocation strategy, so both paths index
+/// identically and the choice can never move a node count.
+enum ClusterStorage {
+    Heap(Box<[Cluster]>),
+    #[cfg(windows)]
+    LargePages(large_pages::LargePageAllocation),
+}
+
+impl core::ops::Deref for ClusterStorage {
+    type Target = [Cluster];
+
+    #[inline]
+    fn deref(&self) -> &[Cluster] {
+        match self {
+            Self::Heap(clusters) => clusters,
+            #[cfg(windows)]
+            Self::LargePages(allocation) => allocation.clusters(),
+        }
+    }
+}
+
+#[cfg(windows)]
+mod large_pages {
+    //! Minimal Win32 surface for a `MEM_LARGE_PAGES` allocation, declared by hand
+    //! because the workspace deliberately carries no Windows bindings crate.
+
+    use core::ffi::c_void;
+    use core::ptr::{self, NonNull};
+    use std::sync::OnceLock;
+
+    use super::{CLUSTER_BYTES, Cluster};
+
+    const MEM_COMMIT: u32 = 0x1000;
+    const MEM_RESERVE: u32 = 0x2000;
+    const MEM_LARGE_PAGES: u32 = 0x2000_0000;
+    const MEM_RELEASE: u32 = 0x8000;
+    const PAGE_READWRITE: u32 = 0x04;
+    const TOKEN_ADJUST_PRIVILEGES: u32 = 0x0020;
+    const TOKEN_QUERY: u32 = 0x0008;
+    const SE_PRIVILEGE_ENABLED: u32 = 0x0002;
+    const ERROR_SUCCESS: u32 = 0;
+
+    #[repr(C)]
+    struct Luid {
+        low_part: u32,
+        high_part: i32,
+    }
+
+    #[repr(C)]
+    struct LuidAndAttributes {
+        luid: Luid,
+        attributes: u32,
+    }
+
+    #[repr(C)]
+    struct TokenPrivileges {
+        privilege_count: u32,
+        privileges: [LuidAndAttributes; 1],
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn VirtualAlloc(
+            address: *mut c_void,
+            size: usize,
+            allocation_type: u32,
+            protect: u32,
+        ) -> *mut c_void;
+        fn VirtualFree(address: *mut c_void, size: usize, free_type: u32) -> i32;
+        fn GetLargePageMinimum() -> usize;
+        fn GetCurrentProcess() -> isize;
+        fn CloseHandle(handle: isize) -> i32;
+        fn GetLastError() -> u32;
+    }
+
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn OpenProcessToken(process: isize, desired_access: u32, token: *mut isize) -> i32;
+        fn LookupPrivilegeValueW(system_name: *const u16, name: *const u16, luid: *mut Luid)
+        -> i32;
+        fn AdjustTokenPrivileges(
+            token: isize,
+            disable_all_privileges: i32,
+            new_state: *const TokenPrivileges,
+            buffer_length: u32,
+            previous_state: *mut TokenPrivileges,
+            return_length: *mut u32,
+        ) -> i32;
+    }
+
+    /// A committed large-page region holding exactly `cluster_count` clusters.
+    ///
+    /// The region itself is rounded up to the large-page minimum, but only the first
+    /// `cluster_count` clusters are ever exposed: the count is part of the table's
+    /// indexing function and must not depend on how the memory behind it was obtained.
+    pub(super) struct LargePageAllocation {
+        pointer: NonNull<Cluster>,
+        cluster_count: usize,
+    }
+
+    // SAFETY: the region is plain memory accessed through `&Cluster`, whose fields are
+    // atomics; the allocation is freed only on drop, which requires exclusive access.
+    unsafe impl Send for LargePageAllocation {}
+    unsafe impl Sync for LargePageAllocation {}
+
+    impl LargePageAllocation {
+        #[inline]
+        pub(super) fn clusters(&self) -> &[Cluster] {
+            // SAFETY: `allocate` committed at least `cluster_count * CLUSTER_BYTES`
+            // zeroed bytes at `pointer`, and zeroed bytes are valid (empty) clusters.
+            unsafe { core::slice::from_raw_parts(self.pointer.as_ptr(), self.cluster_count) }
+        }
+    }
+
+    impl Drop for LargePageAllocation {
+        fn drop(&mut self) {
+            // SAFETY: the pointer came from `VirtualAlloc` with `MEM_RESERVE`, and
+            // `MEM_RELEASE` requires a zero size.
+            unsafe { VirtualFree(self.pointer.as_ptr().cast(), 0, MEM_RELEASE) };
+        }
+    }
+
+    /// Attempts a large-page allocation for `cluster_count` clusters.
+    ///
+    /// Any failure -- the privilege cannot be enabled, large pages are unsupported,
+    /// or the allocation itself is refused (large pages need physically contiguous
+    /// memory, which a fragmented machine may not have) -- returns `None` and the
+    /// caller falls back to the heap.
+    pub(super) fn allocate(cluster_count: usize) -> Option<LargePageAllocation> {
+        static LOCK_MEMORY_PRIVILEGE: OnceLock<bool> = OnceLock::new();
+        if !*LOCK_MEMORY_PRIVILEGE.get_or_init(enable_lock_memory_privilege) {
+            return None;
+        }
+        // SAFETY: no arguments; returns 0 when the processor lacks large pages.
+        let page_bytes = unsafe { GetLargePageMinimum() };
+        if page_bytes == 0 {
+            return None;
+        }
+        let bytes = cluster_count
+            .checked_mul(CLUSTER_BYTES)?
+            .checked_add(page_bytes - 1)?
+            / page_bytes
+            * page_bytes;
+        // SAFETY: a fresh reserve-and-commit of `bytes`; the result is checked below.
+        // `MEM_COMMIT` memory is zero-initialized, which is the table's empty state.
+        let pointer = unsafe {
+            VirtualAlloc(
+                ptr::null_mut(),
+                bytes,
+                MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES,
+                PAGE_READWRITE,
+            )
+        };
+        NonNull::new(pointer.cast::<Cluster>()).map(|pointer| LargePageAllocation {
+            pointer,
+            cluster_count,
+        })
+    }
+
+    /// Enables `SeLockMemoryPrivilege` on the process token, once per process.
+    ///
+    /// `AdjustTokenPrivileges` succeeds even when it assigns nothing, so the call is
+    /// only trusted when `GetLastError` confirms every requested privilege was
+    /// enabled (otherwise it reports `ERROR_NOT_ALL_ASSIGNED`).
+    fn enable_lock_memory_privilege() -> bool {
+        let mut name: Vec<u16> = "SeLockMemoryPrivilege".encode_utf16().collect();
+        name.push(0);
+        let mut token = 0isize;
+        // SAFETY: standard token-privilege sequence over a token opened here; every
+        // out-parameter points at a live local, and the token is closed on all paths.
+        unsafe {
+            if OpenProcessToken(
+                GetCurrentProcess(),
+                TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+                &mut token,
+            ) == 0
+            {
+                return false;
+            }
+            let mut luid = Luid {
+                low_part: 0,
+                high_part: 0,
+            };
+            let enabled = LookupPrivilegeValueW(ptr::null(), name.as_ptr(), &mut luid) != 0 && {
+                let privileges = TokenPrivileges {
+                    privilege_count: 1,
+                    privileges: [LuidAndAttributes {
+                        luid,
+                        attributes: SE_PRIVILEGE_ENABLED,
+                    }],
+                };
+                AdjustTokenPrivileges(token, 0, &privileges, 0, ptr::null_mut(), ptr::null_mut())
+                    != 0
+                    && GetLastError() == ERROR_SUCCESS
+            };
+            CloseHandle(token);
+            enabled
+        }
+    }
+}
+
 pub struct TranspositionTable {
-    clusters: Box<[Cluster]>,
+    clusters: ClusterStorage,
     /// Whether anything has been stored since the last clear.
     ///
     /// `hashfull` samples only the first 1000 clusters, so a large table holding a small
@@ -269,13 +477,21 @@ impl TranspositionTable {
             .ok_or(AllocationError::SizeOverflow)?
             / CACHE_LINE_BYTES;
 
+        #[cfg(windows)]
+        if let Some(allocation) = large_pages::allocate(cluster_count) {
+            return Ok(Self {
+                clusters: ClusterStorage::LargePages(allocation),
+                has_stored: AtomicBool::new(false),
+            });
+        }
+
         let mut clusters = Vec::new();
         clusters
             .try_reserve_exact(cluster_count)
             .map_err(AllocationError::Reserve)?;
         clusters.resize_with(cluster_count, Cluster::empty);
         Ok(Self {
-            clusters: clusters.into_boxed_slice(),
+            clusters: ClusterStorage::Heap(clusters.into_boxed_slice()),
             has_stored: AtomicBool::new(false),
         })
     }
@@ -352,7 +568,12 @@ impl TranspositionTable {
         );
         let packed = PackedEntry::pack(key, data);
         let cluster = self.cluster(key);
-        self.has_stored.store(true, Ordering::Relaxed);
+        // Check-before-store: an unconditional store keeps this shared cache line in
+        // exclusive state on every storing thread at node frequency, while the load
+        // leaves it shared once the flag is set.
+        if !self.has_stored.load(Ordering::Relaxed) {
+            self.has_stored.store(true, Ordering::Relaxed);
+        }
 
         if let Some((entry, stored)) = cluster.entries.iter().find_map(|entry| {
             entry

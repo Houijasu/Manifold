@@ -12,11 +12,13 @@ pub use history::{
     CORRECTION_MAJOR, CORRECTION_MATERIAL, CORRECTION_MINOR, CORRECTION_PAWN, CORRECTION_SOURCES,
     SharedHistory,
 };
+#[cfg(feature = "corrhist-regression")]
+pub use search::{CorrectionFeatures, CorrectionSample, search_with_correction_samples};
 pub use search::{
-    IterationInfo, MATE_SCORE, MAX_SEARCH_PLY, RootMoveInfo, SEARCH_PARAMETERS, SearchLimits,
-    SearchOptions, SearchParameterSpec, SearchParameters, SearchResult, UNEVALUATED_STATIC_EVAL,
-    clamp_centipawn_score, is_mate_score, score_to_uci_mate, search, search_parameter,
-    search_with_callback, search_with_shared_history,
+    IterationInfo, MATE_SCORE, MAX_SEARCH_PLY, PonderState, RootMoveInfo, SEARCH_PARAMETERS,
+    SearchLimits, SearchOptions, SearchParameterSpec, SearchParameters, SearchResult,
+    UNEVALUATED_STATIC_EVAL, clamp_centipawn_score, is_mate_score, score_to_uci_mate, search,
+    search_parameter, search_with_callback, search_with_shared_history,
 };
 pub use thread_pool::{PoolError, PoolSearchResult, SearchPool};
 pub use transposition_table::{
