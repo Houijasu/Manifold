@@ -72,6 +72,8 @@ enum Command {
 struct GenerateOptions {
     out: PathBuf,
     config: GenerateConfig,
+    /// `';'`-separated Syzygy tablebase directories for game adjudication.
+    syzygy_path: Option<String>,
 }
 
 struct ConvertOptions {
@@ -108,6 +110,7 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
     let mut score_bound = None;
     let mut max_positions = None;
     let mut sample_stride = None;
+    let mut syzygy_path = None;
 
     let mut index = 0;
     while index < arguments.len() {
@@ -145,6 +148,7 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                 "--threads",
             )?,
             "--seed" => set_once(&mut seed, parse_u64(&value()?, "--seed")?, "--seed")?,
+            "--syzygy-path" => set_once(&mut syzygy_path, value()?, "--syzygy-path")?,
             "--score-bound" => set_once(
                 &mut score_bound,
                 parse_i32(&value()?, "--score-bound")?,
@@ -180,7 +184,9 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
         )),
         (None, None) => Err(datagen_usage("one of --out or --validate is required")),
         (None, Some(input)) => {
-            if let Some(rejected) = first_generate_only_flag(games, nodes, threads, seed) {
+            if let Some(rejected) =
+                first_generate_only_flag(games, nodes, threads, seed, syzygy_path.as_deref())
+            {
                 return Err(datagen_usage(&format!(
                     "{rejected} applies to generation, not to --validate"
                 )));
@@ -211,7 +217,9 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
             // Self-play knobs have no meaning when positions come from a file, and
             // silently ignoring them would let a caller believe a search budget was
             // honoured when nothing searched anything.
-            if let Some(rejected) = first_generate_only_flag(games, nodes, threads, seed) {
+            if let Some(rejected) =
+                first_generate_only_flag(games, nodes, threads, seed, syzygy_path.as_deref())
+            {
                 return Err(datagen_usage(&format!(
                     "{rejected} applies to self-play generation, not to --from-jsonl"
                 )));
@@ -275,6 +283,7 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                     seed: seed.unwrap_or(0),
                     filter,
                 },
+                syzygy_path,
             }))
         }
     }
@@ -285,12 +294,14 @@ fn first_generate_only_flag(
     nodes: Option<u64>,
     threads: Option<usize>,
     seed: Option<u64>,
+    syzygy_path: Option<&str>,
 ) -> Option<&'static str> {
     games
         .map(|_| "--games")
         .or(nodes.map(|_| "--nodes"))
         .or(threads.map(|_| "--threads"))
         .or(seed.map(|_| "--seed"))
+        .or(syzygy_path.map(|_| "--syzygy-path"))
 }
 
 fn set_once<T>(slot: &mut Option<T>, value: T, name: &str) -> Result<(), String> {
@@ -333,8 +344,20 @@ fn run_generate<W: Write>(options: GenerateOptions, mut writer: W) -> Result<(),
         .map_err(|error| format!("unable to resolve the datagen NNUE network: {error}"))?
         .into_parts();
 
+    // A failed tablebase load is a hard error: datagen is a batch tool, and silently
+    // degrading to no adjudication would corrupt a run the caller expected to be
+    // TB-adjudicated.
+    let tablebases = options
+        .syzygy_path
+        .as_deref()
+        .map(|paths| {
+            mf_tb::Tablebases::new(paths)
+                .map_err(|error| format!("unable to load Syzygy tablebases '{paths}': {error}"))
+        })
+        .transpose()?;
+
     let started = Instant::now();
-    let stats = generate(options.config, &network, |batch| {
+    let stats = generate(options.config, &network, tablebases.as_ref(), |batch| {
         for record in batch {
             output
                 .write_all(&record.to_bytes())
@@ -376,7 +399,12 @@ fn write_generate_summary<W: Write>(
     emit(format!("threads={}", options.config.threads))?;
     emit(format!("nodes={}", options.config.nodes))?;
     emit(format!("score_bound={}", options.config.filter.score_bound))?;
+    emit(format!(
+        "syzygy_path={}",
+        options.syzygy_path.as_deref().unwrap_or("<none>")
+    ))?;
     emit(format!("games={}", stats.games))?;
+    emit(format!("tb_adjudicated={}", stats.tb_adjudicated))?;
     emit(format!("considered={}", stats.considered))?;
     emit(format!("positions={}", stats.positions))?;
     emit(format!("bytes={}", stats.positions * RECORD_BYTES as u64))?;
@@ -653,6 +681,7 @@ fn datagen_help() -> &'static str {
     "Usage:\n\
      \x20 manifold datagen --out <FILE> [--format bulletformat] [--games N] [--nodes N]\n\
      \x20                  [--threads N] [--seed N] [--score-bound N]\n\
+     \x20                  [--syzygy-path <DIRS>]\n\
      \x20 manifold datagen --out <FILE> --from-jsonl <FILE|-> [--max-positions N]\n\
      \x20                  [--sample-stride N] [--resume] [--score-bound N]\n\
      \x20 manifold datagen --validate <FILE> [--format bulletformat] [--check-filters]\n\
@@ -678,6 +707,8 @@ fn datagen_help() -> &'static str {
      \x20 --threads N         worker threads; output is identical at any count (default 1)\n\
      \x20 --seed N            master seed; fixing it fixes the run (default 0)\n\
      \x20 --score-bound N     drop positions with |score| > N centipawns (default 10000)\n\
+     \x20 --syzygy-path DIRS  ';'-separated Syzygy directories; adjudicate a game the\n\
+     \x20                     moment it enters tablebase range (generation only)\n\
      \x20 --check-filters     re-check filter rules against the validated file\n\
      \x20 --report <FILE>     also write the validation report here\n\
      \n\
@@ -732,6 +763,7 @@ mod tests {
             "--threads",
             "--seed",
             "--score-bound",
+            "--syzygy-path",
             "--check-filters",
             "--report",
         ] {
@@ -1139,6 +1171,47 @@ mod tests {
         let _ = std::fs::remove_file(&source);
         let _ = std::fs::remove_file(&out);
         let _ = std::fs::remove_file(&whole);
+    }
+
+    #[test]
+    fn a_syzygy_path_is_parsed_once_and_rejected_where_it_cannot_apply() {
+        // Duplicate flags fail like every other datagen argument.
+        let error = run(&["--out", "x.bin", "--syzygy-path", "a", "--syzygy-path", "b"])
+            .expect_err("duplicate --syzygy-path must fail");
+        assert!(error.contains("duplicate"), "{error}");
+
+        // Adjudication is a self-play concept: neither validation nor conversion
+        // plays games, so accepting the flag there would imply adjudication that
+        // never happens.
+        let error = run(&["--validate", "x.bin", "--syzygy-path", "a"])
+            .expect_err("--syzygy-path must be rejected for --validate");
+        assert!(error.contains("--syzygy-path"), "{error}");
+        let error = run(&[
+            "--out",
+            "x.bin",
+            "--from-jsonl",
+            "s.jsonl",
+            "--syzygy-path",
+            "a",
+        ])
+        .expect_err("--syzygy-path must be rejected for --from-jsonl");
+        assert!(error.contains("--syzygy-path"), "{error}");
+    }
+
+    #[test]
+    fn a_nonexistent_syzygy_path_is_a_hard_error_rather_than_silent_degradation() {
+        let out = temp("bad-syzygy");
+        let error = run(&[
+            "--out",
+            out.to_str().expect("path is UTF-8"),
+            "--games",
+            "1",
+            "--syzygy-path",
+            "Z:\\definitely\\not\\a\\tablebase\\directory",
+        ])
+        .expect_err("a bad --syzygy-path must fail the run");
+        assert!(error.contains("Syzygy"), "{error}");
+        let _ = std::fs::remove_file(&out);
     }
 
     #[test]

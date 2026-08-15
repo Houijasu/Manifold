@@ -273,9 +273,20 @@ fn expected_response(command: &str) -> Option<ExpectedResponse> {
     tokens
         .get(1)
         .is_some_and(|parameter| {
-            ["depth", "nodes", "movetime", "wtime", "btime"]
-                .iter()
-                .any(|known| parameter.eq_ignore_ascii_case(known))
+            // `searchmoves` and `mate` are only here for the bounded forms this
+            // helper drives; a bare `go searchmoves ...` is infinite and must use
+            // `InteractiveUci` instead.
+            [
+                "depth",
+                "nodes",
+                "movetime",
+                "wtime",
+                "btime",
+                "searchmoves",
+                "mate",
+            ]
+            .iter()
+            .any(|known| parameter.eq_ignore_ascii_case(known))
         })
         .then_some(ExpectedResponse::Prefix("bestmove "))
 }
@@ -300,10 +311,12 @@ fn perft_rows(output: &Output) -> Vec<(&str, u64)> {
         .collect()
 }
 
+/// The move of every `bestmove` line, without the optional `ponder <move>` suggestion.
 fn bestmoves(output: &Output) -> Vec<&str> {
     stdout_lines(output)
         .into_iter()
         .filter_map(|line| line.strip_prefix("bestmove "))
+        .filter_map(|rest| rest.split_whitespace().next())
         .collect()
 }
 
@@ -341,11 +354,11 @@ fn canonical_search_lines(output: &Output) -> Vec<String> {
 /// written against the order every major engine emits, and some quietly drop a line whose
 /// fields arrive out of sequence. Stockfish emits
 /// `depth seldepth multipv score ... nodes nps hashfull tbhits time pv`; this engine
-/// emits the same sequence minus `tbhits`, which needs tablebase support to be meaningful.
+/// emits the same sequence, with `tbhits 0` whenever no tablebases are loaded.
 #[test]
 fn search_info_fields_follow_the_reference_engine_keyword_order() {
-    const EXPECTED: [&str; 8] = [
-        "depth", "seldepth", "multipv", "score", "nodes", "nps", "hashfull", "time",
+    const EXPECTED: [&str; 9] = [
+        "depth", "seldepth", "multipv", "score", "nodes", "nps", "hashfull", "tbhits", "time",
     ];
 
     let output = run_uci(&["position startpos", "go depth 6", "quit"]);
@@ -388,6 +401,33 @@ fn optional_field(line: &str, name: &str) -> Option<u64> {
     let tokens: Vec<_> = line.split_whitespace().collect();
     let index = tokens.iter().position(|token| *token == name)?;
     tokens.get(index + 1)?.parse().ok()
+}
+
+fn score_value(line: &str) -> i64 {
+    let tokens: Vec<_> = line.split_whitespace().collect();
+    let score = tokens
+        .iter()
+        .position(|token| *token == "score")
+        .expect("info line should carry a score");
+    let kind = tokens.get(score + 1).expect("score should carry a kind");
+    let value = tokens
+        .get(score + 2)
+        .expect("score should carry a value")
+        .parse::<i64>()
+        .expect("score value should be numeric");
+    match *kind {
+        "cp" => value,
+        "mate" if value > 0 => 1_000_000 - value,
+        "mate" => -1_000_000 - value,
+        _ => panic!("unknown score kind '{kind}'"),
+    }
+}
+
+fn pv_first_move(line: &str) -> &str {
+    line.split(" pv ")
+        .nth(1)
+        .and_then(|pv| pv.split_whitespace().next())
+        .expect("info line should carry a PV move")
 }
 
 #[test]
@@ -438,6 +478,7 @@ fn uci_handshake_is_ordered_and_well_formed() {
             .iter()
             .any(|line| line.starts_with("option name Threads type spin default "))
     );
+    assert!(lines[..uciok].contains(&"option name MultiPV type spin default 1 min 1 max 256"));
     assert!(lines[..uciok].contains(&"option name UCI_Chess960 type check default false"));
     assert!(lines[..uciok].contains(&"option name UseNMP type check default true"));
     assert!(lines[..uciok].contains(&"option name UseRFP type check default true"));
@@ -451,6 +492,11 @@ fn uci_handshake_is_ordered_and_well_formed() {
     assert!(lines[..uciok].contains(&"option name UseMultiCut type check default true"));
     assert!(lines[..uciok].contains(&"option name UseIIR type check default true"));
     assert!(lines[..uciok].contains(&"option name UseProbCut type check default true"));
+    assert!(
+        lines[..uciok]
+            .contains(&"option name UseInterpolatedTimeManagement type check default false")
+    );
+    assert!(lines[..uciok].contains(&"option name UseSearchAgainDepth type check default false"));
     assert!(lines[..uciok].contains(&"option name EvalFile type string default <empty>"));
     // There is no evaluator to switch to, so the engine must not advertise a toggle.
     assert!(
@@ -851,6 +897,60 @@ fn setoption_name_and_boolean_value_are_case_insensitive() {
     assert!(rows.iter().any(|(mv, _)| *mv == "e1c1"));
 }
 
+/// A SyzygyPath that names no existing directory degrades gracefully: the engine
+/// reports the failure as an `info string` and keeps serving commands without
+/// tablebases rather than dying on a configuration mistake.
+#[test]
+fn invalid_syzygy_path_reports_an_error_and_keeps_the_engine_alive() {
+    let output = run_uci(&[
+        r"setoption name SyzygyPath value C:\NoSuchDir",
+        "isready",
+        "position startpos",
+        "go depth 2",
+        "quit",
+    ]);
+
+    assert!(output.status.success());
+    let lines = stdout_lines(&output);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("info string unable to load SyzygyPath")),
+        "a bad path must be reported: {lines:?}"
+    );
+    assert!(lines.contains(&"readyok"));
+    assert_eq!(bestmoves(&output).len(), 1);
+}
+
+/// With real tables on disk, `SyzygyPath` reports how many were discovered.
+///
+/// Skips silently when `MF_SYZYGY_PATH` is unset, matching the repository's
+/// skip-if-absent pattern for large local test data.
+#[test]
+fn syzygy_path_reports_discovered_tables() {
+    let Ok(paths) = std::env::var("MF_SYZYGY_PATH") else {
+        return;
+    };
+    let output = run_uci(&[
+        &format!("setoption name SyzygyPath value {paths}"),
+        "isready",
+        "quit",
+    ]);
+
+    assert!(output.status.success());
+    let lines = stdout_lines(&output);
+    let loaded = lines
+        .iter()
+        .find(|line| line.starts_with("info string Syzygy tablebases loaded: "))
+        .unwrap_or_else(|| panic!("tables under MF_SYZYGY_PATH must be reported: {lines:?}"));
+    let wdl_count = loaded
+        .strip_prefix("info string Syzygy tablebases loaded: ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|count| count.parse::<u64>().ok())
+        .expect("the WDL table count must be numeric");
+    assert!(wdl_count > 0, "a real table set must contain WDL tables");
+}
+
 /// Every search must announce an NNUE evaluator and the source it came from.
 ///
 /// This is the line that would have made the Fritz strength regression obvious: the
@@ -1043,6 +1143,72 @@ mod Threads {
             vec![1, 2, 3, 4, 5, 6]
         );
         assert_eq!(bestmoves(&output).len(), 1);
+    }
+
+    #[test]
+    fn four_worker_multipv_emits_only_one_ordered_set_per_depth() {
+        let output = run_uci(&[
+            "setoption name Threads value 4",
+            "setoption name MultiPV value 3",
+            "position startpos",
+            "go nodes 10000",
+            "quit",
+        ]);
+
+        assert!(output.status.success());
+        let infos: Vec<_> = search_info_lines(&output)
+            .into_iter()
+            .filter(|line| line.contains(" multipv "))
+            .collect();
+        let deepest = infos
+            .iter()
+            .map(|line| field(line, "depth"))
+            .max()
+            .expect("bounded SMP search should report progress");
+        let mut complete_depths = 0;
+        for depth in 1..=deepest {
+            let lines: Vec<_> = infos
+                .iter()
+                .copied()
+                .filter(|line| field(line, "depth") == depth)
+                .collect();
+            assert!(!lines.is_empty(), "completed depths must not be skipped");
+            assert!(lines.len() <= 3, "helpers duplicated depth {depth} output");
+            assert_eq!(
+                lines
+                    .iter()
+                    .map(|line| field(line, "multipv"))
+                    .collect::<Vec<_>>(),
+                (1..=lines.len() as u64).collect::<Vec<_>>(),
+                "depth {depth} must contain one worker-0 line per index"
+            );
+            if lines.len() == 3 {
+                complete_depths += 1;
+            }
+            assert!(
+                lines
+                    .windows(2)
+                    .all(|pair| score_value(pair[0]) >= score_value(pair[1]))
+            );
+            let first_moves: Vec<_> = lines.iter().map(|line| pv_first_move(line)).collect();
+            assert!(
+                first_moves
+                    .iter()
+                    .enumerate()
+                    .all(|(index, mv)| !first_moves[..index].contains(mv))
+            );
+        }
+        assert!(
+            complete_depths > 0,
+            "the node budget must complete at least one full MultiPV set"
+        );
+
+        let final_line_one = infos
+            .iter()
+            .copied()
+            .find(|line| field(line, "depth") == deepest && field(line, "multipv") == 1)
+            .expect("deepest reported iteration should include line one");
+        assert_eq!(bestmoves(&output), [pv_first_move(final_line_one)]);
     }
 
     #[test]
@@ -1318,11 +1484,14 @@ fn hashfull_is_monotone_and_reported_in_per_mille() {
 
 #[test]
 fn node_limited_search_is_repeatable_at_exact_budget() {
+    // No clock tokens here, deliberately: a clock sent alongside a node budget now
+    // installs a hard safety deadline (see the node-limited clock test below), so
+    // pinning the exact-budget contract requires the pure node-limited form.
     let commands = [
         "setoption name Threads value 1",
         "position fen r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
-        "go nodes 20000 wtime 1 btime 1",
-        "go nodes 20000 wtime 1 btime 1",
+        "go nodes 20000",
+        "go nodes 20000",
         "quit",
     ];
     let output = run_uci(&commands);
@@ -1369,6 +1538,29 @@ fn movetime_and_clock_go_forms_honor_bounded_budgets() {
         movetime_elapsed <= Duration::from_millis(500),
         "go movetime 80 took {movetime_elapsed:?}"
     );
+    engine.send("setoption name UseInterpolatedTimeManagement value true");
+    let interpolated_movetime_elapsed = time_search(&mut engine, "go movetime 80");
+    assert!(
+        interpolated_movetime_elapsed >= Duration::from_millis(40),
+        "the interpolated clock governor shortened exact movetime to \
+         {interpolated_movetime_elapsed:?}"
+    );
+    assert!(
+        interpolated_movetime_elapsed <= Duration::from_millis(500),
+        "go movetime 80 with the interpolated toggle took {interpolated_movetime_elapsed:?}"
+    );
+    engine.send("setoption name UseInterpolatedTimeManagement value false");
+    engine.send("setoption name UseSearchAgainDepth value true");
+    let search_again_movetime_elapsed = time_search(&mut engine, "go movetime 80");
+    assert!(
+        search_again_movetime_elapsed >= Duration::from_millis(40),
+        "search-again depth shortened exact movetime to {search_again_movetime_elapsed:?}"
+    );
+    assert!(
+        search_again_movetime_elapsed <= Duration::from_millis(500),
+        "go movetime 80 with search-again depth took {search_again_movetime_elapsed:?}"
+    );
+    engine.send("setoption name UseSearchAgainDepth value false");
 
     // Same reasoning for the clock arm. The signal here is a ~100 ms budget difference
     // between two `movestogo` values, and spawn-to-exit noise under a parallel run is
@@ -1417,15 +1609,52 @@ fn time_search(engine: &mut InteractiveUci, go: &str) -> Duration {
     Duration::from_millis(reported.unwrap_or_else(|| panic!("{go} reported no search time")))
 }
 
+/// A clock sent alongside `go depth` is now a safety deadline, not decoration.
+///
+/// This used to assert the opposite -- that an explicit depth ran to completion no
+/// matter how small the clock was -- which is exactly the zero-time-safety defect:
+/// a huge node or depth budget on a slow node rate flags the engine. The depth budget
+/// stays the primary stop, but a 1 ms clock must cap the run well short of depth 14,
+/// which needs orders of magnitude more than 1 ms in every build profile.
 #[test]
-fn explicit_depth_ignores_small_clock_values() {
-    let output = run_uci(&["position startpos", "go depth 5 wtime 1 btime 1", "quit"]);
+fn explicit_depth_with_a_tiny_clock_is_capped_by_the_hard_deadline() {
+    let output = run_uci(&["position startpos", "go depth 14 wtime 1 btime 1", "quit"]);
 
     assert!(output.status.success());
-    let infos = search_info_lines(&output);
-    assert_eq!(
-        field(infos.last().expect("search should emit info"), "depth"),
-        5
+    let bestmove = bestmoves(&output);
+    assert_eq!(bestmove.len(), 1, "a capped search must still answer");
+    let deepest = search_info_lines(&output)
+        .iter()
+        .map(|line| field(line, "depth"))
+        .max()
+        .expect("the capped search must still complete at least one iteration");
+    assert!(
+        deepest < 14,
+        "a 1 ms clock must cap a depth-14 request; it reached {deepest}"
+    );
+}
+
+/// `go nodes` with a realistic clock: the node budget is the primary stop and the
+/// hard deadline is the safety net, so a `bestmove` must arrive well inside the
+/// 1 s the sender still has on its clock.
+#[test]
+fn node_limited_go_with_clock_tokens_stays_inside_the_clock() {
+    let output = run_uci(&[
+        "position startpos",
+        "go nodes 50000 wtime 1000 btime 1000 movestogo 40",
+        "quit",
+    ]);
+
+    assert!(output.status.success());
+    assert_eq!(bestmoves(&output).len(), 1);
+    let reported = stdout_lines(&output)
+        .into_iter()
+        .filter_map(|line| optional_field(line, "time"))
+        .max()
+        .expect("the search must report its elapsed time");
+    assert!(
+        reported < 1000,
+        "a node-limited go with a 1 s clock spent {reported} ms"
     );
 }
 
@@ -1470,7 +1699,10 @@ fn fifty_millisecond_clock_returns_legal_moves_without_overshoot() {
         let elapsed = started.elapsed();
         let mv = bestmove
             .strip_prefix("bestmove ")
-            .expect("bestmove prefix should exist");
+            .expect("bestmove prefix should exist")
+            .split_whitespace()
+            .next()
+            .expect("bestmove carries a move");
         assert!(
             legal_moves.iter().any(|legal| legal == mv),
             "sample {sample} returned illegal move {mv}"
@@ -1586,7 +1818,7 @@ fn every_go_form_a_gui_sends_eventually_answers_with_bestmove() {
         "go searchmoves d2d4 e2e4",
         "go ponder searchmoves d2d4",
         "go searchmoves d2d4 depth 4",
-        // A mate search this engine does not implement must still answer.
+        // A mate search with no mate on the board must still answer once stopped.
         "go mate 3",
         // Unknown tokens alongside a recognized one are ignored per the UCI spec,
         // not treated as fatal. (A `go` whose arguments are *entirely* unrecognized
@@ -1619,6 +1851,375 @@ fn every_go_form_a_gui_sends_eventually_answers_with_bestmove() {
         engine.send("quit");
         assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
     }
+}
+
+#[test]
+fn a_ponder_search_holds_its_answer_until_stop() {
+    // Timing-sensitive on the "no bestmove yet" side: an engine sharing the machine
+    // could legitimately be slow, but it must never be TALKATIVE, so the session gets
+    // the machine to itself to keep the info stream deterministic.
+    let mut engine = InteractiveUci::spawn_exclusive();
+    engine.send("position startpos moves e2e4");
+    engine.send("go ponder wtime 60000 btime 60000");
+    assert!(
+        engine
+            .receive_until(watchdog(Duration::from_secs(2)), |line| {
+                line.starts_with("info depth 1 ")
+            })
+            .is_some(),
+        "go ponder must search the predicted position"
+    );
+
+    // The ~300 ms window is NOT watchdog-scaled: it asserts silence, and silence does
+    // not get harder to produce in a debug build.
+    assert_eq!(
+        engine.receive_until(Duration::from_millis(300), |line| {
+            line.starts_with("bestmove ")
+        }),
+        None,
+        "a pondering engine must not answer before ponderhit or stop"
+    );
+
+    engine.send("stop");
+    let bestmove = engine
+        .receive_until(watchdog(Duration::from_secs(2)), |line| {
+            line.starts_with("bestmove ")
+        })
+        .expect("stop during ponder is a ponder miss and must produce the deferred bestmove");
+    assert!(!bestmove.contains("0000"));
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+}
+
+#[test]
+fn ponderhit_converts_the_ponder_search_into_a_timed_one() {
+    let mut engine = InteractiveUci::spawn_exclusive();
+    engine.send("position startpos moves e2e4");
+    // 3000 ms on the clock: soft ~97 ms, hard ~388 ms, so the converted search must
+    // answer well inside the receive deadline without any `stop`.
+    engine.send("go ponder wtime 3000 btime 3000");
+    assert!(
+        engine
+            .receive_until(watchdog(Duration::from_secs(2)), |line| {
+                line.starts_with("info depth 1 ")
+            })
+            .is_some(),
+        "go ponder must search the predicted position"
+    );
+
+    engine.send("ponderhit");
+    let bestmove = engine
+        .receive_until(watchdog(Duration::from_secs(5)), |line| {
+            line.starts_with("bestmove ")
+        })
+        .expect("ponderhit must convert to a timed search that answers on its own");
+    assert!(!bestmove.contains("0000"));
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+}
+
+#[test]
+fn a_stray_ponderhit_without_an_active_search_is_ignored() {
+    let mut engine = InteractiveUci::spawn();
+    engine.send("ponderhit");
+    engine.send("isready");
+    assert!(
+        engine
+            .receive_until(watchdog(Duration::from_secs(30)), |line| line == "readyok")
+            .is_some(),
+        "a stray ponderhit must not wedge the engine"
+    );
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+}
+
+#[test]
+fn a_new_go_during_ponder_joins_the_old_search_and_answers_each_go_once() {
+    // The GUI shortcut path: on a ponder miss some GUIs skip `stop` and send the
+    // corrected `position`/`go` directly. The engine must join the old search (its
+    // deferred bestmove is printed and discarded by the GUI) and answer the new one --
+    // exactly one bestmove per go.
+    let mut engine = InteractiveUci::spawn_exclusive();
+    engine.send("position startpos moves e2e4");
+    engine.send("go ponder wtime 60000 btime 60000");
+    assert!(
+        engine
+            .receive_until(watchdog(Duration::from_secs(2)), |line| {
+                line.starts_with("info depth 1 ")
+            })
+            .is_some(),
+        "go ponder must search the predicted position"
+    );
+
+    engine.send("position startpos moves d2d4");
+    engine.send("go depth 4");
+    let first = engine
+        .receive_until(watchdog(Duration::from_secs(2)), |line| {
+            line.starts_with("bestmove ")
+        })
+        .expect("joining the ponder search must release its deferred bestmove");
+    assert!(!first.contains("0000"));
+    let second = engine
+        .receive_until(watchdog(Duration::from_secs(5)), |line| {
+            line.starts_with("bestmove ")
+        })
+        .expect("the new go must produce its own bestmove");
+    assert!(!second.contains("0000"));
+    // No third bestmove: two `go` commands, exactly two answers.
+    assert_eq!(
+        engine.receive_until(Duration::from_millis(300), |line| {
+            line.starts_with("bestmove ")
+        }),
+        None,
+        "two go commands must produce exactly two bestmoves"
+    );
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+}
+
+#[test]
+fn searchmoves_restricts_the_answer_to_the_listed_moves() {
+    let output = run_uci(&["position startpos", "go searchmoves e2e4 depth 4", "quit"]);
+    assert!(output.status.success());
+    assert_eq!(bestmoves(&output), ["e2e4"]);
+
+    // An illegal or unknown entry is skipped rather than failing the command, and
+    // whatever legal remainder there is still restricts the root.
+    let output = run_uci(&[
+        "position startpos",
+        "go searchmoves e2e5 zzzz a2a3 depth 4",
+        "quit",
+    ]);
+    assert!(output.status.success());
+    assert_eq!(bestmoves(&output), ["a2a3"]);
+}
+
+#[test]
+fn multipv_reports_ordered_distinct_lines_and_keeps_line_one_as_bestmove() {
+    let output = run_uci(&[
+        "setoption name MultiPV value 3",
+        "position startpos",
+        "go depth 6",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let infos = search_info_lines(&output);
+    assert_eq!(infos.len(), 18);
+    for depth in 1..=6 {
+        let lines: Vec<_> = infos
+            .iter()
+            .copied()
+            .filter(|line| field(line, "depth") == depth)
+            .collect();
+        assert_eq!(lines.len(), 3, "depth {depth} should report three lines");
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| field(line, "multipv"))
+                .collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert!(
+            lines
+                .windows(2)
+                .all(|pair| score_value(pair[0]) >= score_value(pair[1])),
+            "depth {depth} scores should be non-increasing: {lines:?}"
+        );
+        let first_moves: Vec<_> = lines.iter().map(|line| pv_first_move(line)).collect();
+        assert!(
+            first_moves
+                .iter()
+                .enumerate()
+                .all(|(index, mv)| !first_moves[..index].contains(mv)),
+            "depth {depth} first moves should be distinct: {first_moves:?}"
+        );
+    }
+
+    let final_line_one = infos
+        .iter()
+        .copied()
+        .find(|line| field(line, "depth") == 6 && field(line, "multipv") == 1)
+        .expect("depth 6 should report line one");
+    assert_eq!(bestmoves(&output), [pv_first_move(final_line_one)]);
+}
+
+#[test]
+fn multipv_composes_with_searchmoves() {
+    let output = run_uci(&[
+        "setoption name MultiPV value 2",
+        "position startpos",
+        "go depth 6 searchmoves e2e4 d2d4",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let infos = search_info_lines(&output);
+    assert_eq!(infos.len(), 12);
+    for depth in 1..=6 {
+        let lines: Vec<_> = infos
+            .iter()
+            .copied()
+            .filter(|line| field(line, "depth") == depth)
+            .collect();
+        assert_eq!(lines.len(), 2, "depth {depth} should report two lines");
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| field(line, "multipv"))
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        let first_moves: Vec<_> = lines.iter().map(|line| pv_first_move(line)).collect();
+        assert!(
+            first_moves.iter().all(|mv| ["e2e4", "d2d4"].contains(mv)),
+            "searchmoves should restrict every line: {first_moves:?}"
+        );
+        assert_ne!(first_moves[0], first_moves[1]);
+    }
+}
+
+#[test]
+fn multipv_clamps_to_the_number_of_legal_root_moves() {
+    let output = run_uci(&[
+        "setoption name MultiPV value 5",
+        "position fen 8/7p/8/8/8/2k5/8/K7 w - - 0 1",
+        "go depth 4",
+        "quit",
+    ]);
+    assert!(output.status.success());
+
+    let infos = search_info_lines(&output);
+    assert_eq!(infos.len(), 8);
+    for depth in 1..=4 {
+        let lines: Vec<_> = infos
+            .iter()
+            .copied()
+            .filter(|line| field(line, "depth") == depth)
+            .collect();
+        assert_eq!(lines.len(), 2, "depth {depth} should clamp to two lines");
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| field(line, "multipv"))
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+    assert_eq!(bestmoves(&output).len(), 1);
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn a_searchmoves_list_with_no_legal_entries_searches_normally() {
+    let output = run_uci(&[
+        "position startpos",
+        "go searchmoves e2e5 zzzz depth 4",
+        "quit",
+    ]);
+    assert!(output.status.success());
+    let moves = bestmoves(&output);
+    assert_eq!(moves.len(), 1);
+    assert_ne!(moves[0], "0000", "no restriction means a normal search");
+}
+
+#[test]
+fn go_mate_returns_promptly_with_a_mate_score_when_one_exists() {
+    let output = run_uci(&[
+        "position fen k7/8/KQ6/8/8/8/8/8 w - - 0 1",
+        "go mate 1",
+        "quit",
+    ]);
+    assert!(output.status.success());
+    let infos = search_info_lines(&output);
+    assert!(
+        infos
+            .last()
+            .is_some_and(|line| line.contains(" score mate 1 ")),
+        "a mate-in-1 must be reported as mate 1: {infos:?}"
+    );
+    assert_eq!(bestmoves(&output).len(), 1);
+}
+
+#[test]
+fn clear_hash_button_is_accepted_and_leaves_the_engine_responsive() {
+    let output = run_uci(&[
+        "position startpos",
+        "go depth 4",
+        "setoption name Clear Hash",
+        "isready",
+        "go depth 4",
+        "quit",
+    ]);
+    assert!(output.status.success());
+    let lines = stdout_lines(&output);
+    assert!(lines.contains(&"readyok"));
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.starts_with("info string unable to clear Hash")),
+        "a default pool must clear successfully: {lines:?}"
+    );
+    assert_eq!(bestmoves(&output).len(), 2);
+}
+
+#[test]
+fn the_d_command_prints_a_diagram_whose_fen_names_the_current_position() {
+    let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+    let mut engine = InteractiveUci::spawn();
+    engine.send(&format!("position fen {fen}"));
+    engine.send("d");
+    let fen_line = engine
+        .receive_until(watchdog(Duration::from_secs(5)), |line| {
+            line.starts_with("Fen: ")
+        })
+        .expect("d should print the FEN");
+    assert_eq!(fen_line, format!("Fen: {fen}"));
+    assert!(
+        engine
+            .receive_until(watchdog(Duration::from_secs(2)), |line| {
+                line.starts_with("Key: ")
+            })
+            .is_some(),
+        "d should print the Zobrist key"
+    );
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+}
+
+#[test]
+fn the_eval_command_is_deterministic_for_a_fixed_position() {
+    let mut engine = InteractiveUci::spawn();
+    engine.send("position startpos moves e2e4 e7e5");
+    engine.send("eval");
+    let first = engine
+        .receive_until(watchdog(Duration::from_secs(30)), |line| {
+            line.starts_with("NNUE evaluation: ")
+        })
+        .expect("eval should print an evaluation");
+    engine.send("eval");
+    let second = engine
+        .receive_until(watchdog(Duration::from_secs(5)), |line| {
+            line.starts_with("NNUE evaluation: ")
+        })
+        .expect("a second eval should print an evaluation");
+    assert_eq!(
+        first, second,
+        "eval must be a pure function of the position"
+    );
+    let centipawns = first
+        .strip_prefix("NNUE evaluation: ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .expect("eval line should carry a number");
+    assert!(
+        centipawns.parse::<i32>().is_ok(),
+        "eval must print an integer centipawn value: {first}"
+    );
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
 }
 
 #[test]
@@ -1874,7 +2475,10 @@ fn mate_scores_use_uci_sign_and_move_count_conventions() {
     let cases = [
         ("6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1", 8, "mate 1"),
         ("k7/7R/1K6/8/8/8/8/8 b - - 0 1", 10, "mate -1"),
-        ("8/8/8/8/8/6K1/6R1/6Rk w - - 0 1", 12, "mate 2"),
+        // The FEN this case ran with (`.../6R1/6Rk w`) had the black king in check
+        // with white to move. This is its legal mate-in-two sibling (1. Rh2+ Kg1
+        // 2. Rh1#).
+        ("8/8/8/8/8/6K1/6R1/7k w - - 0 1", 12, "mate 2"),
     ];
 
     for (fen, depth, expected) in cases {

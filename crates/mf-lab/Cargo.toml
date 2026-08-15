@@ -5,6 +5,16 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+corrhist-regression = ["dep:mf-search", "mf-search/corrhist-regression"]
+
 [dependencies]
 mf-core = { path = "../mf-core" }
 mf-nnue = { path = "../mf-nnue" }
+mf-search = { path = "../mf-search", optional = true }
+
+[[bin]]
+name = "mf-lab"
+path = "src/main.rs"
+required-features = ["corrhist-regression"]

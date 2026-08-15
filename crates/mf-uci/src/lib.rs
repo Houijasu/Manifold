@@ -11,14 +11,18 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use mf_core::{Position, format_uci_move, generate_legal_moves, parse_uci_move, perft_divide};
+use mf_core::{
+    Move, Piece, PieceKind, Position, Square, format_uci_move, generate_legal_moves,
+    parse_uci_move, perft_divide,
+};
 use mf_nnue::{Network, NetworkSource, production_forward_mode, resolve_network};
 use mf_search::{
-    IterationInfo, PoolError, PoolSearchResult, RootMoveInfo, SEARCH_PARAMETERS, SearchLimits,
-    SearchOptions, SearchParameterSpec, SearchPool, SearchResult, SharedHistory,
+    IterationInfo, PonderState, PoolError, PoolSearchResult, RootMoveInfo, SEARCH_PARAMETERS,
+    SearchLimits, SearchOptions, SearchParameterSpec, SearchPool, SearchResult, SharedHistory,
     TranspositionTable, clamp_centipawn_score, max_hash_mebibytes, score_to_uci_mate,
     search_parameter, search_with_shared_history,
 };
+use mf_tb::Tablebases;
 
 const DEFAULT_HASH_MIB: usize = 16;
 const MIN_HASH_MIB: i128 = 1;
@@ -32,6 +36,10 @@ const UCI_RESPONSE: &[&str] = &[
     "id name Manifold",
     "id author Houijasu",
     "option name Threads type spin default 1 min 1 max 256",
+    "option name MultiPV type spin default 1 min 1 max 256",
+    "option name Clear Hash type button",
+    "option name Move Overhead type spin default 10 min 0 max 2000",
+    "option name Ponder type check default false",
     "option name UCI_Chess960 type check default false",
     "option name UseNMP type check default true",
     "option name UseRFP type check default true",
@@ -55,6 +63,8 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseCaptureHistory type check default true",
     "option name UsePawnHistory type check default false",
     "option name UseContHistory type check default true",
+    "option name UseTtMoveHistory type check default true",
+    "option name UseLowPlyHistory type check default true",
     "option name UseHistoryPruning type check default false",
     "option name UseCorrHistory type check default true",
     "option name UseCorrHistPawn type check default true",
@@ -62,8 +72,12 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseCorrHistMajor type check default false",
     "option name UseCorrHistMaterial type check default false",
     "option name UseCorrHistCont type check default true",
+    "option name UseCorrplexity type check default true",
     "option name UseTimeEffort type check default false",
+    "option name UseInterpolatedTimeManagement type check default false",
+    "option name UseSearchAgainDepth type check default false",
     "option name EvalFile type string default <empty>",
+    "option name SyzygyPath type string default <empty>",
 ];
 
 const BENCH_CASES: [&str; 6] = [
@@ -84,7 +98,10 @@ const DEFAULT_MOVES_TO_GO: u64 = 30;
 /// Upper bound on `movestogo`, so a tournament that announces a very distant time
 /// control does not shrink each move's budget to nothing.
 const MAX_MOVES_TO_GO: u64 = 50;
+/// Default `Move Overhead`; the advertised option line must agree with these three.
 const TIME_OVERHEAD_MILLIS: u64 = 10;
+const MIN_MOVE_OVERHEAD_MILLIS: u64 = 0;
+const MAX_MOVE_OVERHEAD_MILLIS: u64 = 2000;
 /// Fraction of the increment folded into the per-move budget, in percent.
 const INCREMENT_FRACTION_PERCENT: u64 = 75;
 /// Fraction of the remaining clock held back as a safety reserve, in percent.
@@ -142,6 +159,17 @@ struct EngineState {
     search_pool: Arc<SearchPool>,
     search_options: SearchOptions,
     transposition_table: Arc<TranspositionTable>,
+    /// Syzygy tablebases loaded via `SyzygyPath`; `None` until a path is set.
+    tablebases: Option<Arc<Tablebases>>,
+    /// Milliseconds withheld from every clock budget, set via `Move Overhead`.
+    move_overhead_millis: u64,
+    /// The advisory `Ponder` option: a GUI's declaration that it will ponder.
+    ///
+    /// Stored but not consulted outside tests: `go ponder` is honoured whenever it
+    /// arrives, and time management does not yet spend differently for a pondering
+    /// opponent.
+    #[allow(dead_code)]
+    ponder_enabled: bool,
 }
 
 impl Default for EngineState {
@@ -163,6 +191,9 @@ impl Default for EngineState {
                 TranspositionTable::new(DEFAULT_HASH_MIB)
                     .expect("the default transposition table should allocate"),
             ),
+            tablebases: None,
+            move_overhead_millis: TIME_OVERHEAD_MILLIS,
+            ponder_enabled: false,
         }
     }
 }
@@ -209,11 +240,20 @@ impl EngineState {
 
 struct ActiveSearch {
     stop: Arc<AtomicBool>,
+    /// The `go ponder` latch, present only while this search was started pondering.
+    ponder: Option<Arc<PonderState>>,
     handle: JoinHandle<()>,
 }
 
 impl ActiveSearch {
     fn stop_and_join(self) {
+        // A ponder miss: end the ponder wait WITHOUT re-basing the clock, so the
+        // search thread prints the deferred bestmove instead of spinning forever.
+        // The stop flag alone cannot do this, because the pool sets that same flag
+        // itself when worker 0 completes while still pondering.
+        if let Some(ponder) = &self.ponder {
+            ponder.abort();
+        }
         while !self.handle.is_finished() {
             self.stop.store(true, Ordering::Relaxed);
             thread::sleep(Duration::from_millis(1));
@@ -263,6 +303,19 @@ where
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("stop") && has_no_arguments {
             stop_active_search(&mut active_search);
+        } else if keyword.eq_ignore_ascii_case("ponderhit") && has_no_arguments {
+            // The predicted move was played: the ponder search becomes the real one.
+            // The latch flip re-bases the clock, so the budget computed at `go ponder`
+            // starts counting from now; the search itself is NOT stopped. Without an
+            // active ponder search there is nothing to convert, and a stray
+            // `ponderhit` is silently ignored per the protocol's tolerance for
+            // out-of-sequence commands.
+            if let Some(ponder) = active_search
+                .as_ref()
+                .and_then(|search| search.ponder.as_ref())
+            {
+                ponder.ponderhit();
+            }
         } else if keyword.eq_ignore_ascii_case("quit") && has_no_arguments {
             stop_active_search(&mut active_search);
             break;
@@ -282,6 +335,32 @@ where
                 .expect("UCI writer lock should not be poisoned");
             write_bench(&mut *writer, state.search_options, &state.network)
                 .map_err(io::Error::other)?;
+            writer.flush()?;
+        } else if keyword.eq_ignore_ascii_case("d") && has_no_arguments {
+            stop_active_search(&mut active_search);
+            let mut writer = writer
+                .lock()
+                .expect("UCI writer lock should not be poisoned");
+            write_position_diagram(&mut *writer, &state.position, state.chess960)?;
+            writer.flush()?;
+        } else if keyword.eq_ignore_ascii_case("eval") && has_no_arguments {
+            stop_active_search(&mut active_search);
+            let mut writer = writer
+                .lock()
+                .expect("UCI writer lock should not be poisoned");
+            if state.position_is_stale {
+                writeln!(
+                    writer,
+                    "info string refusing to evaluate: the last position command failed, \
+                     so the engine does not know the current position"
+                )?;
+            } else {
+                writeln!(
+                    writer,
+                    "NNUE evaluation: {} cp (from the side to move's perspective)",
+                    state.network.evaluate_production(&state.position)
+                )?;
+            }
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("setoption") {
             stop_active_search(&mut active_search);
@@ -340,14 +419,20 @@ where
                     report_ignored_go_arguments(&writer, &ignored)?;
                     let network = Arc::clone(&state.network);
                     let evaluator_diagnostic = active_evaluator_diagnostic(&state);
+                    let root_moves = parameters.root_moves(&state.position, state.chess960);
+                    let ponder = parameters.ponder.then(|| Arc::new(PonderState::new()));
                     active_search = Some(start_search(
                         state.position.clone(),
                         state.position_history.clone(),
                         Arc::clone(&state.search_pool),
                         Arc::clone(&state.transposition_table),
-                        parameters.search_limits(&state.position),
+                        parameters.search_limits(&state.position, state.move_overhead_millis),
                         state.search_options,
                         network,
+                        state.tablebases.clone(),
+                        root_moves,
+                        None,
+                        ponder,
                         evaluator_diagnostic,
                         state.chess960,
                         Arc::clone(&writer),
@@ -360,14 +445,20 @@ where
                     let fixed_depth = parameters.depth.is_some();
                     let network = Arc::clone(&state.network);
                     let evaluator_diagnostic = active_evaluator_diagnostic(&state);
+                    let root_moves = parameters.root_moves(&state.position, state.chess960);
+                    let ponder = parameters.ponder.then(|| Arc::new(PonderState::new()));
                     active_search = Some(start_search(
                         state.position.clone(),
                         state.position_history.clone(),
                         Arc::clone(&state.search_pool),
                         Arc::clone(&state.transposition_table),
-                        parameters.search_limits(&state.position),
+                        parameters.search_limits(&state.position, state.move_overhead_millis),
                         state.search_options,
                         network,
+                        state.tablebases.clone(),
+                        root_moves,
+                        parameters.mate,
+                        ponder,
                         evaluator_diagnostic,
                         state.chess960,
                         Arc::clone(&writer),
@@ -428,6 +519,10 @@ fn start_search<W>(
     limits: SearchLimits,
     options: SearchOptions,
     network: Arc<Network>,
+    tablebases: Option<Arc<Tablebases>>,
+    root_moves: Option<Vec<Move>>,
+    mate: Option<u32>,
+    ponder: Option<Arc<PonderState>>,
     evaluator_diagnostic: String,
     chess960: bool,
     writer: Arc<Mutex<W>>,
@@ -439,15 +534,26 @@ where
 {
     let stop = Arc::new(AtomicBool::new(false));
     let search_stop = Arc::clone(&stop);
+    let search_ponder = ponder.clone();
     let handle = thread::spawn(move || {
         if let Ok(mut writer) = writer.lock() {
             let _ = writeln!(writer, "{evaluator_diagnostic}");
             let _ = writer.flush();
         }
+        let mate_stop = Arc::clone(&search_stop);
         let on_iteration = |iteration: &IterationInfo| {
             if let Ok(mut writer) = writer.lock() {
                 let _ = write_iteration_info(&mut *writer, &position, iteration, chess960);
                 let _ = writer.flush();
+            }
+            // `go mate N`: the requested mate (or shorter) for the side to move ends
+            // the search. The search's own mate-score exit usually fires first; this
+            // is what makes a bare `go mate N` terminate instead of running unbounded.
+            if let Some(n) = mate
+                && score_to_uci_mate(iteration.score)
+                    .is_some_and(|moves| moves > 0 && moves as u32 <= n)
+            {
+                mate_stop.store(true, Ordering::Relaxed);
             }
         };
         let on_current_move = |root_move: &RootMoveInfo| {
@@ -465,6 +571,8 @@ where
                 options,
                 Arc::clone(&search_stop),
                 Arc::clone(&network),
+                tablebases,
+                root_moves,
                 on_iteration,
             )
         } else {
@@ -476,10 +584,23 @@ where
                 options,
                 Arc::clone(&search_stop),
                 network,
+                tablebases,
+                root_moves,
+                search_ponder.clone(),
                 on_iteration,
                 on_current_move,
             )
         };
+        // A search that completed while still pondering -- it hit the depth ceiling,
+        // or the root was terminal -- must hold its answer until `ponderhit` or
+        // `stop`, both of which unarm the latch. The shared stop flag cannot gate
+        // this wait: the pool sets it internally when worker 0 completes.
+        while search_ponder
+            .as_ref()
+            .is_some_and(|ponder| ponder.is_pondering())
+        {
+            thread::sleep(Duration::from_millis(1));
+        }
         while wait_for_stop && !search_stop.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(1));
         }
@@ -495,7 +616,11 @@ where
             let _ = writer.flush();
         }
     });
-    ActiveSearch { stop, handle }
+    ActiveSearch {
+        stop,
+        ponder,
+        handle,
+    }
 }
 
 /// Runs the standalone `perft` subcommand arguments.
@@ -604,6 +729,8 @@ where
                     SearchOptions::default(),
                     Arc::new(AtomicBool::new(false)),
                     Arc::clone(&network),
+                    None,
+                    None,
                     |_| {},
                 )
                 .map_err(|error| format!("mtbench search failed: {error}"))?;
@@ -766,6 +893,9 @@ fn write_bench<W: Write>(
             options,
             &shared_history,
             network,
+            // Bench is the change-detection signature: never probe tablebases here.
+            None,
+            None,
         );
         elapsed += started.elapsed();
         total = total
@@ -787,7 +917,7 @@ fn handle_setoption<W: Write>(
     writer: &mut W,
 ) -> io::Result<()> {
     let tokens: Vec<_> = command.split_whitespace().collect();
-    if tokens.len() < 4
+    if tokens.len() < 3
         || !tokens[0].eq_ignore_ascii_case("setoption")
         || !tokens[1].eq_ignore_ascii_case("name")
     {
@@ -798,15 +928,46 @@ fn handle_setoption<W: Write>(
         .position(|token| token.eq_ignore_ascii_case("value"))
         .map(|index| index + 2)
     else {
+        // Button options carry no `value` token: `setoption name Clear Hash` is the
+        // whole command. Everything else without a value stays ignored.
+        let name = tokens[2..].join(" ");
+        if name.eq_ignore_ascii_case("Clear Hash") {
+            handle_clear_hash(state, writer)?;
+        }
         return Ok(());
     };
     let name = tokens[2..value_index].join(" ");
     let value = tokens[value_index + 1..].join(" ");
 
+    // Check-type options accept exactly true|false, and GUIs and tuners also speak a
+    // numeric-bool dialect (`value 1`). A silently ignored write leaves the tuner
+    // measuring a value the engine never adopted, so an unparseable value is reported
+    // the same way the numeric options report theirs. A missing `value` token never
+    // reaches here: some GUIs send a bare `setoption name X`.
+    if let Some(canonical) = check_option_name(&name)
+        && parse_check_option(&value).is_none()
+    {
+        writeln!(
+            writer,
+            "info string invalid {canonical} value '{value}' (expected true|false)"
+        )?;
+        return Ok(());
+    }
+
     if name.eq_ignore_ascii_case("UCI_Chess960") {
         if let Some(enabled) = parse_check_option(&value) {
             state.chess960 = enabled;
         }
+    } else if name.eq_ignore_ascii_case("Ponder") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.ponder_enabled = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("MultiPV") {
+        let Ok(requested) = value.parse::<i128>() else {
+            writeln!(writer, "info string invalid MultiPV value '{value}'")?;
+            return Ok(());
+        };
+        state.search_options.multi_pv = requested.clamp(1, 256) as u32;
     } else if name.eq_ignore_ascii_case("UseNMP") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_nmp = enabled;
@@ -863,6 +1024,14 @@ fn handle_setoption<W: Write>(
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_time_effort = enabled;
         }
+    } else if name.eq_ignore_ascii_case("UseInterpolatedTimeManagement") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_interpolated_time_management = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseSearchAgainDepth") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_search_again_depth = enabled;
+        }
     } else if name.eq_ignore_ascii_case("UseSingularExt") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_singular_ext = enabled;
@@ -899,6 +1068,14 @@ fn handle_setoption<W: Write>(
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_continuation_history = enabled;
         }
+    } else if name.eq_ignore_ascii_case("UseTtMoveHistory") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_tt_move_history = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseLowPlyHistory") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_low_ply_history = enabled;
+        }
     } else if name.eq_ignore_ascii_case("UseHistoryPruning") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_history_pruning = enabled;
@@ -911,6 +1088,10 @@ fn handle_setoption<W: Write>(
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_correction_sources[source] = enabled;
         }
+    } else if name.eq_ignore_ascii_case("UseCorrplexity") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_corrplexity = enabled;
+        }
     } else if let Some(spec) = search_parameter(&name) {
         // A tuner writes these hundreds of times per session, so an unparseable value
         // is reported rather than swallowed: a silently ignored write leaves the tuner
@@ -922,6 +1103,8 @@ fn handle_setoption<W: Write>(
         spec.set(&mut state.search_options.parameters, requested);
     } else if name.eq_ignore_ascii_case("EvalFile") {
         handle_eval_file(&value, state, writer)?;
+    } else if name.eq_ignore_ascii_case("SyzygyPath") {
+        handle_syzygy_path(&value, state, writer)?;
     } else if name.eq_ignore_ascii_case("Hash") {
         let Ok(requested) = value.parse::<i128>() else {
             writeln!(writer, "info string invalid Hash value '{value}'")?;
@@ -936,6 +1119,15 @@ fn handle_setoption<W: Write>(
         }
 
         resize_hash(requested, max_hash_mebibytes(), state, writer)?;
+    } else if name.eq_ignore_ascii_case("Move Overhead") {
+        let Ok(requested) = value.parse::<i128>() else {
+            writeln!(writer, "info string invalid Move Overhead value '{value}'")?;
+            return Ok(());
+        };
+        state.move_overhead_millis = requested.clamp(
+            MIN_MOVE_OVERHEAD_MILLIS as i128,
+            MAX_MOVE_OVERHEAD_MILLIS as i128,
+        ) as u64;
     } else if name.eq_ignore_ascii_case("Threads") {
         let Ok(requested) = value.parse::<i128>() else {
             writeln!(writer, "info string invalid Threads value '{value}'")?;
@@ -954,6 +1146,21 @@ fn handle_setoption<W: Write>(
                 )?;
             }
         }
+    }
+    Ok(())
+}
+
+/// The `Clear Hash` button: wipes the transposition table and search history in place.
+///
+/// Uses the same parallel [`SearchPool::clear`] path `ucinewgame` does rather than
+/// reallocating, so the table keeps its size and address. A failure is reported as an
+/// `info string`, matching the `ucinewgame` convention.
+fn handle_clear_hash<W: Write>(state: &EngineState, writer: &mut W) -> io::Result<()> {
+    if let Err(error) = state
+        .search_pool
+        .clear(Arc::clone(&state.transposition_table))
+    {
+        writeln!(writer, "info string unable to clear Hash: {error}")?;
     }
     Ok(())
 }
@@ -1047,6 +1254,34 @@ fn handle_eval_file<W: Write>(
     }
 }
 
+fn handle_syzygy_path<W: Write>(
+    value: &str,
+    state: &mut EngineState,
+    writer: &mut W,
+) -> io::Result<()> {
+    if value.is_empty() || value.eq_ignore_ascii_case("<empty>") {
+        state.tablebases = None;
+        return writeln!(writer, "info string Syzygy tablebases disabled");
+    }
+
+    // A path that fails to open leaves the previous tablebases in place: the engine
+    // keeps searching with whatever it already had, and says so.
+    match Tablebases::new(value) {
+        Ok(tablebases) => {
+            writeln!(
+                writer,
+                "info string Syzygy tablebases loaded: {} WDL and {} DTZ tables, up to {} pieces",
+                tablebases.wdl_table_count(),
+                tablebases.dtz_table_count(),
+                tablebases.max_pieces()
+            )?;
+            state.tablebases = Some(Arc::new(tablebases));
+            Ok(())
+        }
+        Err(error) => writeln!(writer, "info string unable to load SyzygyPath: {error}"),
+    }
+}
+
 fn write_network_selection<W: Write>(
     writer: &mut W,
     state: &EngineState,
@@ -1090,6 +1325,22 @@ fn parse_check_option(value: &str) -> Option<bool> {
     } else {
         None
     }
+}
+
+/// Resolves an option name to its advertised spelling when it names a check-type
+/// option.
+///
+/// Derived from `UCI_RESPONSE` so the set of options diagnosed here can never drift
+/// from the set the engine actually advertises.
+fn check_option_name(name: &str) -> Option<&'static str> {
+    UCI_RESPONSE
+        .iter()
+        .filter_map(|line| line.strip_prefix("option name "))
+        .find_map(|rest| {
+            let (option, option_type) = rest.split_once(" type ")?;
+            (option_type.starts_with("check") && name.eq_ignore_ascii_case(option))
+                .then_some(option)
+        })
 }
 
 fn handle_position(command: &str, state: &mut EngineState) -> Result<(), String> {
@@ -1227,6 +1478,13 @@ struct GoParameters {
     winc: Option<u64>,
     binc: Option<u64>,
     movestogo: Option<u64>,
+    /// Stop once a mate in this many moves (or fewer) for the side to move is found.
+    mate: Option<u32>,
+    /// Raw `searchmoves` notation, resolved against the position when the search starts.
+    searchmoves: Vec<String>,
+    /// `go ponder`: search the predicted position, but defer `bestmove` until
+    /// `ponderhit` (convert to a normal timed search) or `stop` (ponder miss).
+    ponder: bool,
     infinite: bool,
 }
 
@@ -1268,31 +1526,31 @@ impl GoParameters {
                 recognized = true;
                 continue;
             }
-            // `ponder` takes no value. Treat it as an ordinary search rather than
-            // dropping the command: without real pondering the engine still owes the
-            // GUI a `bestmove`, and a GUI that sent `go ponder` waits forever without
-            // one.
+            // `ponder` takes no value; the clock tokens travel alongside it and are
+            // parsed as usual, because they describe the time budget the search will
+            // run under once `ponderhit` converts it.
             if key.eq_ignore_ascii_case("ponder") {
+                parameters.ponder = true;
                 recognized = true;
                 continue;
             }
-            // `searchmoves` is a trailing list of moves, not a key/value pair. The
-            // search has no root-move restriction, so consume the list and search
-            // normally; answering the wrong move set still beats never answering.
+            // `searchmoves` is a trailing list of moves, not a key/value pair.
             if key.eq_ignore_ascii_case("searchmoves") {
                 while index < tokens.len() && !is_go_keyword(tokens[index]) {
+                    parameters.searchmoves.push(tokens[index].to_string());
                     index += 1;
                 }
                 recognized = true;
                 continue;
             }
-            // `mate N` asks for a mate search this engine does not implement. Consume
-            // the value and fall through to the unbounded-analysis default below.
             if key.eq_ignore_ascii_case("mate") {
-                if index < tokens.len() && parse_go_value(tokens[index]).is_some() {
-                    index += 1;
+                match tokens.get(index).copied().and_then(parse_go_value) {
+                    Some(parsed) => {
+                        index += 1;
+                        parameters.mate = Some(parsed.min(u64::from(u32::MAX)) as u32);
+                    }
+                    None => ignored.push(key.to_string()),
                 }
-                ignored.push(key.to_string());
                 recognized = true;
                 continue;
             }
@@ -1347,14 +1605,17 @@ impl GoParameters {
         }
 
         // A `go` carrying no budget at all -- bare `go`, or one whose only arguments
-        // were `ponder`/`searchmoves`/`mate` -- is an unbounded analysis request. UCI
+        // were `ponder`/`searchmoves` -- is an unbounded analysis request. UCI
         // requires a `bestmove` for every `go`, so treat it as infinite and let `stop`
         // end it rather than silently ignoring the command and hanging the GUI.
+        // `mate N` is a budget of its own: the search stops itself once the mate is
+        // found, so it must stay non-infinite for the mate-score early exit to fire.
         if parameters.depth.is_none()
             && parameters.nodes.is_none()
             && parameters.movetime.is_none()
             && parameters.wtime.is_none()
             && parameters.btime.is_none()
+            && parameters.mate.is_none()
         {
             parameters.infinite = true;
         }
@@ -1366,28 +1627,65 @@ impl GoParameters {
         Some((parameters, ignored))
     }
 
-    fn search_limits(&self, position: &Position) -> SearchLimits {
-        let (soft_time, hard_time) =
-            if self.infinite || self.depth.is_some() || self.nodes.is_some() {
-                (None, None)
-            } else if let Some(millis) = self.movetime {
-                (
-                    Some(Duration::from_millis(millis)),
-                    Some(Duration::from_millis(millis)),
-                )
-            } else {
-                self.clock_limits(position)
-            };
+    /// Resolves the `searchmoves` list against the current position.
+    ///
+    /// Uses the same notation parsing as `position ... moves`, so both castling
+    /// dialects and case-insensitive promotions are accepted. Illegal or unknown
+    /// moves are skipped, and a list that resolves to nothing places no restriction:
+    /// answering from the full move set still beats never answering.
+    fn root_moves(&self, position: &Position, chess960: bool) -> Option<Vec<Move>> {
+        let resolved: Vec<Move> = self
+            .searchmoves
+            .iter()
+            .filter_map(|notation| parse_uci_move(position, notation, chess960))
+            .collect();
+        if resolved.is_empty() {
+            None
+        } else {
+            Some(resolved)
+        }
+    }
+
+    fn search_limits(&self, position: &Position, move_overhead_millis: u64) -> SearchLimits {
+        let (soft_time, hard_time, use_clock_management) = if self.infinite {
+            (None, None, false)
+        } else if self.depth.is_some() || self.nodes.is_some() {
+            // A node or depth budget stays the primary stop, but a clock sent alongside
+            // still supplies a hard safety deadline: a huge node budget on a slow node
+            // rate must not flag the engine. Only the hard limit applies -- no soft
+            // limit, no governor -- and `clock_limits` yields no deadline when no clock
+            // tokens were sent, so clock-less bounded runs are exactly what they were.
+            let hard_time = self.clock_limits(position, move_overhead_millis).1;
+            (None, hard_time, false)
+        } else if let Some(millis) = self.movetime {
+            // Move Overhead is the engine's share of the sender's budget, so it comes
+            // off the requested time before both limits are built; the floor keeps a
+            // tiny request from becoming a zero budget.
+            let budget = millis.saturating_sub(move_overhead_millis).max(1);
+            (
+                Some(Duration::from_millis(budget)),
+                Some(Duration::from_millis(budget)),
+                false,
+            )
+        } else {
+            let (soft_time, hard_time) = self.clock_limits(position, move_overhead_millis);
+            (soft_time, hard_time, soft_time.is_some())
+        };
         SearchLimits {
             depth: if self.infinite { None } else { self.depth },
             nodes: if self.infinite { None } else { self.nodes },
             soft_time,
             hard_time,
             infinite: self.infinite,
+            use_clock_management,
         }
     }
 
-    fn clock_limits(&self, position: &Position) -> (Option<Duration>, Option<Duration>) {
+    fn clock_limits(
+        &self,
+        position: &Position,
+        move_overhead_millis: u64,
+    ) -> (Option<Duration>, Option<Duration>) {
         let white = position.side_to_move() == mf_core::Color::White;
         let remaining = if white { self.wtime } else { self.btime };
         let Some(remaining) = remaining else {
@@ -1407,7 +1705,7 @@ impl GoParameters {
         // on the last move of the control.
         let safety = remaining.saturating_mul(CLOCK_SAFETY_PERCENT) / 100;
         let available = remaining
-            .saturating_sub(TIME_OVERHEAD_MILLIS)
+            .saturating_sub(move_overhead_millis)
             .saturating_sub(safety)
             .max(1);
         let soft = (available / moves)
@@ -1440,7 +1738,13 @@ fn write_pool_search_tail<W: Write>(
     } else {
         write_selected_result_info(writer, position, &pooled.result, chess960)?;
     }
-    write_bestmove(writer, position, pooled.result.best_move, chess960)
+    write_bestmove(
+        writer,
+        position,
+        pooled.result.best_move,
+        &pooled.result.pv,
+        chess960,
+    )
 }
 
 fn write_search_summary<W: Write>(
@@ -1454,12 +1758,13 @@ fn write_search_summary<W: Write>(
         let pv = format_pv(position, &result.pv, chess960);
         writeln!(
             writer,
-            "info depth {} seldepth {} multipv 1 score {} nodes {} nps 0 hashfull {} time {} pv {}",
+            "info depth {} seldepth {} multipv 1 score {} nodes {} nps 0 hashfull {} tbhits {} time {} pv {}",
             result.depth,
             result.seldepth,
             score,
             result.nodes,
             result.hashfull,
+            result.tbhits,
             result.elapsed.as_millis(),
             pv
         )?;
@@ -1505,13 +1810,14 @@ fn write_selected_result_info<W: Write>(
     // invisible -- the GUI kept showing a superseded score from the previous line.
     writeln!(
         writer,
-        "info depth {} seldepth {} multipv 1 score {} nodes {} nps {} hashfull {} time {} pv {}",
+        "info depth {} seldepth {} multipv 1 score {} nodes {} nps {} hashfull {} tbhits {} time {} pv {}",
         result.depth,
         result.seldepth,
         score,
         result.nodes,
         nps,
         result.hashfull,
+        result.tbhits,
         elapsed_millis,
         pv
     )
@@ -1525,13 +1831,14 @@ fn write_search_failure<W: Write>(
 ) -> io::Result<()> {
     writeln!(writer, "info string search failed: {error}")?;
     let fallback = generate_legal_moves(position).first().copied();
-    write_bestmove(writer, position, fallback, chess960)
+    write_bestmove(writer, position, fallback, &[], chess960)
 }
 
 fn write_bestmove<W: Write>(
     writer: &mut W,
     position: &Position,
     best_move: Option<mf_core::Move>,
+    pv: &[mf_core::Move],
     chess960: bool,
 ) -> io::Result<()> {
     let bestmove = best_move
@@ -1539,6 +1846,24 @@ fn write_bestmove<W: Write>(
         // UCI represents "no legal move" with the null-move token. `0000`
         // is accepted by strict GUIs that reject the older `(none)` spelling.
         .unwrap_or_else(|| NULL_BESTMOVE.to_string());
+    // The second PV move is the reply the engine expects, which is what a pondering
+    // GUI ponders on. Emitted whenever the winning PV carries one -- unconditional
+    // emission is spec-legal and a non-pondering GUI ignores the field -- but only
+    // when the PV actually starts with the best move: a helper-selected result's PV
+    // and best move always agree, so a mismatch would mean the suggestion belongs to
+    // a different line than the move being played.
+    if let Some(best) = best_move
+        && pv.first() == Some(&best)
+        && let Some(&reply) = pv.get(1)
+    {
+        let mut after_best = position.clone();
+        after_best.make_move(best);
+        return writeln!(
+            writer,
+            "bestmove {bestmove} ponder {}",
+            format_uci_move(&after_best, reply, chess960)
+        );
+    }
     writeln!(writer, "bestmove {bestmove}")
 }
 
@@ -1579,17 +1904,19 @@ fn write_iteration_info<W: Write>(
     let pv = format_pv(position, &iteration.pv, chess960);
     writeln!(
         writer,
-        // `multipv 1` is constant because the engine searches a single PV. It is emitted
-        // anyway: it is the field GUIs read to decide which analysis row a line belongs
+        // `multipv` is the field GUIs read to decide which analysis row a line belongs
         // to, and some hide lines that lack it. Stockfish emits it unconditionally in
-        // this slot, between `seldepth` and `score`.
-        "info depth {} seldepth {} multipv 1 score {} nodes {} nps {} hashfull {} time {} pv {}",
+        // this slot, between `seldepth` and `score`. `tbhits` sits between `hashfull`
+        // and `time`, matching the reference engine's keyword order.
+        "info depth {} seldepth {} multipv {} score {} nodes {} nps {} hashfull {} tbhits {} time {} pv {}",
         iteration.depth,
         iteration.seldepth,
+        iteration.multipv_index,
         score,
         iteration.nodes,
         nps,
         iteration.hashfull,
+        iteration.tbhits,
         elapsed_millis,
         pv
     )
@@ -1610,6 +1937,42 @@ fn format_pv(position: &Position, pv: &[mf_core::Move], chess960: bool) -> Strin
         replay.make_move(mv);
     }
     notation.join(" ")
+}
+
+/// The `d` debug command: an ASCII board diagram, the FEN, and the Zobrist key.
+fn write_position_diagram<W: Write>(
+    writer: &mut W,
+    position: &Position,
+    chess960: bool,
+) -> io::Result<()> {
+    for rank in (0..8).rev() {
+        let mut row = String::with_capacity(16);
+        for file in 0..8 {
+            if file > 0 {
+                row.push(' ');
+            }
+            let square = Square::new(rank * 8 + file).expect("file and rank are in 0..8");
+            row.push(position.piece_at(square).map_or('.', piece_letter));
+        }
+        writeln!(writer, "{row}")?;
+    }
+    writeln!(writer, "Fen: {}", position.to_fen(chess960))?;
+    writeln!(writer, "Key: {:016X}", position.zobrist().main())
+}
+
+fn piece_letter(piece: Piece) -> char {
+    let letter = match piece.kind() {
+        PieceKind::Pawn => 'p',
+        PieceKind::Knight => 'n',
+        PieceKind::Bishop => 'b',
+        PieceKind::Rook => 'r',
+        PieceKind::Queen => 'q',
+        PieceKind::King => 'k',
+    };
+    match piece.color() {
+        mf_core::Color::White => letter.to_ascii_uppercase(),
+        mf_core::Color::Black => letter,
+    }
 }
 
 fn write_perft<W: Write>(
@@ -1707,6 +2070,7 @@ mod tests {
                 seldepth: 8,
                 nodes: 1_234,
                 hashfull: 17,
+                tbhits: 0,
                 elapsed: Duration::from_millis(20),
                 pv: vec![best_move],
                 iterations: Vec::new(),
@@ -1724,7 +2088,7 @@ mod tests {
         assert_eq!(
             lines[0],
             format!(
-                "info depth 5 seldepth 8 multipv 1 score cp 42 nodes 1234 nps 61700 hashfull 17 time 20 pv {}",
+                "info depth 5 seldepth 8 multipv 1 score cp 42 nodes 1234 nps 61700 hashfull 17 tbhits 0 time 20 pv {}",
                 format_uci_move(&position, best_move, false)
             )
         );
@@ -1777,6 +2141,187 @@ mod tests {
                 .expect("protocol output should be UTF-8")
                 .contains("info string invalid Threads value 'banana'")
         );
+    }
+
+    #[test]
+    fn multipv_spin_clamps_values_below_the_minimum() {
+        let mut state = EngineState::default();
+
+        handle_setoption(
+            "setoption name MultiPV value -100",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("MultiPV write should be writable");
+
+        assert_eq!(state.search_options.multi_pv, 1);
+    }
+
+    #[test]
+    fn multipv_spin_clamps_values_above_the_maximum() {
+        let mut state = EngineState::default();
+
+        handle_setoption(
+            "setoption name MultiPV value 1000",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("MultiPV write should be writable");
+
+        assert_eq!(state.search_options.multi_pv, 256);
+    }
+
+    #[test]
+    fn malformed_multipv_spin_preserves_the_existing_value_and_reports_it() {
+        let mut state = EngineState::default();
+        state.search_options.multi_pv = 7;
+        let mut output = Vec::new();
+
+        handle_setoption(
+            "setoption name MultiPV value banana",
+            &mut state,
+            &mut output,
+        )
+        .expect("invalid MultiPV diagnostic should be writable");
+
+        assert_eq!(state.search_options.multi_pv, 7);
+        assert_eq!(
+            String::from_utf8(output).expect("protocol output should be UTF-8"),
+            "info string invalid MultiPV value 'banana'\n"
+        );
+    }
+    #[test]
+    fn malformed_check_values_report_a_diagnostic_and_preserve_the_existing_value() {
+        let mut state = EngineState::default();
+        state.search_options.use_rfp = false;
+
+        // The numeric-bool dialect some GUIs and tuners speak is not silently dropped:
+        // the write is reported as invalid so a tuner never measures a value the
+        // engine never adopted.
+        let mut output = Vec::new();
+        handle_setoption(
+            "setoption name UseRFP value banana",
+            &mut state,
+            &mut output,
+        )
+        .expect("invalid check diagnostic should be writable");
+        assert!(!state.search_options.use_rfp);
+        assert_eq!(
+            String::from_utf8(output.clone()).expect("protocol output should be UTF-8"),
+            "info string invalid UseRFP value 'banana' (expected true|false)\n"
+        );
+
+        handle_setoption("setoption name UseRFP value 1", &mut state, &mut output)
+            .expect("numeric-bool diagnostic should be writable");
+        assert_eq!(
+            String::from_utf8(output.clone()).expect("protocol output should be UTF-8"),
+            "info string invalid UseRFP value 'banana' (expected true|false)\n\
+             info string invalid UseRFP value '1' (expected true|false)\n"
+        );
+
+        // A value token with nothing after it is still a rejected write, matching the
+        // numeric options' handling of the same shape.
+        handle_setoption("setoption name UseNMP value", &mut state, &mut output)
+            .expect("empty check diagnostic should be writable");
+        assert!(
+            String::from_utf8(output.clone())
+                .expect("protocol output should be UTF-8")
+                .contains("info string invalid UseNMP value '' (expected true|false)")
+        );
+
+        // Absence of a `value` token stays silent: some GUIs send a bare
+        // `setoption name X`, and it must not produce a diagnostic.
+        output.clear();
+        handle_setoption("setoption name UseNMP", &mut state, &mut output)
+            .expect("bare setoption should be writable");
+        handle_setoption("setoption name Clear Hash", &mut state, &mut output)
+            .expect("button setoption should be writable");
+        assert!(
+            !String::from_utf8(output)
+                .expect("protocol output should be UTF-8")
+                .contains("invalid"),
+            "commands without a value token must stay silent"
+        );
+    }
+
+    #[test]
+    fn interpolated_time_management_check_option_persists_and_rejects_malformed_values() {
+        let mut state = EngineState::default();
+        assert!(!state.search_options.use_interpolated_time_management);
+
+        handle_setoption(
+            "SeToPtIoN NaMe UsEiNtErPoLaTeDtImEmAnAgEmEnT VaLuE TrUe",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("mixed-case check write should be accepted");
+        assert!(state.search_options.use_interpolated_time_management);
+
+        state
+            .new_game()
+            .expect("new game should clear search state without resetting options");
+        assert!(state.search_options.use_interpolated_time_management);
+
+        let mut output = Vec::new();
+        handle_setoption(
+            "setoption name UseInterpolatedTimeManagement value banana",
+            &mut state,
+            &mut output,
+        )
+        .expect("malformed check write should be writable");
+        assert!(state.search_options.use_interpolated_time_management);
+        assert_eq!(
+            String::from_utf8(output).expect("protocol output should be UTF-8"),
+            "info string invalid UseInterpolatedTimeManagement value 'banana' (expected true|false)\n"
+        );
+
+        handle_setoption(
+            "setoption name UseInterpolatedTimeManagement value FALSE",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("false check write should be accepted");
+        assert!(!state.search_options.use_interpolated_time_management);
+    }
+
+    #[test]
+    fn search_again_depth_check_option_persists_and_rejects_malformed_values() {
+        let mut state = EngineState::default();
+        assert!(!state.search_options.use_search_again_depth);
+
+        handle_setoption(
+            "SeToPtIoN NaMe UsEsEaRcHaGaInDePtH VaLuE TrUe",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("mixed-case check write should be accepted");
+        assert!(state.search_options.use_search_again_depth);
+
+        state
+            .new_game()
+            .expect("new game should clear search state without resetting options");
+        assert!(state.search_options.use_search_again_depth);
+
+        let mut output = Vec::new();
+        handle_setoption(
+            "setoption name UseSearchAgainDepth value banana",
+            &mut state,
+            &mut output,
+        )
+        .expect("malformed check write should be writable");
+        assert!(state.search_options.use_search_again_depth);
+        assert_eq!(
+            String::from_utf8(output).expect("protocol output should be UTF-8"),
+            "info string invalid UseSearchAgainDepth value 'banana' (expected true|false)\n"
+        );
+
+        handle_setoption(
+            "setoption name UseSearchAgainDepth value FALSE",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("false check write should be accepted");
+        assert!(!state.search_options.use_search_again_depth);
     }
 
     /// An oversize request resizes to the advertised maximum and says so.
@@ -1955,6 +2500,24 @@ mod tests {
             &mut output,
         )
         .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseTtMoveHistory value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+        handle_setoption(
+            "SeToPtIoN NaMe UsElOwPlYhIsToRy VaLuE FaLsE",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
+        handle_setoption(
+            "setoption name UseCorrplexity value false",
+            &mut state,
+            &mut output,
+        )
+        .expect("setoption output should be writable");
 
         state
             .new_game()
@@ -1976,6 +2539,9 @@ mod tests {
         assert!(!state.search_options.use_capture_history);
         assert!(state.search_options.use_pawn_history);
         assert!(state.search_options.use_history_pruning);
+        assert!(!state.search_options.use_tt_move_history);
+        assert!(!state.search_options.use_low_ply_history);
+        assert!(!state.search_options.use_corrplexity);
     }
 
     #[test]
@@ -2197,22 +2763,95 @@ mod tests {
     }
 
     #[test]
-    fn movetime_search_limits_use_the_requested_duration() {
+    fn movetime_search_limits_subtract_the_move_overhead() {
         let (parameters, _) =
             GoParameters::parse(&["movetime", "100"]).expect("movetime should parse");
-        let limits = parameters.search_limits(&Position::startpos());
+        let limits = parameters.search_limits(&Position::startpos(), TIME_OVERHEAD_MILLIS);
 
-        assert_eq!(limits.soft_time, Some(Duration::from_millis(100)));
-        assert_eq!(limits.hard_time, Some(Duration::from_millis(100)));
+        // The sender's budget is the requested time minus the engine's Move Overhead
+        // share; spending the full request plus I/O latency is how movetime flags.
+        let expected = Duration::from_millis(100 - TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.soft_time, Some(expected));
+        assert_eq!(limits.hard_time, Some(expected));
+        assert!(!limits.use_clock_management);
+    }
+
+    #[test]
+    fn movetime_below_the_overhead_clamps_to_one_millisecond() {
+        let (parameters, _) =
+            GoParameters::parse(&["movetime", "5"]).expect("movetime should parse");
+        let limits = parameters.search_limits(&Position::startpos(), 10);
+
+        // A saturating subtraction alone would yield a zero budget, which no search
+        // can satisfy; the floor keeps the engine answering.
+        assert_eq!(limits.soft_time, Some(Duration::from_millis(1)));
+        assert_eq!(limits.hard_time, Some(Duration::from_millis(1)));
+        assert!(!limits.use_clock_management);
+    }
+
+    #[test]
+    fn node_and_depth_limited_searches_keep_only_a_hard_clock_deadline() {
+        for arguments in [
+            &["nodes", "100000", "wtime", "2000", "btime", "2000"][..],
+            &["depth", "10", "wtime", "2000", "btime", "2000"][..],
+        ] {
+            let (parameters, _) =
+                GoParameters::parse(arguments).expect("bounded go with clock should parse");
+            let limits = parameters.search_limits(&Position::startpos(), TIME_OVERHEAD_MILLIS);
+            assert_eq!(
+                limits.hard_time,
+                parameters
+                    .clock_limits(&Position::startpos(), TIME_OVERHEAD_MILLIS)
+                    .1,
+                "{arguments:?}: the clock's hard limit becomes the safety deadline"
+            );
+            assert_eq!(
+                limits.soft_time, None,
+                "{arguments:?}: the soft-limit governor must stay out of bounded searches"
+            );
+            assert!(!limits.use_clock_management);
+        }
+
+        // Without clock tokens the bounded forms must be exactly what they were: no
+        // deadline at all, so node- and depth-limited determinism is preserved.
+        for arguments in [&["nodes", "100000"][..], &["depth", "10"][..]] {
+            let (parameters, _) = GoParameters::parse(arguments).expect("bounded go should parse");
+            let limits = parameters.search_limits(&Position::startpos(), TIME_OVERHEAD_MILLIS);
+            assert_eq!(
+                limits.hard_time, None,
+                "{arguments:?}: no clock, no deadline"
+            );
+            assert_eq!(limits.soft_time, None);
+        }
+    }
+
+    #[test]
+    fn non_clock_go_forms_disable_clock_management() {
+        for arguments in [
+            &["depth", "5"][..],
+            &["nodes", "1000"][..],
+            &["infinite"][..],
+            &["movetime", "100"][..],
+        ] {
+            let (parameters, _) =
+                GoParameters::parse(arguments).expect("bounded go form should parse");
+            assert!(
+                !parameters
+                    .search_limits(&Position::startpos(), TIME_OVERHEAD_MILLIS)
+                    .use_clock_management,
+                "{arguments:?} must not activate clock management"
+            );
+        }
     }
 
     #[test]
     fn clock_limits_reserve_a_safety_margin_and_let_the_hard_limit_borrow_from_later_moves() {
         let (parameters, _) = GoParameters::parse(&["wtime", "60000", "winc", "600"])
             .expect("clock parameters should parse");
-        let limits = parameters.search_limits(&Position::startpos());
+        let limits = parameters.search_limits(&Position::startpos(), TIME_OVERHEAD_MILLIS);
         let soft = limits.soft_time.expect("a clock implies a soft limit");
         let hard = limits.hard_time.expect("a clock implies a hard limit");
+        assert!(limits.use_clock_management);
 
         // 60000 - 10 overhead - 1200 safety = 58790 available; 58790/30 + 450 = 2409.
         assert_eq!(soft, Duration::from_millis(2_409));
@@ -2233,7 +2872,7 @@ mod tests {
                 .copied()
                 .expect("startpos has moves"),
         );
-        let limits = parameters.search_limits(&position);
+        let limits = parameters.search_limits(&position, TIME_OVERHEAD_MILLIS);
         let hard = limits.hard_time.expect("a clock implies a hard limit");
 
         // With one move to go the soft limit takes the whole available clock, so only
@@ -2250,9 +2889,254 @@ mod tests {
             .expect("clock should parse");
 
         assert_eq!(
-            far.search_limits(&Position::startpos()).soft_time,
-            clamped.search_limits(&Position::startpos()).soft_time
+            far.search_limits(&Position::startpos(), TIME_OVERHEAD_MILLIS)
+                .soft_time,
+            clamped
+                .search_limits(&Position::startpos(), TIME_OVERHEAD_MILLIS)
+                .soft_time
         );
+    }
+
+    #[test]
+    fn searchmoves_resolves_legal_moves_and_skips_illegal_ones() {
+        let (parameters, _) = GoParameters::parse(&["searchmoves", "e2e4", "d2d4", "depth", "3"])
+            .expect("searchmoves should parse");
+        assert_eq!(parameters.searchmoves, ["e2e4", "d2d4"]);
+        assert_eq!(parameters.depth, Some(3));
+
+        let position = Position::startpos();
+        let resolved = parameters
+            .root_moves(&position, false)
+            .expect("two legal moves should resolve");
+        assert_eq!(resolved.len(), 2);
+        assert!(
+            resolved
+                .iter()
+                .all(|&mv| generate_legal_moves(&position).contains(&mv))
+        );
+
+        let (mixed, _) =
+            GoParameters::parse(&["searchmoves", "e2e5", "zzzz", "e2e4", "depth", "3"])
+                .expect("a partially illegal searchmoves list should parse");
+        let resolved = mixed
+            .root_moves(&position, false)
+            .expect("the one legal move should resolve");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(format_uci_move(&position, resolved[0], false), "e2e4");
+    }
+
+    #[test]
+    fn an_empty_or_fully_illegal_searchmoves_list_places_no_restriction() {
+        let position = Position::startpos();
+        let (empty, _) = GoParameters::parse(&["searchmoves", "depth", "3"])
+            .expect("an empty searchmoves list should parse");
+        assert!(empty.searchmoves.is_empty());
+        assert_eq!(empty.root_moves(&position, false), None);
+
+        let (illegal, _) = GoParameters::parse(&["searchmoves", "e2e5", "zzzz", "depth", "3"])
+            .expect("an illegal searchmoves list should parse");
+        assert_eq!(illegal.root_moves(&position, false), None);
+    }
+
+    #[test]
+    fn searchmoves_accepts_chess960_castling_notation() {
+        let position = Position::from_fen("r3k2r/8/8/8/8/8/8/R3K2R w HAha - 0 1", true)
+            .expect("Chess960 castling FEN should parse");
+        let (parameters, _) = GoParameters::parse(&["searchmoves", "e1h1", "depth", "3"])
+            .expect("Chess960 searchmoves should parse");
+        let resolved = parameters
+            .root_moves(&position, true)
+            .expect("king-takes-rook notation should resolve");
+        assert_eq!(resolved.len(), 1);
+        assert!(resolved[0].flag().is_castling());
+    }
+
+    #[test]
+    fn go_mate_parses_its_move_count_and_stays_non_infinite() {
+        let (parameters, ignored) =
+            GoParameters::parse(&["mate", "3"]).expect("go mate should parse");
+        assert_eq!(parameters.mate, Some(3));
+        assert!(!parameters.infinite);
+        assert!(ignored.is_empty());
+
+        // A bare `mate` without a value is malformed: reported, and the command falls
+        // back to unbounded analysis so the GUI still gets its bestmove.
+        let (bare, ignored) = GoParameters::parse(&["mate"]).expect("bare mate should parse");
+        assert_eq!(bare.mate, None);
+        assert!(bare.infinite);
+        assert_eq!(ignored, ["mate"]);
+    }
+
+    #[test]
+    fn go_ponder_parses_alongside_clock_tokens() {
+        let (parameters, ignored) = GoParameters::parse(&[
+            "ponder", "wtime", "60000", "btime", "59000", "winc", "1000", "binc", "1000",
+        ])
+        .expect("go ponder with clocks should parse");
+        assert!(parameters.ponder);
+        assert!(
+            !parameters.infinite,
+            "the clock tokens are the budget the search converts to at ponderhit"
+        );
+        assert_eq!(parameters.wtime, Some(60_000));
+        assert_eq!(parameters.btime, Some(59_000));
+        assert!(ignored.is_empty());
+
+        // A bare `go ponder` carries no budget: legal, and unbounded until
+        // ponderhit/stop.
+        let (bare, ignored) = GoParameters::parse(&["ponder"]).expect("bare ponder should parse");
+        assert!(bare.ponder);
+        assert!(bare.infinite);
+        assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn bestmove_gains_a_ponder_suggestion_when_the_pv_has_a_reply() {
+        let position = Position::startpos();
+        let first = parse_uci_move(&position, "e2e4", false).expect("e2e4 is legal");
+        let mut after_first = position.clone();
+        after_first.make_move(first);
+        let reply = parse_uci_move(&after_first, "e7e5", false).expect("e7e5 is legal");
+
+        let mut output = Vec::new();
+        write_bestmove(&mut output, &position, Some(first), &[first, reply], false)
+            .expect("bestmove should be writable");
+        assert_eq!(
+            String::from_utf8(output).expect("protocol output should be UTF-8"),
+            "bestmove e2e4 ponder e7e5\n"
+        );
+
+        // A single-move PV has no reply to suggest.
+        let mut output = Vec::new();
+        write_bestmove(&mut output, &position, Some(first), &[first], false)
+            .expect("bestmove should be writable");
+        assert_eq!(
+            String::from_utf8(output).expect("protocol output should be UTF-8"),
+            "bestmove e2e4\n"
+        );
+
+        // A PV that does not begin with the played move belongs to a different line,
+        // so no suggestion is attached.
+        let other = parse_uci_move(&position, "d2d4", false).expect("d2d4 is legal");
+        let mut output = Vec::new();
+        write_bestmove(&mut output, &position, Some(other), &[first, reply], false)
+            .expect("bestmove should be writable");
+        assert_eq!(
+            String::from_utf8(output).expect("protocol output should be UTF-8"),
+            "bestmove d2d4\n"
+        );
+    }
+
+    #[test]
+    fn the_ponder_option_is_stored_on_the_engine_state() {
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+        assert!(!state.ponder_enabled);
+
+        handle_setoption("setoption name Ponder value true", &mut state, &mut output)
+            .expect("Ponder write should be writable");
+        assert!(state.ponder_enabled);
+
+        handle_setoption("setoption name Ponder value false", &mut state, &mut output)
+            .expect("Ponder write should be writable");
+        assert!(!state.ponder_enabled);
+    }
+
+    #[test]
+    fn move_overhead_writes_are_clamped_to_the_advertised_bounds() {
+        let mut state = EngineState::default();
+        let mut output = Vec::new();
+
+        handle_setoption(
+            "setoption name Move Overhead value 500",
+            &mut state,
+            &mut output,
+        )
+        .expect("Move Overhead write should be writable");
+        assert_eq!(state.move_overhead_millis, 500);
+
+        handle_setoption(
+            "setoption name Move Overhead value 5000",
+            &mut state,
+            &mut output,
+        )
+        .expect("oversize Move Overhead should be writable");
+        assert_eq!(state.move_overhead_millis, MAX_MOVE_OVERHEAD_MILLIS);
+
+        handle_setoption(
+            "setoption name Move Overhead value -3",
+            &mut state,
+            &mut output,
+        )
+        .expect("negative Move Overhead should be writable");
+        assert_eq!(state.move_overhead_millis, MIN_MOVE_OVERHEAD_MILLIS);
+
+        handle_setoption(
+            "setoption name Move Overhead value banana",
+            &mut state,
+            &mut output,
+        )
+        .expect("invalid Move Overhead diagnostic should be writable");
+        assert_eq!(state.move_overhead_millis, MIN_MOVE_OVERHEAD_MILLIS);
+        assert!(
+            String::from_utf8(output)
+                .expect("protocol output should be UTF-8")
+                .contains("info string invalid Move Overhead value 'banana'")
+        );
+    }
+
+    #[test]
+    fn move_overhead_is_subtracted_from_the_clock_budget() {
+        let (parameters, _) = GoParameters::parse(&["wtime", "60000", "winc", "600"])
+            .expect("clock parameters should parse");
+        let limits = parameters.search_limits(&Position::startpos(), 500);
+
+        // 60000 - 500 overhead - 1200 safety = 58300 available; 58300/30 + 450 = 2393.
+        assert_eq!(limits.soft_time, Some(Duration::from_millis(2_393)));
+    }
+
+    #[test]
+    fn clear_hash_button_without_a_value_clears_the_table_in_place() {
+        let mut state = EngineState::default();
+        let key = state.position.zobrist().main();
+        let allocated_bytes = state.transposition_table.allocated_bytes();
+        state.transposition_table.store(
+            key,
+            EntryData {
+                best_move: generate_legal_moves(&state.position).first().copied(),
+                score: 7,
+                static_eval: 3,
+                depth: 9,
+                bound: Bound::Exact,
+                age: 1,
+                pv: false,
+            },
+        );
+        let mut output = Vec::new();
+
+        handle_setoption("setoption name Clear Hash", &mut state, &mut output)
+            .expect("Clear Hash button should be writable");
+
+        assert_eq!(state.transposition_table.probe(key), None);
+        assert_eq!(state.transposition_table.allocated_bytes(), allocated_bytes);
+        assert!(output.is_empty(), "a successful clear reports nothing");
+    }
+
+    #[test]
+    fn the_position_diagram_round_trips_its_own_fen() {
+        let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+        let position = Position::from_fen(fen, false).expect("test FEN should parse");
+        let mut output = Vec::new();
+
+        write_position_diagram(&mut output, &position, false)
+            .expect("position diagram should be writable");
+
+        let output = String::from_utf8(output).expect("protocol output should be UTF-8");
+        let lines: Vec<_> = output.lines().collect();
+        assert_eq!(lines.len(), 10, "eight ranks, the FEN, and the key");
+        assert_eq!(lines[0], "r . . . k . . r");
+        assert_eq!(lines[8], format!("Fen: {fen}"));
+        assert_eq!(lines[9], format!("Key: {:016X}", position.zobrist().main()));
     }
 
     #[test]

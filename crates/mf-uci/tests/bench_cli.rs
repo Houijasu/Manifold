@@ -78,47 +78,91 @@ use std::time::{Duration, Instant};
 /// This constant NOT moving is otherwise still an assertion. A feature that ships
 /// disabled must leave the shipped signature bit-for-bit unchanged, so if adding one
 /// ever moves this number, the toggle is not gating everything it claims to gate.
-const BENCH_NODE_COUNT: u64 = 34_516;
-const BENCH_NODES: &str = "Nodes searched: 34516";
+///
+/// The lazy staged move picker moved it from `34_516` to `35_886`. Quiets are now
+/// generated and scored only when the good captures are exhausted, so their history
+/// scores are read WARM — after any beta-cutoff bonuses and post-LMR continuation
+/// bonuses the earlier moves' subtrees applied — instead of frozen at node entry.
+/// That is deliberate (it is what the reference engine does) and it is why every
+/// history-on anchor in this file moved, while both all-selectivity-off anchors
+/// (`3_473_752` and `2_848_237`) reproduce bit-for-bit: with every history table
+/// disabled nothing is warm, so lazy scoring is order-identical to eager and the
+/// unchanged numbers prove the staging itself did not move any tree. The same change
+/// removed the qsearch stalemate scans (non-in-check qsearch nodes return the standing
+/// pat without a legality scan, the Stockfish convention), which is tree-neutral on
+/// this suite.
+///
+/// The Stage-3 per-worker history pair (ttMove history feeding the singular double
+/// margin, low-ply history feeding quiet ordering at ply < 5) moved it from `35_886`
+/// to `39_051`, and moved every defaults-on anchor in this file with it. Attribution
+/// is pinned in `per_worker_history_toggles_reproduce_the_pre_change_signature`: with
+/// `UseTtMoveHistory=false` and `UseLowPlyHistory=false` the old `35_886` comes back
+/// bit-for-bit, so the pair's maintenance is proven invisible to a build that does not
+/// read it. The two all-selectivity-off ablation anchors are unchanged because that
+/// session now switches the new reads off alongside the other ordering tables.
+///
+/// The corrhist complexity proxy (Stage 3 item 23) moved it from `39_051` to `40_705`:
+/// `|correction_value|` now refunds LMR reduction, grows the RFP margin, and shrinks
+/// the singular double margin. Attribution is pinned in
+/// `corrplexity_off_reproduces_the_pre_change_signature`, and every anchor measured
+/// with `UseCorrHistory=false` is unchanged because a zero correction is a zero proxy.
+const BENCH_NODE_COUNT: u64 = 40_705;
+const BENCH_NODES: &str = "Nodes searched: 40705";
+
+/// The signature with `UseCorrplexity=false`: the previous shipped signature,
+/// bit-for-bit. The toggle gates the three consumption reads only, so this coming back
+/// exactly proves the feature added no computation and no side effect beyond them.
+const BENCH_NODE_COUNT_WITHOUT_CORRPLEXITY: u64 = 39_051;
 
 /// The signature with `UsePostLMRDepth=false`, capture LMR still on.
 ///
 /// This is the number M3-F2 measured its -8.11 Elo with, which is not a coincidence:
 /// that build was capture LMR without the verification-depth band, and this arm
 /// reconstructs it exactly.
-const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 35_199;
+const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 38_726;
 
 /// The signature with `UsePostLMRContHist=true`.
 ///
 /// Pinned so the disabled half of the M3-F4 package stays measurable without a rebuild.
-const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 36_581;
+const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 54_581;
 
 /// The signature with `UseCaptureLMR=false`: the M3 shipped signature, bit-for-bit.
 ///
 /// The attribution proof that M4-F1b moved the signature by flipping one default and
 /// nothing else. If `44_737` does not come back exactly, something other than capture
 /// LMR moved the tree.
-const BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR: u64 = 38_620;
+const BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR: u64 = 40_150;
 
 /// The signature with `UseCaptureLMR=false` AND `UsePostLMRDepth=false`: the M7/M2
 /// signature both features were measured against, bit-for-bit.
-const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 39_272;
+const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 41_190;
 
 /// The all-on signature with `UseQSearchChecks=true`.
 ///
 /// Pinned so the disabled technique stays measurable without a rebuild, and so a change
 /// to the quiet-check generator is still caught by the suite even though nothing in the
 /// shipped search reaches it.
-const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 38_871;
+const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 41_611;
 
 /// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
-const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 39_134;
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 40_975;
 
 /// The NNUE signature reproduced exactly by `UseContHistory=false`.
 ///
 /// This is measured with correction history off so the anchor isolates continuation
 /// history rather than folding correction-history changes into the same number.
-const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 36_360;
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 37_723;
+
+/// The signature with both per-worker history reads off.
+///
+/// This anchor is the maintenance/read-separation proof for the Stage-3 pair. Both
+/// tables are still built and updated on every search in this arm, so an exact anchor
+/// proves the updates have no side effect on the tree — the same statement every other
+/// `Use*` control in this file makes. It reproduced the pre-pair `35_886` bit-for-bit
+/// until the corrhist complexity proxy landed on top; that feature moved this arm like
+/// every defaults-on anchor, and its own attribution control is
+/// `corrplexity_off_reproduces_the_pre_change_signature`.
+const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 36_214;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -143,7 +187,12 @@ const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 36_360;
 ///
 /// M7 moved it again, from `142_487` to `124_323`, in the same direction as every other
 /// anchor here.
-const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 78_365;
+///
+/// The Stage-3 per-worker history pair moved it from `80_482` to `129_420` — the same
+/// all-on-cheaper/LMR-off-dearer divergence continuation history produced, and for the
+/// same reason: low-ply ordering feeds the tree LMR then prunes, so removing LMR
+/// removes more search than before.
+const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 129_420;
 
 fn workspace_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -299,7 +348,7 @@ fn run_uci_bench_ablation_session() -> Output {
         // The history tables are disabled for the whole of this session. They are a
         // move-ordering input that every other technique's isolated delta is measured
         // through, so leaving them on would fold history's effect into all eleven
-        // numbers below. The NNUE all-off signatures (`3_473_717` and `2_848_247`)
+        // numbers below. The NNUE all-off signatures (`3_473_752` and `2_848_237`)
         // are pinned separately. History gets its own isolation context in
         // `history_toggles_have_pinned_nnue_signatures`.
         //
@@ -311,6 +360,8 @@ fn run_uci_bench_ablation_session() -> Output {
              setoption name UseCaptureHistory value false\n\
              setoption name UseContHistory value false\n\
              setoption name UseCorrHistory value false\n\
+             setoption name UseTtMoveHistory value false\n\
+             setoption name UseLowPlyHistory value false\n\
              setoption name UseNMP value false\n\
              setoption name UseRFP value false\n\
              setoption name UseRazoring value false\n\
@@ -492,7 +543,7 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     assert_eq!(nodes.len(), 14);
     let baseline = nodes[0];
     assert_eq!(
-        baseline, 3_473_717,
+        baseline, 3_473_752,
         "the NNUE all-selectivity-off signature must leave check extensions enabled"
     );
     for (name, enabled) in [
@@ -536,7 +587,7 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     );
 
     assert_eq!(
-        nodes[13], 2_848_247,
+        nodes[13], 2_848_237,
         "UseCheckExt=false must reproduce the NNUE all-selectivity-off signature"
     );
 }
@@ -590,7 +641,7 @@ fn history_toggles_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 4);
 
-    assert_eq!(nodes, [39_134, 42_533, 38_803, 36_360]);
+    assert_eq!(nodes, [40_975, 47_262, 39_460, 37_723]);
 }
 
 /// `UseContHistory=false` must reproduce its NNUE signature bit-for-bit.
@@ -691,7 +742,7 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 3);
 
-    assert_eq!(nodes, [BENCH_NODE_COUNT, 45_249, 37_519]);
+    assert_eq!(nodes, [BENCH_NODE_COUNT, 45_909, 49_862]);
 }
 
 /// `UseQSearchChecks` ships OFF, and this test records WHY in an executable form.
@@ -939,7 +990,7 @@ fn post_lmr_handling_cannot_reach_the_tree_without_lmr() {
     // default-context LMR-off tree rather than at some third thing.
     assert_eq!(
         nodes,
-        vec![67_005; 3],
+        vec![75_983; 3],
         "post-LMR handling must be completely inert while UseLMR is off"
     );
 }
@@ -988,6 +1039,53 @@ fn the_time_effort_term_cannot_move_the_fixed_depth_bench_signature() {
     );
 }
 
+#[test]
+fn interpolated_time_management_is_inert_for_default_and_explicit_off_bench() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseInterpolatedTimeManagement value false\n\
+         bench\n\
+         setoption name UseInterpolatedTimeManagement value true\n\
+         bench\n\
+         quit\n",
+        "UCI interpolated time management bench session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT; 3],
+        "the interpolated governor must not reach fixed-depth bench in any toggle position"
+    );
+}
+
+#[test]
+fn search_again_depth_preserves_the_control_bench_signature() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseSearchAgainDepth value false\n\
+         bench\n\
+         setoption name UseInterpolatedTimeManagement value false\n\
+         setoption name UseSearchAgainDepth value false\n\
+         bench\n\
+         quit\n",
+        "UCI search-again depth bench session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT; 3],
+        "default, explicit off, and both Stage 6 toggles off must preserve bench"
+    );
+}
+
 /// Turning history off must reproduce the pinned NNUE all-off signatures bit-for-bit.
 ///
 /// This is the proof that M4-F1 moved the shipped bench signature by adding history
@@ -1003,11 +1101,11 @@ fn disabling_history_reproduces_nnue_all_selectivity_off_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
 
     assert_eq!(
-        nodes[0], 3_473_717,
+        nodes[0], 3_473_752,
         "ten selectivity toggles off with history off must match the NNUE anchor exactly"
     );
     assert_eq!(
-        nodes[13], 2_848_247,
+        nodes[13], 2_848_237,
         "all selectivity off with history off must match the NNUE anchor exactly"
     );
 }
@@ -1124,6 +1222,141 @@ fn pawn_history_ships_disabled_and_is_wired_through_to_the_search() {
     );
 }
 
+/// Both per-worker history reads off must reproduce the pre-change signature
+/// bit-for-bit, and each read must have its own observable effect.
+///
+/// This is the attribution control for the Stage-3 pair (ttMove history in the
+/// singular double margin, low-ply history in quiet ordering). Both tables are still
+/// allocated, refilled, and updated on every search in the both-off arm, so `35_886`
+/// coming back exactly is the proof that maintenance is separated from the reads: the
+/// toggles gate consumption only, and the updates leave no fingerprint on the tree.
+/// The single-off arms pin that each feature reaches the search independently, so the
+/// pair stays SPRT-able one feature at a time.
+#[test]
+fn per_worker_history_toggles_reproduce_the_pre_change_signature() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseTtMoveHistory value false\n\
+         setoption name UseLowPlyHistory value false\n\
+         bench\n\
+         setoption name UseLowPlyHistory value true\n\
+         bench\n\
+         setoption name UseTtMoveHistory value true\n\
+         setoption name UseLowPlyHistory value false\n\
+         bench\n\
+         quit\n",
+        "UCI per-worker history session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 4);
+
+    assert_eq!(
+        nodes[0], BENCH_NODE_COUNT,
+        "both per-worker history reads must be ON in the shipped default"
+    );
+    assert_eq!(
+        nodes[1], BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY,
+        "with both reads off the pinned signature must come back bit-for-bit, \
+         proving the unconditional maintenance has no side effect on the tree"
+    );
+    assert_ne!(
+        nodes[2], nodes[0],
+        "disabling only UseTtMoveHistory must reach the search"
+    );
+    assert_ne!(
+        nodes[3], nodes[0],
+        "disabling only UseLowPlyHistory must reach the search"
+    );
+}
+
+/// `UseCorrplexity=false` must reproduce the pre-change signature bit-for-bit.
+///
+/// This is the attribution control for the corrhist complexity proxy (Stage 3 item
+/// 23). The proxy is `|correction_value|`, a magnitude the search was already
+/// computing per node; the feature only READS it at three sites (LMR refund, RFP
+/// margin, singular double margin), so switching those reads off must restore the
+/// previous shipped tree exactly. Corrhist maintenance and the eval correction are
+/// untouched either way — that is what the exact anchor proves.
+#[test]
+fn corrplexity_off_reproduces_the_pre_change_signature() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseCorrplexity value false\n\
+         bench\n\
+         quit\n",
+        "UCI corrplexity session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(
+        metrics(stdout, "Nodes searched: "),
+        vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITHOUT_CORRPLEXITY],
+        "the complexity proxy must be ON in the shipped default and must restore the \
+         pre-change signature exactly when disabled"
+    );
+}
+
+/// Each corrplexity divisor must reach its consumption site.
+///
+/// The wiring proof for the three new spins, in the same shape as
+/// `changing_a_tunable_parameter_changes_the_bench_signature`: drive each divisor to
+/// its minimum (4_096, making the proxy term large), assert the aggregate moves, then
+/// restore the default and demand the shipped signature back exactly. The direction of
+/// each individual tree is NOT asserted — the depth-granularity caveat on the LMR
+/// wiring test applies here too — only that the read exists and the write round-trips.
+#[test]
+fn each_corrplexity_divisor_reaches_its_consumption_site() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name LmrCorrplexityDivisor value 4096\n\
+         bench\n\
+         setoption name LmrCorrplexityDivisor value 26310\n\
+         setoption name RfpCorrplexityDivisor value 4096\n\
+         bench\n\
+         setoption name RfpCorrplexityDivisor value 198435\n\
+         setoption name SingularCorrplexityDivisor value 4096\n\
+         bench\n\
+         setoption name SingularCorrplexityDivisor value 198368\n\
+         bench\n\
+         quit\n",
+        "UCI corrplexity divisor session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 5);
+
+    assert_eq!(nodes[0], BENCH_NODE_COUNT);
+    for (name, moved) in [
+        "LmrCorrplexityDivisor",
+        "RfpCorrplexityDivisor",
+        "SingularCorrplexityDivisor",
+    ]
+    .into_iter()
+    .zip(&nodes[1..=3])
+    {
+        assert_ne!(
+            *moved, nodes[0],
+            "{name} at its minimum must reach the search and change the tree"
+        );
+    }
+    assert_eq!(
+        nodes[4], BENCH_NODE_COUNT,
+        "restoring all three defaults must restore the shipped signature exactly"
+    );
+}
+
 /// The UCI option list must advertise the real defaults.
 ///
 /// A GUI that trusts `default true` would silently enable a measured regression.
@@ -1140,6 +1373,8 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseQSearchChecks",
         "UsePostLMRContHist",
         "UseTimeEffort",
+        "UseInterpolatedTimeManagement",
+        "UseSearchAgainDepth",
     ] {
         assert!(
             stdout
@@ -1152,8 +1387,11 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseButterflyHistory",
         "UseCaptureHistory",
         "UseContHistory",
+        "UseTtMoveHistory",
+        "UseLowPlyHistory",
         "UsePostLMRDepth",
         "UseCaptureLMR",
+        "UseCorrplexity",
     ] {
         assert!(
             stdout
@@ -1211,11 +1449,11 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 56_833,
+        nodes[2], 62_573,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(
-        nodes[3], 135_316,
+        nodes[3], 180_934,
         "with futility and SEE already off, UseLMR=false is unchanged by the split"
     );
 

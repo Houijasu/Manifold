@@ -10,6 +10,7 @@ use mf_search::{
     MATE_SCORE, SearchLimits, SearchOptions, SharedHistory, TranspositionTable,
     search_with_callback,
 };
+use mf_tb::{Tablebases, Wdl};
 
 use crate::filter::{Filter, Rejection};
 use crate::record::{Outcome, Record};
@@ -83,6 +84,8 @@ pub struct GenerateStats {
     pub deduplicated: u64,
     /// Emitted records by side-to-move-relative result: loss, draw, win.
     pub results: [u64; 3],
+    /// Games adjudicated by a Syzygy tablebase probe.
+    pub tb_adjudicated: u64,
 }
 
 impl GenerateStats {
@@ -96,6 +99,7 @@ impl GenerateStats {
         self.positions += other.positions;
         self.considered += other.considered;
         self.deduplicated += other.deduplicated;
+        self.tb_adjudicated += other.tb_adjudicated;
         for (slot, value) in self.rejected.iter_mut().zip(other.rejected) {
             *slot += value;
         }
@@ -131,6 +135,7 @@ struct GameOutput {
 pub fn generate<S>(
     config: GenerateConfig,
     network: &Network,
+    tablebases: Option<&Tablebases>,
     mut sink: S,
 ) -> Result<GenerateStats, String>
 where
@@ -154,7 +159,14 @@ where
                     if index >= config.games {
                         return Ok(());
                     }
-                    let output = play_game(index, &config, &transposition_table, &history, network);
+                    let output = play_game(
+                        index,
+                        &config,
+                        &transposition_table,
+                        &history,
+                        network,
+                        tablebases,
+                    );
                     pending
                         .lock()
                         .map_err(|_| "datagen output queue poisoned".to_string())?
@@ -250,6 +262,7 @@ fn play_game(
     transposition_table: &TranspositionTable,
     shared_history: &SharedHistory,
     network: &Network,
+    tablebases: Option<&Tablebases>,
 ) -> GameOutput {
     let mut rng = Rng::for_index(config.seed, index);
     let mut stats = GenerateStats {
@@ -302,6 +315,8 @@ fn play_game(
             limits,
             options,
             network,
+            None,
+            None,
             &stop,
             |_| {},
         );
@@ -373,6 +388,24 @@ fn play_game(
 
         state.position.make_move(best_move);
         state.history.push(state.position.repetition_key());
+
+        // Tablebase adjudication: the instant the game enters table range, the true
+        // result is known and the game ends. Probing only at `halfmove_clock() == 0`
+        // is both the standard Syzygy WDL soundness condition and sufficient: a
+        // position can only enter table range through a capture, which zeroes the
+        // clock, so every in-range position was probed on the ply it became in-range.
+        if let Some(tablebases) = tablebases
+            && state.position.halfmove_clock() == 0
+            && state.position.occupancy().count() as usize <= tablebases.max_pieces()
+            && let Some(wdl) = tablebases.probe_wdl(&state.position)
+        {
+            white_relative_outcome = Some(white_relative_tb_outcome(
+                wdl,
+                state.position.side_to_move(),
+            ));
+            stats.tb_adjudicated += 1;
+            break;
+        }
     }
 
     // A game that hit the ply ceiling without resolving is scored as a draw, which is
@@ -429,6 +462,23 @@ fn random_opening(rng: &mut Rng) -> Option<GameState> {
         kept: Vec::new(),
         seen: HashSet::new(),
     })
+}
+
+/// Maps a side-to-move-relative tablebase verdict onto the white-relative game
+/// outcome.
+///
+/// Cursed wins and blessed losses are draws under the fifty-move rule, which is the
+/// truth a real game would reach, so they are labelled as draws.
+fn white_relative_tb_outcome(wdl: Wdl, side_to_move: mf_core::Color) -> Outcome {
+    let stm_wins = match wdl {
+        Wdl::Win => true,
+        Wdl::Loss => false,
+        Wdl::CursedWin | Wdl::BlessedLoss | Wdl::Draw => return Outcome::Draw,
+    };
+    match (side_to_move, stm_wins) {
+        (mf_core::Color::White, true) | (mf_core::Color::Black, false) => Outcome::Win,
+        (mf_core::Color::White, false) | (mf_core::Color::Black, true) => Outcome::Loss,
+    }
 }
 
 /// The white-relative outcome if `position` is checkmate or stalemate.
@@ -497,7 +547,7 @@ mod tests {
     fn collect(config: GenerateConfig) -> (Vec<Record>, super::GenerateStats) {
         let network = network().expect("caller must check `network()` before collecting");
         let mut records = Vec::new();
-        let stats = generate(config, network, |batch| {
+        let stats = generate(config, network, None, |batch| {
             records.extend_from_slice(batch);
             Ok(())
         })
@@ -631,6 +681,115 @@ mod tests {
             stats.deduplicated > 0,
             "self-play repeats positions, so dedup must actually fire"
         );
+    }
+
+    #[test]
+    fn wdl_verdicts_map_to_white_relative_outcomes_through_the_side_to_move() {
+        use mf_core::Color;
+        use mf_tb::Wdl;
+
+        use super::white_relative_tb_outcome;
+        use crate::record::Outcome;
+
+        assert_eq!(
+            white_relative_tb_outcome(Wdl::Win, Color::White),
+            Outcome::Win
+        );
+        assert_eq!(
+            white_relative_tb_outcome(Wdl::Loss, Color::White),
+            Outcome::Loss
+        );
+        assert_eq!(
+            white_relative_tb_outcome(Wdl::Win, Color::Black),
+            Outcome::Loss
+        );
+        assert_eq!(
+            white_relative_tb_outcome(Wdl::Loss, Color::Black),
+            Outcome::Win
+        );
+        // Cursed wins and blessed losses are fifty-move-rule draws for either side.
+        for color in Color::ALL {
+            assert_eq!(
+                white_relative_tb_outcome(Wdl::CursedWin, color),
+                Outcome::Draw
+            );
+            assert_eq!(
+                white_relative_tb_outcome(Wdl::BlessedLoss, color),
+                Outcome::Draw
+            );
+            assert_eq!(white_relative_tb_outcome(Wdl::Draw, color), Outcome::Draw);
+        }
+    }
+
+    /// Loads tablebases from `MF_SYZYGY_PATH`, or `None` to skip (repo pattern).
+    fn tablebases() -> Option<&'static mf_tb::Tablebases> {
+        static TABLEBASES: OnceLock<Option<mf_tb::Tablebases>> = OnceLock::new();
+        TABLEBASES
+            .get_or_init(|| {
+                let paths = std::env::var("MF_SYZYGY_PATH").ok()?;
+                Some(
+                    mf_tb::Tablebases::new(&paths).unwrap_or_else(|error| {
+                        panic!("MF_SYZYGY_PATH is set but broken: {error}")
+                    }),
+                )
+            })
+            .as_ref()
+    }
+
+    fn collect_with_tb(
+        config: GenerateConfig,
+        tablebases: &mf_tb::Tablebases,
+    ) -> (Vec<Record>, super::GenerateStats) {
+        let network = network().expect("caller must check `network()` before collecting");
+        let mut records = Vec::new();
+        let stats = generate(config, network, Some(tablebases), |batch| {
+            records.extend_from_slice(batch);
+            Ok(())
+        })
+        .expect("generation succeeds");
+        (records, stats)
+    }
+
+    /// Enough games to make at least one reach tablebase range with high probability.
+    fn tb_config(threads: usize) -> GenerateConfig {
+        GenerateConfig {
+            games: 32,
+            nodes: 1_000,
+            threads,
+            seed: 90_210,
+            ..GenerateConfig::default()
+        }
+    }
+
+    #[test]
+    fn a_tablebase_run_is_deterministic_and_actually_adjudicates() {
+        let (Some(tablebases), Some(_)) = (tablebases(), network()) else {
+            eprintln!("SKIPPED: set MF_SYZYGY_PATH to run tablebase adjudication tests");
+            return;
+        };
+        let (first, first_stats) = collect_with_tb(tb_config(1), tablebases);
+        let (second, second_stats) = collect_with_tb(tb_config(1), tablebases);
+        assert_eq!(
+            first, second,
+            "a fixed seed plus a fixed table set must be reproducible"
+        );
+        assert_eq!(first_stats, second_stats);
+        assert!(
+            first_stats.tb_adjudicated > 0,
+            "at least one game must actually be adjudicated by the tablebases"
+        );
+    }
+
+    #[test]
+    fn a_tablebase_run_is_independent_of_the_thread_count() {
+        let (Some(tablebases), Some(_)) = (tablebases(), network()) else {
+            eprintln!("SKIPPED: set MF_SYZYGY_PATH to run tablebase adjudication tests");
+            return;
+        };
+        let (single, single_stats) = collect_with_tb(tb_config(1), tablebases);
+        let (multi, multi_stats) = collect_with_tb(tb_config(4), tablebases);
+        assert_eq!(single, multi);
+        assert_eq!(single_stats, multi_stats);
     }
 
     #[test]

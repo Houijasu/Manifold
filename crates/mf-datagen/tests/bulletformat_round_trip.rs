@@ -172,7 +172,7 @@ fn a_generated_file_loads_through_bulletformats_data_loader_with_a_matching_coun
     path.push(format!("mf-datagen-loader-{}.bullet", std::process::id()));
 
     let mut file = std::io::BufWriter::new(std::fs::File::create(&path).expect("temp file"));
-    let stats = generate(config, &network, |batch| {
+    let stats = generate(config, &network, None, |batch| {
         for record in batch {
             file.write_all(&record.to_bytes())
                 .map_err(|error| error.to_string())?;

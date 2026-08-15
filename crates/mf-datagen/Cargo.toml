@@ -9,6 +9,7 @@ authors.workspace = true
 mf-core = { path = "../mf-core" }
 mf-nnue = { path = "../mf-nnue" }
 mf-search = { path = "../mf-search" }
+mf-tb = { path = "../mf-tb" }
 
 # `bulletformat` (MIT, zero dependencies) is a DEV-DEPENDENCY ONLY, used as a
 # round-trip oracle exactly as `cozy-chess` is used for perft in `mf-core`. It must

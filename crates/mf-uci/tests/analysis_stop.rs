@@ -15,10 +15,11 @@ fn engine_path() -> std::path::PathBuf {
     path
 }
 
-/// A king-and-queen mate in one. `go infinite` here finds a mate immediately and, per
-/// UCI, must not answer before `stop` -- which is exactly the state the user reported the
-/// engine could not be pulled out of.
-const FORCED_MATE: &str = "7k/6Q1/6K1/8/8/8/8/8 w - - 0 1";
+/// A king-and-queen mate in one (Qf8#). `go infinite` here finds a mate immediately and,
+/// per UCI, must not answer before `stop` -- which is exactly the state the user reported
+/// the engine could not be pulled out of. The FEN this constant held had the black king
+/// already in check with white to move; this is its legal sibling.
+const FORCED_MATE: &str = "7k/5Q2/6K1/8/8/8/8/8 w - - 0 1";
 
 /// The ply ceiling the search must never iterate past. Mirrors `mf_search::MAX_SEARCH_PLY`
 /// and the NNUE accumulator stack depth; spelled out here so the protocol surface is
