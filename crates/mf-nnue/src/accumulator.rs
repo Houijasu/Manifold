@@ -25,7 +25,9 @@ use crate::threats::{
 pub const ACCUMULATOR_STACK_CAPACITY: usize = 128;
 
 const STACK_STATES: usize = ACCUMULATOR_STACK_CAPACITY + 1;
-const MAX_PIECE_DELTAS: usize = 4;
+/// Maximum number of piece features one move can remove or add; bounds the delta
+/// slices handed to the fused update kernel.
+pub(crate) const MAX_PIECE_DELTAS: usize = 4;
 const A1: Square = match Square::new(0) {
     Some(square) => square,
     None => unreachable!(),
@@ -218,6 +220,8 @@ impl AccumulatorState {
                         threat_additions,
                         threat_removals,
                     );
+                    prefetch_threat_rows(context.network, &threat_removals[..removal_count]);
+                    prefetch_threat_rows(context.network, &threat_additions[..addition_count]);
                     rebase_halfka(
                         context.backend,
                         context.network,
@@ -272,6 +276,8 @@ impl AccumulatorState {
                 threat_additions,
                 threat_removals,
             );
+            prefetch_threat_rows(context.network, &threat_removals[..removal_count]);
+            prefetch_threat_rows(context.network, &threat_additions[..addition_count]);
             let parent_accumulator = &parent.accumulators[index];
             let child_accumulator = &mut self.accumulators[index];
             fused_accumulator_update(
@@ -778,6 +784,83 @@ struct UpdateContext<'position> {
     finny: &'position mut FinnyTable,
 }
 
+/// Prefetches the FullThreats weight rows the subsequent accumulate loop will read.
+///
+/// The threat table is ~62 MB of 1 KiB rows indexed by feature, so the rows a node
+/// touches are scattered far beyond any cache. Index computation is the natural
+/// prefetch point (the reference engine's `append_changed_indices` takes a
+/// `prefetchBase`/`prefetchStride` pair for exactly this): by the time the SIMD loop
+/// asks for a row, the line holding its head is already in flight and the hardware
+/// prefetcher streams the rest. Pure hint -- no behavior change.
+#[inline]
+fn prefetch_threat_rows(network: &Network, features: &[u32]) {
+    #[cfg(target_arch = "x86_64")]
+    for &feature in features {
+        if let Some(row) = network.threat_weights().row(feature as usize) {
+            use core::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
+            // SAFETY: `_mm_prefetch` only issues a hardware hint. The pointer is
+            // derived from a live weight row and is not dereferenced by Rust.
+            unsafe { _mm_prefetch::<_MM_HINT_T0>(row.as_ptr().cast()) };
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (network, features);
+}
+
+/// Issues one T0 prefetch hint for the cache line starting at `address`.
+#[inline]
+fn prefetch_t0(address: *const u8) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use core::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
+        // SAFETY: `_mm_prefetch` only issues a hardware hint; the address is
+        // never dereferenced by Rust.
+        unsafe { _mm_prefetch::<_MM_HINT_T0>(address.cast()) };
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = address;
+}
+
+/// `prefetch_threat_rows` for `usize` feature indices, also covering the PSQT rows.
+///
+/// The mirror-flip rebuild streams every active threat row straight from the ~62 MB
+/// table, so issuing the prefetches between index computation and the add loop hides
+/// part of each cold miss. Pure hint -- no behavior change.
+#[inline]
+fn prefetch_threat_rows_indexed(network: &Network, features: &[usize]) {
+    #[cfg(target_arch = "x86_64")]
+    for &feature in features {
+        if let Some(row) = network.threat_weights().row(feature) {
+            prefetch_t0(row.as_ptr().cast());
+        }
+        if let Some(row) = network.threat_psqt_row(feature) {
+            prefetch_t0(row.as_ptr().cast());
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (network, features);
+}
+
+/// Prefetches the HalfKAv2_hm weight and PSQT rows for the given feature indices.
+///
+/// A Finny refresh computes all diff indices before applying any 2 KiB rows; issued
+/// there, each prefetch hides part of the cold-miss latency of the apply loops.
+/// Pure hint -- no behavior change.
+#[inline]
+pub(crate) fn prefetch_half_ka_rows(network: &Network, features: &[usize]) {
+    #[cfg(target_arch = "x86_64")]
+    for &feature in features {
+        if let Some(row) = network.half_ka_weights().row(feature) {
+            prefetch_t0(row.as_ptr().cast());
+        }
+        if let Some(row) = network.psqt_row(feature) {
+            prefetch_t0(row.as_ptr().cast());
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (network, features);
+}
+
 /// Rebuilds one perspective from a cached HalfKA accumulator plus a fresh threat enumeration.
 ///
 /// Used when a king move flips the mirror, which changes every FullThreats index and so leaves
@@ -796,6 +879,7 @@ fn rebuild_threats_onto(
 
     let mut active_threats = [0; MAX_ACTIVE];
     let threat_count = append_active_threats(perspective, position, &mut active_threats);
+    prefetch_threat_rows_indexed(network, &active_threats[..threat_count]);
     for &feature in &active_threats[..threat_count] {
         add_i8_row(
             backend,

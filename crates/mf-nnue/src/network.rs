@@ -8,6 +8,13 @@ use std::path::Path;
 use crate::format::{Cursor, FormatError};
 
 pub const VERSION: u32 = 0x6A44_8AFA;
+/// Architecture hash of the HalfKAv2_hm + FullThreats network layout this build targets.
+///
+/// Derived from the shipped `nets/main.nnue`; when the network is next retrained,
+/// this constant must be updated in the same change.
+pub const ARCHITECTURE_HASH: u32 = 0x0256_ACDF;
+/// Feature-transformer hash expected alongside [`ARCHITECTURE_HASH`].
+pub const FEATURE_TRANSFORMER_HASH: u32 = 0x6165_DDC9;
 pub const HALF_KA_DIMS: usize = 22_528;
 pub const THREAT_DIMS: usize = 60_720;
 pub const L1: usize = 1_024;
@@ -146,6 +153,12 @@ impl Network {
         }
 
         let architecture_hash = cursor.read_u32().map_err(LoadError::from)?;
+        if architecture_hash != ARCHITECTURE_HASH {
+            return Err(LoadError::UnexpectedArchitectureHash {
+                found: architecture_hash,
+                expected: ARCHITECTURE_HASH,
+            });
+        }
         let description_length = cursor.read_i32().map_err(LoadError::from)?;
         let description_length_usize = usize::try_from(description_length)
             .ok()
@@ -159,6 +172,12 @@ impl Network {
         .into_owned();
 
         let feature_transformer_hash = cursor.read_u32().map_err(LoadError::from)?;
+        if feature_transformer_hash != FEATURE_TRANSFORMER_HASH {
+            return Err(LoadError::UnexpectedFeatureTransformerHash {
+                found: feature_transformer_hash,
+                expected: FEATURE_TRANSFORMER_HASH,
+            });
+        }
 
         let mut feature_transformer_biases = [0; L1];
         cursor
@@ -372,6 +391,8 @@ pub enum LoadError {
     Io(std::io::Error),
     UnexpectedEof,
     UnexpectedVersion { found: u32, expected: u32 },
+    UnexpectedArchitectureHash { found: u32, expected: u32 },
+    UnexpectedFeatureTransformerHash { found: u32, expected: u32 },
     InvalidDescriptionLength(i32),
     InvalidSignedLeb128,
     ValueOutOfRange { value: i64, target: &'static str },
@@ -399,6 +420,14 @@ impl fmt::Display for LoadError {
                 formatter,
                 "unexpected NNUE version 0x{found:08X} (expected 0x{expected:08X})"
             ),
+            Self::UnexpectedArchitectureHash { found, expected } => write!(
+                formatter,
+                "unexpected NNUE architecture hash 0x{found:08X} (expected 0x{expected:08X})"
+            ),
+            Self::UnexpectedFeatureTransformerHash { found, expected } => write!(
+                formatter,
+                "unexpected NNUE feature-transformer hash 0x{found:08X} (expected 0x{expected:08X})"
+            ),
             Self::InvalidDescriptionLength(length) => {
                 write!(formatter, "invalid NNUE description length {length}")
             }
@@ -424,7 +453,9 @@ impl std::error::Error for LoadError {
 
 #[cfg(test)]
 mod tests {
-    use super::{FC0_OUT, L1, LoadError, Network, VERSION, build_fc0_sparse_weights, row};
+    use super::{
+        ARCHITECTURE_HASH, FC0_OUT, L1, LoadError, Network, VERSION, build_fc0_sparse_weights, row,
+    };
 
     #[test]
     fn row_returns_none_when_range_arithmetic_overflows() {
@@ -456,7 +487,7 @@ mod tests {
     fn rejects_negative_description_length() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&VERSION.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&ARCHITECTURE_HASH.to_le_bytes());
         bytes.extend_from_slice(&(-1_i32).to_le_bytes());
 
         assert!(matches!(
@@ -469,13 +500,45 @@ mod tests {
     fn rejects_description_length_larger_than_remaining_input() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&VERSION.to_le_bytes());
-        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&ARCHITECTURE_HASH.to_le_bytes());
         bytes.extend_from_slice(&5_i32.to_le_bytes());
         bytes.extend_from_slice(b"tiny");
 
         assert!(matches!(
             Network::from_bytes(&bytes),
             Err(LoadError::InvalidDescriptionLength(5))
+        ));
+    }
+
+    #[test]
+    fn rejects_wrong_architecture_hash() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&VERSION.to_le_bytes());
+        bytes.extend_from_slice(&0xDEAD_BEEF_u32.to_le_bytes());
+
+        assert!(matches!(
+            Network::from_bytes(&bytes),
+            Err(LoadError::UnexpectedArchitectureHash {
+                found: 0xDEAD_BEEF,
+                expected: ARCHITECTURE_HASH
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_wrong_feature_transformer_hash() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&VERSION.to_le_bytes());
+        bytes.extend_from_slice(&ARCHITECTURE_HASH.to_le_bytes());
+        bytes.extend_from_slice(&0_i32.to_le_bytes());
+        bytes.extend_from_slice(&0xDEAD_BEEF_u32.to_le_bytes());
+
+        assert!(matches!(
+            Network::from_bytes(&bytes),
+            Err(LoadError::UnexpectedFeatureTransformerHash {
+                found: 0xDEAD_BEEF,
+                expected: super::FEATURE_TRANSFORMER_HASH
+            })
         ));
     }
 

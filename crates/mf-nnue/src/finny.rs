@@ -21,6 +21,8 @@ use crate::instrumentation;
 use crate::network::{L1, Network, PSQT_BUCKETS};
 use crate::simd::{SimdBackend, add_i16_row, add_psqt_row, subtract_i16_row, subtract_psqt_row};
 
+use crate::accumulator::prefetch_half_ka_rows;
+
 /// Distinct `(color, kind)` piece slots tracked per cache entry.
 const PIECE_SLOTS: usize = 12;
 
@@ -109,6 +111,9 @@ impl FinnyTable {
                 entry.pieces[slot] = current;
             }
         }
+
+        prefetch_half_ka_rows(network, &removals[..removed]);
+        prefetch_half_ka_rows(network, &additions[..added]);
 
         for &feature in &removals[..removed] {
             subtract_i16_row(
@@ -281,7 +286,10 @@ mod tests {
         let positions = [
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
             "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
-            "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 b kq - 0 1",
+            // The FEN this replaced had the white king in check with black to move
+            // (the b6 bishop bears on g1), an unreachable position. Kiwipete keeps the
+            // "wildly different material" property the refresh must survive.
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
             "8/8/8/2k5/8/8/PPP5/4K3 w - - 0 1",
         ];
 

@@ -1242,8 +1242,11 @@ mod tests {
 
         assert_changed_edges_match_full_diff("4k3/8/8/8/8/2N5/4N3/4K3 w - - 0 1", "c3b5", false);
 
+        // This case formerly gave check from e2 in the parent position (illegal with
+        // white to move). The rook now swings onto the e-file instead, so the added
+        // king-target edge is exactly the one a legal move creates.
         let (_, _, _, _, king_target_changes) =
-            assert_changed_edges_match_full_diff("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1", "e2e7", false);
+            assert_changed_edges_match_full_diff("4k3/8/8/8/8/8/R7/4K3 w - - 0 1", "a2e2", false);
         assert!(king_target_changes.iter().any(|edge| {
             edge.attacked() == ThreatPiece::new(super::Color::Black, PieceKind::King)
         }));
