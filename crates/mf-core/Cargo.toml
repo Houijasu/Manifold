@@ -7,6 +7,9 @@ authors.workspace = true
 
 [features]
 force-magic = []
+# Thread-local SEE call/cycle counters (rdtsc). Off by default: the counters add an rdtsc
+# pair to one of the hottest helpers in the engine.
+instrumentation = []
 
 [dev-dependencies]
 cozy-chess = "0.3.4"

@@ -5,6 +5,8 @@ mod bitboard;
 mod castling;
 mod chess_move;
 mod fen;
+#[cfg(feature = "instrumentation")]
+mod instrumentation;
 mod movegen;
 mod notation;
 mod perft;
@@ -19,7 +21,13 @@ pub use bitboard::{Bitboard, BitboardIter, Square};
 pub use castling::{CastlingRights, CastlingSide};
 pub use chess_move::{Move, MoveFlag};
 pub use fen::FenError;
-pub use movegen::{MoveList, generate_legal_moves, generate_pseudo_legal_moves, has_legal_move};
+#[cfg(feature = "instrumentation")]
+pub use instrumentation::{SeeCounters, reset_see_counters, see_counters};
+pub use movegen::{
+    MoveList, generate_legal_moves, generate_pseudo_legal_captures, generate_pseudo_legal_moves,
+    generate_pseudo_legal_quiets, has_legal_move, has_legal_move_in_place, is_legal,
+    is_pseudo_legal,
+};
 pub use notation::{format_uci_move, parse_uci_move};
 pub use perft::{perft, perft_divide};
 pub use piece::{Color, Piece, PieceKind, material_value};

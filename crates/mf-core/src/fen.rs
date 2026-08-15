@@ -1,5 +1,6 @@
 use core::fmt;
 
+use crate::attacks::is_in_check;
 use crate::zobrist::MAX_MATERIAL_COUNT;
 use crate::{CastlingSide, Color, Piece, PieceKind, Position, Square};
 
@@ -44,6 +45,7 @@ impl Position {
         parse_board(&mut position, fields[0])?;
         validate_kings(&position)?;
         reject_unpromotable_material(&position)?;
+        reject_unreachable_positions(&position)?;
         parse_castling(&mut position, fields[2], chess960)?;
         position.set_en_passant(parse_en_passant(&position, fields[3])?);
         position.set_halfmove_clock(
@@ -63,6 +65,96 @@ impl Position {
         let fullmove_number = fullmove_number.max(1);
         position.set_fullmove_number(fullmove_number);
         Ok(position)
+    }
+
+    /// Formats the position as a six-field FEN that [`Position::from_fen`] round-trips.
+    ///
+    /// Castling rights are spelled `KQkq` in standard mode and as rook-file letters
+    /// (`HAha`) in Chess960 mode; the parser accepts the file letters in both modes, so
+    /// either spelling round-trips. The en-passant field carries the position's own
+    /// canonical state, which `from_fen` already normalized to "capturable or absent".
+    pub fn to_fen(&self, chess960: bool) -> String {
+        let mut fen = String::new();
+        for rank in (0..8).rev() {
+            let mut empty = 0u32;
+            for file in 0..8 {
+                match self.piece_at(square(file, rank)) {
+                    Some(piece) => {
+                        if empty > 0 {
+                            fen.push(char::from_digit(empty, 10).expect("empty run is at most 8"));
+                            empty = 0;
+                        }
+                        fen.push(piece_symbol(piece));
+                    }
+                    None => empty += 1,
+                }
+            }
+            if empty > 0 {
+                fen.push(char::from_digit(empty, 10).expect("empty run is at most 8"));
+            }
+            if rank > 0 {
+                fen.push('/');
+            }
+        }
+
+        fen.push(' ');
+        fen.push(match self.side_to_move() {
+            Color::White => 'w',
+            Color::Black => 'b',
+        });
+
+        fen.push(' ');
+        let mut rights = String::new();
+        for color in Color::ALL {
+            for side in CastlingSide::ALL {
+                let Some(rook) = self.castling_rook(color, side) else {
+                    continue;
+                };
+                let symbol = if chess960 {
+                    (b'a' + rook.file()) as char
+                } else {
+                    match side {
+                        CastlingSide::KingSide => 'k',
+                        CastlingSide::QueenSide => 'q',
+                    }
+                };
+                rights.push(match color {
+                    Color::White => symbol.to_ascii_uppercase(),
+                    Color::Black => symbol,
+                });
+            }
+        }
+        if rights.is_empty() {
+            fen.push('-');
+        } else {
+            fen.push_str(&rights);
+        }
+
+        match self.en_passant() {
+            Some(target) => fen.push_str(&format!(" {target:?}")),
+            None => fen.push_str(" -"),
+        }
+        fen.push_str(&format!(
+            " {} {}",
+            self.halfmove_clock(),
+            self.fullmove_number()
+        ));
+        fen
+    }
+}
+
+fn piece_symbol(piece: Piece) -> char {
+    let symbol = match piece.kind() {
+        PieceKind::Pawn => 'p',
+        PieceKind::Knight => 'n',
+        PieceKind::Bishop => 'b',
+        PieceKind::Rook => 'r',
+        PieceKind::Queen => 'q',
+        PieceKind::King => 'k',
+    };
+    match piece.color() {
+        Color::White => symbol.to_ascii_uppercase(),
+        Color::Black => symbol,
     }
 }
 
@@ -200,6 +292,35 @@ fn reject_unpromotable_material(position: &Position) -> Result<(), FenError> {
                 )));
             }
         }
+    }
+    Ok(())
+}
+
+/// Rejects boards no legal game can reach, beyond the per-kind material bounds above.
+///
+/// Two classes, both cheap and both with operational consequences: a pawn on rank 1
+/// or 8 (a promotion shape the move generator never produces), and the side NOT to
+/// move in check (the previous move would have left the moving king en prise, and the
+/// search used to carry a workaround for such positions rather than the parser
+/// rejecting them). The check test costs one attack lookup, nothing next to the board
+/// parse itself.
+///
+/// A TOTAL piece-count bound is deliberately absent: the per-kind guards above are
+/// what keep the material key indexable, and they admit boards with more than sixteen
+/// pieces on a side on purpose -- such material is unreachable in a game but harmless
+/// to hold, and pinned tests in `tests/fen.rs` assert it stays parseable.
+fn reject_unreachable_positions(position: &Position) -> Result<(), FenError> {
+    for color in Color::ALL {
+        for pawn in position.pieces(color, PieceKind::Pawn) {
+            if pawn.rank() == 0 || pawn.rank() == 7 {
+                return Err(FenError::new(format!(
+                    "{color:?} has a pawn on a back rank"
+                )));
+            }
+        }
+    }
+    if is_in_check(position, !position.side_to_move()) {
+        return Err(FenError::new("the side not to move must not be in check"));
     }
     Ok(())
 }
