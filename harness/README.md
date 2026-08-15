@@ -9,6 +9,7 @@ a wrong conclusion; they belong in version control.
 |---|---|
 | `run_match.ps1` | Guard-railed fastchess match driver. **Use it for every match.** |
 | `nps_compare.py` | Fair two-engine NPS/nodes comparison with warmup handling. |
+| `build_pgo.ps1` | Reproducible PGO build with a hard node-signature gate. |
 
 ## `run_match.ps1`
 
@@ -77,3 +78,24 @@ number. A cold-start comparison is unfair and is explicitly disallowed by A-EONE
 
 Drives both engines with **stdin held open**, polling stdout until `bestmove`. Piping a
 script that ends in `quit` aborts the search and manufactures convincing false positives.
+
+## `build_pgo.ps1`
+
+`.\harness\build_pgo.ps1 [-BenchRuns 3] [-MeasureNps]`
+
+Runs the `research/rust-perf-and-nnue-training.md` §0.5 PGO round-trip as one command:
+plain build (baseline preserved at `target\release\manifold-nopgo.exe`), instrumented
+`-Cprofile-generate` build, `bench` profiling runs, `llvm-profdata` merge from the pinned
+toolchain, `-Cprofile-use` rebuild, and provenance in `target\pgo\pgo-metadata.txt`.
+
+Two things it enforces mechanically:
+
+1. **`-C target-cpu=native` is re-stated in every `RUSTFLAGS` stage.** Setting
+   `RUSTFLAGS` replaces `.cargo/config.toml`'s rustflags wholesale; forgetting this loses
+   BMI2/PEXT and the AVX-VNNI kernels and invalidates any before/after number.
+2. **The deterministic bench node signature must be identical before and after PGO.**
+   A drift means the optimiser changed the search, and the script aborts (exit 4).
+
+Measured on this repo (2026-08, depth-12 `nps_compare.py` medians): geomean 1.00x --
+parity, not a gain, because fat LTO + `codegen-units = 1` + `target-cpu=native` leave
+PGO little headroom. Re-run after large source changes.
