@@ -184,14 +184,16 @@ fn selectivity_options_default_to_enabled() {
             // 3.3x MORE nodes at depth 14 while looking cheaper on bench. See the
             // comment on `SearchOptions::default` in `search.rs`.
             use_correction_sources: [true, true, false, false, true],
-            // Both per-worker history reads ship ENABLED; their maintenance is
-            // unconditional either way. See the comments on `SearchOptions::default`.
-            use_tt_move_history: true,
+            // The ttMove-history read ships DISABLED: the depth-13 toggle probes
+            // measured it multiplying nodes-to-depth by 2.0-2.3x with no match
+            // evidence behind the inflation. Maintenance is unconditional either way.
+            use_tt_move_history: false,
             use_low_ply_history: true,
-            // The corrhist complexity proxy ships ENABLED: it gates only the three
-            // consumption reads (LMR, RFP margin, singular double margin), never the
-            // corrhist maintenance or the eval correction itself.
-            use_corrplexity: true,
+            // The corrhist complexity proxy ships DISABLED for the same reason
+            // (1.4-1.9x nodes-to-depth). It gates only the three consumption reads
+            // (LMR, RFP margin, singular double margin), never the corrhist
+            // maintenance or the eval correction itself.
+            use_corrplexity: false,
             // The best-move node-share time term also ships DISABLED: it measured
             // -17.39 +/- 18.99 Elo at 8+0.08 and -34.86 +/- 44.35 at 30+0.3, because
             // the share it measures is r = -0.348 correlated with the stability count

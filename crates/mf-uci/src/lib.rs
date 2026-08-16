@@ -63,7 +63,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseCaptureHistory type check default true",
     "option name UsePawnHistory type check default false",
     "option name UseContHistory type check default true",
-    "option name UseTtMoveHistory type check default true",
+    "option name UseTtMoveHistory type check default false",
     "option name UseLowPlyHistory type check default true",
     "option name UseHistoryPruning type check default false",
     "option name UseCorrHistory type check default true",
@@ -72,7 +72,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseCorrHistMajor type check default false",
     "option name UseCorrHistMaterial type check default false",
     "option name UseCorrHistCont type check default true",
-    "option name UseCorrplexity type check default true",
+    "option name UseCorrplexity type check default false",
     "option name UseTimeEffort type check default false",
     "option name UseInterpolatedTimeManagement type check default false",
     "option name UseSearchAgainDepth type check default false",
@@ -2500,8 +2500,10 @@ mod tests {
             &mut output,
         )
         .expect("setoption output should be writable");
+        // ttMove history and corrplexity default to false, so setting them false
+        // would prove nothing about parsing. Set them TRUE and assert they flipped.
         handle_setoption(
-            "setoption name UseTtMoveHistory value false",
+            "setoption name UseTtMoveHistory value true",
             &mut state,
             &mut output,
         )
@@ -2513,7 +2515,7 @@ mod tests {
         )
         .expect("setoption output should be writable");
         handle_setoption(
-            "setoption name UseCorrplexity value false",
+            "setoption name UseCorrplexity value true",
             &mut state,
             &mut output,
         )
@@ -2539,9 +2541,9 @@ mod tests {
         assert!(!state.search_options.use_capture_history);
         assert!(state.search_options.use_pawn_history);
         assert!(state.search_options.use_history_pruning);
-        assert!(!state.search_options.use_tt_move_history);
+        assert!(state.search_options.use_tt_move_history);
         assert!(!state.search_options.use_low_ply_history);
-        assert!(!state.search_options.use_corrplexity);
+        assert!(state.search_options.use_corrplexity);
     }
 
     #[test]

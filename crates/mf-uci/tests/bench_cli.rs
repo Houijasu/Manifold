@@ -106,63 +106,65 @@ use std::time::{Duration, Instant};
 /// the singular double margin. Attribution is pinned in
 /// `corrplexity_off_reproduces_the_pre_change_signature`, and every anchor measured
 /// with `UseCorrHistory=false` is unchanged because a zero correction is a zero proxy.
-const BENCH_NODE_COUNT: u64 = 40_705;
-const BENCH_NODES: &str = "Nodes searched: 40705";
+const BENCH_NODE_COUNT: u64 = 35_859;
+const BENCH_NODES: &str = "Nodes searched: 35859";
 
-/// The signature with `UseCorrplexity=false`: the previous shipped signature,
-/// bit-for-bit. The toggle gates the three consumption reads only, so this coming back
-/// exactly proves the feature added no computation and no side effect beyond them.
-const BENCH_NODE_COUNT_WITHOUT_CORRPLEXITY: u64 = 39_051;
+/// The signature with `UseCorrplexity=true`: the low-ply-plus-proxy tree. The toggle
+/// gates the three consumption reads only, so an exact anchor proves the feature adds
+/// no computation and no side effect beyond them. Pinned from the OFF side since the
+/// default flipped; the pre-flip all-on tree is the `39_051` both-reads-on arm of
+/// `per_worker_history_toggles_reproduce_the_pre_change_signature`.
+const BENCH_NODE_COUNT_WITH_CORRPLEXITY: u64 = 36_970;
 
 /// The signature with `UsePostLMRDepth=false`, capture LMR still on.
 ///
 /// This is the number M3-F2 measured its -8.11 Elo with, which is not a coincidence:
 /// that build was capture LMR without the verification-depth band, and this arm
 /// reconstructs it exactly.
-const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 38_726;
+const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 37_137;
 
 /// The signature with `UsePostLMRContHist=true`.
 ///
 /// Pinned so the disabled half of the M3-F4 package stays measurable without a rebuild.
-const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 54_581;
+const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 41_454;
 
 /// The signature with `UseCaptureLMR=false`: the M3 shipped signature, bit-for-bit.
 ///
 /// The attribution proof that M4-F1b moved the signature by flipping one default and
 /// nothing else. If `44_737` does not come back exactly, something other than capture
 /// LMR moved the tree.
-const BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR: u64 = 40_150;
+const BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR: u64 = 37_420;
 
 /// The signature with `UseCaptureLMR=false` AND `UsePostLMRDepth=false`: the M7/M2
 /// signature both features were measured against, bit-for-bit.
-const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 41_190;
+const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 37_547;
 
 /// The all-on signature with `UseQSearchChecks=true`.
 ///
 /// Pinned so the disabled technique stays measurable without a rebuild, and so a change
 /// to the quiet-check generator is still caught by the suite even though nothing in the
 /// shipped search reaches it.
-const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 41_611;
+const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 37_543;
 
 /// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
-const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 40_975;
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 37_654;
 
 /// The NNUE signature reproduced exactly by `UseContHistory=false`.
 ///
 /// This is measured with correction history off so the anchor isolates continuation
 /// history rather than folding correction-history changes into the same number.
-const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 37_723;
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 35_442;
 
 /// The signature with both per-worker history reads off.
 ///
 /// This anchor is the maintenance/read-separation proof for the Stage-3 pair. Both
 /// tables are still built and updated on every search in this arm, so an exact anchor
 /// proves the updates have no side effect on the tree — the same statement every other
-/// `Use*` control in this file makes. It reproduced the pre-pair `35_886` bit-for-bit
-/// until the corrhist complexity proxy landed on top; that feature moved this arm like
-/// every defaults-on anchor, and its own attribution control is
-/// `corrplexity_off_reproduces_the_pre_change_signature`.
-const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 36_214;
+/// `Use*` control in this file makes. With the corrplexity default now OFF alongside
+/// the ttMove-history read, this arm reproduces the pre-pair `35_886` bit-for-bit
+/// again — the strongest form of the separation proof, reconnecting the suite to the
+/// signature the pair was originally measured against.
+const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 35_886;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -192,7 +194,7 @@ const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 36_214;
 /// all-on-cheaper/LMR-off-dearer divergence continuation history produced, and for the
 /// same reason: low-ply ordering feeds the tree LMR then prunes, so removing LMR
 /// removes more search than before.
-const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 129_420;
+const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 76_797;
 
 fn workspace_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -641,7 +643,7 @@ fn history_toggles_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 4);
 
-    assert_eq!(nodes, [40_975, 47_262, 39_460, 37_723]);
+    assert_eq!(nodes, [37_654, 43_888, 38_035, 35_442]);
 }
 
 /// `UseContHistory=false` must reproduce its NNUE signature bit-for-bit.
@@ -742,7 +744,7 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 3);
 
-    assert_eq!(nodes, [BENCH_NODE_COUNT, 45_909, 49_862]);
+    assert_eq!(nodes, [BENCH_NODE_COUNT, 41_709, 35_802]);
 }
 
 /// `UseQSearchChecks` ships OFF, and this test records WHY in an executable form.
@@ -990,7 +992,7 @@ fn post_lmr_handling_cannot_reach_the_tree_without_lmr() {
     // default-context LMR-off tree rather than at some third thing.
     assert_eq!(
         nodes,
-        vec![75_983; 3],
+        vec![68_221; 3],
         "post-LMR handling must be completely inert while UseLMR is off"
     );
 }
@@ -1237,12 +1239,11 @@ fn per_worker_history_toggles_reproduce_the_pre_change_signature() {
     require_bench_network!();
     let output = run_uci_session(
         "bench\n\
-         setoption name UseTtMoveHistory value false\n\
          setoption name UseLowPlyHistory value false\n\
          bench\n\
+         setoption name UseTtMoveHistory value true\n\
          setoption name UseLowPlyHistory value true\n\
          bench\n\
-         setoption name UseTtMoveHistory value true\n\
          setoption name UseLowPlyHistory value false\n\
          bench\n\
          quit\n",
@@ -1257,37 +1258,40 @@ fn per_worker_history_toggles_reproduce_the_pre_change_signature() {
 
     assert_eq!(
         nodes[0], BENCH_NODE_COUNT,
-        "both per-worker history reads must be ON in the shipped default"
+        "the shipped default reads low-ply history only: the ttMove-history read is \
+         OFF pending match evidence for its measured ~2x nodes-to-depth inflation"
     );
     assert_eq!(
         nodes[1], BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY,
-        "with both reads off the pinned signature must come back bit-for-bit, \
+        "with both reads off the pre-pair signature must come back bit-for-bit, \
          proving the unconditional maintenance has no side effect on the tree"
     );
-    assert_ne!(
-        nodes[2], nodes[0],
-        "disabling only UseTtMoveHistory must reach the search"
+    assert_eq!(
+        nodes[2], 39_051,
+        "both reads ON must reproduce the pre-corrplexity all-on signature exactly, \
+         proving UseTtMoveHistory still reaches the search from its new OFF default"
     );
     assert_ne!(
-        nodes[3], nodes[0],
-        "disabling only UseLowPlyHistory must reach the search"
+        nodes[3], nodes[2],
+        "disabling UseLowPlyHistory with ttMove history on must reach the search"
     );
 }
 
-/// `UseCorrplexity=false` must reproduce the pre-change signature bit-for-bit.
+/// `UseCorrplexity` ships OFF, and flipping it on must reach the search.
 ///
 /// This is the attribution control for the corrhist complexity proxy (Stage 3 item
 /// 23). The proxy is `|correction_value|`, a magnitude the search was already
 /// computing per node; the feature only READS it at three sites (LMR refund, RFP
-/// margin, singular double margin), so switching those reads off must restore the
-/// previous shipped tree exactly. Corrhist maintenance and the eval correction are
-/// untouched either way — that is what the exact anchor proves.
+/// margin, singular double margin). It shipped ON until the depth-13 toggle probes
+/// measured it multiplying nodes-to-depth by 1.4-1.9x; it is OFF pending match
+/// evidence, and the ON arm stays pinned here so it remains SPRT-able without a
+/// rebuild. Corrhist maintenance and the eval correction are untouched either way.
 #[test]
-fn corrplexity_off_reproduces_the_pre_change_signature() {
+fn corrplexity_ships_disabled_and_is_wired_through_to_the_search() {
     require_bench_network!();
     let output = run_uci_session(
         "bench\n\
-         setoption name UseCorrplexity value false\n\
+         setoption name UseCorrplexity value true\n\
          bench\n\
          quit\n",
         "UCI corrplexity session",
@@ -1298,9 +1302,9 @@ fn corrplexity_off_reproduces_the_pre_change_signature() {
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
     assert_eq!(
         metrics(stdout, "Nodes searched: "),
-        vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITHOUT_CORRPLEXITY],
-        "the complexity proxy must be ON in the shipped default and must restore the \
-         pre-change signature exactly when disabled"
+        vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITH_CORRPLEXITY],
+        "the complexity proxy must be OFF in the shipped default and must reach the \
+         search when enabled"
     );
 }
 
@@ -1316,7 +1320,8 @@ fn corrplexity_off_reproduces_the_pre_change_signature() {
 fn each_corrplexity_divisor_reaches_its_consumption_site() {
     require_bench_network!();
     let output = run_uci_session(
-        "bench\n\
+        "setoption name UseCorrplexity value true\n\
+         bench\n\
          setoption name LmrCorrplexityDivisor value 4096\n\
          bench\n\
          setoption name LmrCorrplexityDivisor value 26310\n\
@@ -1337,7 +1342,10 @@ fn each_corrplexity_divisor_reaches_its_consumption_site() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 5);
 
-    assert_eq!(nodes[0], BENCH_NODE_COUNT);
+    // The proxy read is enabled for the whole session: the divisors are unreachable
+    // while `UseCorrplexity` is off, which is its own wiring proof in
+    // `corrplexity_ships_disabled_and_is_wired_through_to_the_search`.
+    assert_eq!(nodes[0], BENCH_NODE_COUNT_WITH_CORRPLEXITY);
     for (name, moved) in [
         "LmrCorrplexityDivisor",
         "RfpCorrplexityDivisor",
@@ -1352,8 +1360,8 @@ fn each_corrplexity_divisor_reaches_its_consumption_site() {
         );
     }
     assert_eq!(
-        nodes[4], BENCH_NODE_COUNT,
-        "restoring all three defaults must restore the shipped signature exactly"
+        nodes[4], BENCH_NODE_COUNT_WITH_CORRPLEXITY,
+        "restoring all three defaults must restore the proxy-on signature exactly"
     );
 }
 
@@ -1372,6 +1380,8 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseHistoryPruning",
         "UseQSearchChecks",
         "UsePostLMRContHist",
+        "UseTtMoveHistory",
+        "UseCorrplexity",
         "UseTimeEffort",
         "UseInterpolatedTimeManagement",
         "UseSearchAgainDepth",
@@ -1387,11 +1397,9 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseButterflyHistory",
         "UseCaptureHistory",
         "UseContHistory",
-        "UseTtMoveHistory",
         "UseLowPlyHistory",
         "UsePostLMRDepth",
         "UseCaptureLMR",
-        "UseCorrplexity",
     ] {
         assert!(
             stdout
@@ -1449,11 +1457,11 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 62_573,
+        nodes[2], 60_381,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(
-        nodes[3], 180_934,
+        nodes[3], 136_225,
         "with futility and SEE already off, UseLMR=false is unchanged by the split"
     );
 

@@ -846,9 +846,13 @@ impl Default for SearchOptions {
                 sources[CORRECTION_MATERIAL] = false;
                 sources
             },
-            use_tt_move_history: true,
+            // Both ship OFF: the depth-13 toggle probes measured them multiplying
+            // nodes-to-depth (ttMoveHistory 2.0-2.3x, corrplexity 1.4-1.9x, 3.0-3.7x
+            // combined) with no match evidence behind the inflation. Each earns its
+            // default back by winning a fixed-time match against this baseline.
+            use_tt_move_history: false,
             use_low_ply_history: true,
-            use_corrplexity: true,
+            use_corrplexity: false,
             // The best root move's share of the tree, folded into the soft limit
             // multiplicatively with the stability governor.
             //
