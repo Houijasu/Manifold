@@ -32,10 +32,24 @@ $tokens = @(Get-ForbiddenInstructionTokens @(
     '0000000140001000: c4 e2 e2 f5 c3        pext rax, rbx, rcx'
     '0000000140001004: 48 89 d8              mov rax, rbx # pdep appears only in a comment'
     '0000000140001008 <bzhi_metadata>:'
-    '000000014000100c: c4 e3 fb f0 c3 07     rorx rax, rbx, 7'
+    '000000014000100c: c4 e2 d2 f5 c6        pdep rax, rbx, rcx'
+    '0000000140001010: c4 e2 e8 f5 c1        bzhi rax, rbx, rcx'
+    '0000000140001014: c4 e2 fb f6 c1        mulx rax, rbx, rcx'
+    '0000000140001018: c4 e2 ea f7 c1        sarx rax, rbx, rcx'
+    '000000014000101c: c4 e2 e9 f7 c1        shlx rax, rbx, rcx'
+    '0000000140001020: c4 e2 eb f7 c1        shrx rax, rbx, rcx'
+    '0000000140001024: c4 e3 fb f0 c3 07     rorx rax, rbx, 7'
 ))
-if (($tokens -join ',') -ne 'pext,rorx') {
+if (($tokens -join ',') -ne 'pext,pdep,bzhi,mulx,sarx,shlx,shrx,rorx') {
     throw "instruction scan did not isolate mnemonic tokens: $($tokens -join ',')"
+}
+$cleanTokens = @(Get-ForbiddenInstructionTokens @(
+    '0000000140002000: 48 89 d8              mov rax, rbx'
+    '0000000140002004: 48 01 c8              add rax, rcx # pext is comment text'
+    '0000000140002008 <rorx_metadata>:'
+))
+if ($cleanTokens.Count -ne 0) {
+    throw "clean instruction fixture produced forbidden tokens: $($cleanTokens -join ',')"
 }
 
 $hadCargoTargetDir = Test-Path Env:CARGO_TARGET_DIR
@@ -84,6 +98,30 @@ New-Item -ItemType Directory -Path $final | Out-Null
 Set-Content (Join-Path $staging 'new.txt') 'new'
 Set-Content (Join-Path $final 'old.txt') 'old'
 try {
+    $buildOutput = Join-Path $testRoot 'build-output.exe'
+    $stagedBinaryDirectory = Join-Path $testRoot 'binary-staging'
+    [System.IO.File]::WriteAllText($buildOutput, 'validated portable bytes')
+    $stagedBinary = Stage-PortableBinary $buildOutput $stagedBinaryDirectory
+    $stagedHash = (Get-FileHash -LiteralPath $stagedBinary -Algorithm SHA256).Hash
+    [System.IO.File]::WriteAllText($buildOutput, 'mutated build output')
+    Assert-StableFileHash $stagedBinary $stagedHash 'staged portable binary' | Out-Null
+    if ([System.IO.File]::ReadAllText($stagedBinary) -cne 'validated portable bytes') {
+        throw 'staged portable binary changed with mutable build output'
+    }
+
+    $testNetwork = Join-Path $testRoot 'main.nnue'
+    [System.IO.File]::WriteAllText($testNetwork, 'network before build')
+    $networkHash = (Get-FileHash -LiteralPath $testNetwork -Algorithm SHA256).Hash
+    Assert-StableFileHash $testNetwork $networkHash 'embedded network' | Out-Null
+    [System.IO.File]::WriteAllText($testNetwork, 'network changed during build')
+    try {
+        Assert-StableFileHash $testNetwork $networkHash 'embedded network'
+        throw 'network change must be rejected'
+    } catch {
+        if ($_.Exception.Message -eq 'network change must be rejected') { throw }
+        if ($_.Exception.Message -notmatch 'embedded network changed') { throw }
+    }
+
     try {
         Publish-PortableStaging -StagingDirectory $staging -FinalDirectory $final `
             -BackupDirectory $backup -ValidatePublished {

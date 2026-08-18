@@ -16,10 +16,10 @@
 - **Depends on**: none (independent of 001-007)
 - **Category**: direction
 - **Planned at**: commit `b9d15bf` + working tree, 2026-08-15
-- **Completion**: DONE locally on 2026-08-19 at source commit
-  `a33523426dd18412a9e83f569cfb33122fa8a99f`; native/portable bench 37,420,
-  portable perft 4,865,609, force-magic green, native scan control positive
-  (`bzhi`, `mulx`, `pext`, `rorx`, `shlx`, `shrx`), portable scan zero matches
+- **Completion**: DONE locally on 2026-08-19; native/portable bench 37,420,
+  portable perft 4,865,609, force-magic green, controlled scanner fixture green,
+  portable scan zero matches, staged binary stable through publication, embedded
+  network hash stable, ordinary release unchanged
 
 ## Why this matters
 
@@ -80,8 +80,10 @@ Model the script's structure on `harness/build_pgo.ps1` (read it first; match it
 2. Build `cargo build --release -p mf-uci --bin manifold`, verify the executable in
    `target\portable-build\release`, and never write `target\release\manifold.exe`.
 3. Use the default embedded network, so no adjacent `nets` copy is required.
-4. Stage the binary, exact 40-hex source sidecar, and metadata before rollback-safe
-   publication to `target\portable`.
+4. Copy the portable output once into unique staging immediately after build; run all
+   portable gates and hash calculation against that staged file, then add the exact
+   40-hex engine-source sidecar and metadata before rollback-safe publication to
+   `target\portable`.
 
 **Verify**: script exits 0; `target/portable/manifold.exe bench` prints the **same** node signature as the native build.
 
@@ -94,12 +96,15 @@ Model the script's structure on `harness/build_pgo.ps1` (read it first; match it
 ### Step 3: Prove the binary is actually baseline
 
 Locate `llvm-objdump.exe` beside the pinned toolchain's `llvm-profdata.exe`, disassemble
-both binaries, and match only decoded instruction tokens (never comments or metadata):
+the staged portable binary, and match only decoded instruction tokens (never comments
+or metadata):
 
 - Reject portable `pext`, `pdep`, `bzhi`, `mulx`, `sarx`, `shlx`, `shrx`, and `rorx`.
-- Require at least one specified token in the native control binary.
+- Test all forbidden tokens through a controlled text fixture; native scan output is
+  informational only and must not gate portable builds on non-BMI2 hosts.
 
-**Verify**: zero BMI2+ instruction matches in portable; nonzero in native (control positive).
+**Verify**: zero specified instruction matches in portable; controlled fixture detects
+every specified mnemonic without matching comments or metadata.
 
 ### Step 4: Magic-backend confidence
 
@@ -118,7 +123,9 @@ README Build section: two artifacts (native, tuned to the build machine, fastest
 ## Test plan
 
 - Signature identity (native vs portable bench) — the core invariant.
-- Instruction-scan control experiment (step 3).
+- Deterministic instruction-scanner fixture plus the staged portable scan (step 3).
+- Staged-binary identity after mutating the original build output.
+- Embedded-network hash change rejection.
 - Perft anchor through the portable binary (step 4).
 - Optional 10-game smoke for runtime sanity.
 
@@ -126,7 +133,9 @@ README Build section: two artifacts (native, tuned to the build machine, fastest
 
 - [x] `harness/build_portable.ps1` produces `target/portable/manifold.exe` + metadata
 - [x] Portable bench signature identical to native (37,420)
-- [x] Zero specified BMI2-family instruction tokens in the portable binary; control positive on native
+- [x] Zero specified BMI2-family instruction tokens in the staged portable binary; controlled scanner fixture green
+- [x] Published binary is the exact staged file that passed every portable gate
+- [x] Embedded-network hash remains stable through metadata and publication
 - [x] `cargo test -p mf-core --features force-magic` green; portable perft 5 = 4,865,609
 - [x] README documents both build paths
 

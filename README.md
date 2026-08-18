@@ -27,11 +27,13 @@ For a verified baseline x86-64 Windows build:
 pwsh -NoProfile -File harness/build_portable.ps1
 ```
 
-The verified artifact is `target/portable/manifold.exe`, with its exact source commit
-in `manifold.exe.source-commit` and build evidence in `build-metadata.txt`. The script
+The verified artifact is `target/portable/manifold.exe`, with its exact engine-source
+HEAD in `manifold.exe.source-commit` and build evidence in `build-metadata.txt`. The script
 builds in dedicated `target/native-build` and `target/portable-build` directories,
 leaves `target/release/manifold.exe` byte-for-byte unchanged, and publishes only after
-bench, perft, force-magic, and disassembly gates pass. It requires Rust's
+copying the portable output once into unique staging and running bench, perft,
+force-magic, hash-stability, and disassembly gates against those staged bytes. It
+also rejects an embedded-network change during the build. The script requires Rust's
 `llvm-tools-preview` component for `llvm-objdump`; if absent, follow the exact install
 command printed by the script. The portable build runs on baseline x86-64 machines but
 is meaningfully slower than the native build on BMI2-capable CPUs.

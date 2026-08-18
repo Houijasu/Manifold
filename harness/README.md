@@ -124,9 +124,13 @@ Builds native and baseline x86-64 references under `target\native-build` and
 `target\portable-build`, then publishes `target\portable\manifold.exe` only after both
 bench signatures equal 37,420, portable perft 5 equals 4,865,609, the force-magic tests
 pass, and pinned-toolchain `llvm-objdump` finds no `pext`, `pdep`, `bzhi`, `mulx`,
-`sarx`, `shlx`, `shrx`, or `rorx` instruction tokens. The native binary is a positive
-scan control. Publication includes an exact source-commit sidecar and metadata with
-toolchain, flags, hashes, signatures, and disassembler path; staging rollback prevents
-partial artifacts. The script restores caller `RUSTFLAGS`/`CARGO_TARGET_DIR` and keeps
-`target\release\manifold.exe` byte-for-byte unchanged. The default embedded network
-means no adjacent `nets` copy is required.
+`sarx`, `shlx`, `shrx`, or `rorx` instruction tokens. A controlled disassembly-text
+fixture tests the scanner independently of host CPU features; native scan results are
+informational only. The portable build output is copied once into unique staging, and
+bench, perft, disassembly, and hashes all use those exact staged bytes. Publication
+includes an exact source-commit sidecar and metadata with toolchain, flags, stable
+network/binary hashes, signatures, and disassembler path; staging rollback prevents
+partial artifacts. The script restores caller `RUSTFLAGS`/`CARGO_TARGET_DIR`, rejects
+an embedded-network change during the run, and keeps `target\release\manifold.exe`
+byte-for-byte unchanged. The default embedded network means no adjacent `nets` copy is
+required.

@@ -17,7 +17,7 @@ $targetRoot = Join-Path $repositoryRoot 'target'
 $nativeTarget = Join-Path $targetRoot 'native-build'
 $portableBuildTarget = Join-Path $targetRoot 'portable-build'
 $portableDirectory = Join-Path $targetRoot 'portable'
-$stagingDirectory = Join-Path $targetRoot 'portable-staging'
+$stagingDirectory = Join-Path $targetRoot "portable-staging-$([guid]::NewGuid().ToString('N'))"
 $backupDirectory = Join-Path $targetRoot 'portable-backup'
 $ordinaryRelease = Join-Path $targetRoot 'release\manifold.exe'
 $networkPath = Join-Path $repositoryRoot 'nets\main.nnue'
@@ -192,6 +192,38 @@ function Get-ForbiddenInstructionsInBinary {
     return @(Get-ForbiddenInstructionTokens $output | Sort-Object -Unique)
 }
 
+function Assert-StableFileHash {
+    param(
+        [string]$Path,
+        [string]$ExpectedHash,
+        [string]$Description
+    )
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw (New-PortableFailure "ABORT: $Description disappeared: $Path." 8)
+    }
+    $actualHash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    if ($actualHash -ne $ExpectedHash) {
+        throw (New-PortableFailure "ABORT: $Description changed ($ExpectedHash -> $actualHash)." 8)
+    }
+    return $actualHash
+}
+
+function Stage-PortableBinary {
+    param(
+        [string]$BuildOutput,
+        [string]$StagingDirectory
+    )
+    if (Test-Path -LiteralPath $StagingDirectory) {
+        throw (New-PortableFailure "ABORT: portable staging path already exists: $StagingDirectory." 8)
+    }
+    New-Item -ItemType Directory -Path $StagingDirectory | Out-Null
+    $stagedBinary = Join-Path $StagingDirectory 'manifold.exe'
+    Copy-Item -LiteralPath $BuildOutput -Destination $stagedBinary
+    $buildHash = (Get-FileHash -LiteralPath $BuildOutput -Algorithm SHA256).Hash
+    Assert-StableFileHash $stagedBinary $buildHash 'staged portable binary' | Out-Null
+    return $stagedBinary
+}
+
 function Confirm-OrdinaryReleasePreserved {
     param(
         [bool]$ExistedBefore,
@@ -311,9 +343,6 @@ function Invoke-PortableBuild {
         if (Test-Path -LiteralPath $backupDirectory) {
             throw (New-PortableFailure "ABORT: stale portable publication backup requires inspection: $backupDirectory." 8)
         }
-        Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
-
         try {
             Write-Host '== Stage 1/6: native reference build and bench =='
             $nativeExe = Invoke-CargoBuild $nativeRustFlags $nativeTarget
@@ -324,13 +353,16 @@ function Invoke-PortableBuild {
 
             Write-Host '== Stage 2/6: portable x86-64 build and bench =='
             $portableExe = Invoke-CargoBuild $portableRustFlags $portableBuildTarget
-            $portableBench = Invoke-EngineNodesCommand $portableExe @('bench') 'portable bench'
+            $stagedBinary = Stage-PortableBinary $portableExe $stagingDirectory
+            $binaryHash = (Get-FileHash -LiteralPath $stagedBinary -Algorithm SHA256).Hash
+            Assert-StableFileHash $networkPath $networkHash 'embedded network' | Out-Null
+            $portableBench = Invoke-EngineNodesCommand $stagedBinary @('bench') 'portable bench'
             if ($portableBench -ne $expectedBenchSignature) {
                 throw (New-PortableFailure "ABORT: portable bench signature is $portableBench, expected $expectedBenchSignature." 4)
             }
 
             Write-Host '== Stage 3/6: portable perft =='
-            $portablePerft = Invoke-EngineNodesCommand $portableExe @('perft', '5') 'portable perft 5'
+            $portablePerft = Invoke-EngineNodesCommand $stagedBinary @('perft', '5') 'portable perft 5'
             if ($portablePerft -ne $expectedPerftSignature) {
                 throw (New-PortableFailure "ABORT: portable perft 5 is $portablePerft, expected $expectedPerftSignature." 4)
             }
@@ -340,14 +372,12 @@ function Invoke-PortableBuild {
 
             Write-Host '== Stage 5/6: instruction scan =='
             $nativeForbidden = @(Get-ForbiddenInstructionsInBinary $objdump $nativeExe)
-            if ($nativeForbidden.Count -eq 0) {
-                throw (New-PortableFailure 'ABORT: native instruction-scan control found no forbidden BMI2 mnemonics.' 7)
-            }
-            $portableForbidden = @(Get-ForbiddenInstructionsInBinary $objdump $portableExe)
+            $portableForbidden = @(Get-ForbiddenInstructionsInBinary $objdump $stagedBinary)
             if ($portableForbidden.Count -ne 0) {
                 throw (New-PortableFailure "ABORT: portable binary contains forbidden instructions: $($portableForbidden -join ', ')." 7)
             }
-            Write-Host "native control instructions: $($nativeForbidden -join ', ')"
+            $nativeScan = if ($nativeForbidden.Count -eq 0) { 'none' } else { $nativeForbidden -join ', ' }
+            Write-Host "native forbidden instructions (informational): $nativeScan"
             Write-Host 'portable forbidden instructions: none'
 
             Write-Host '== Stage 6/6: metadata and failure-safe publication =='
@@ -355,17 +385,18 @@ function Invoke-PortableBuild {
             if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
                 throw (New-PortableFailure 'ABORT: HEAD changed during the portable build.' 5)
             }
+            Assert-StableFileHash $networkPath $networkHash 'embedded network' | Out-Null
+            Assert-StableFileHash $stagedBinary $binaryHash 'staged portable binary' | Out-Null
             Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore | Out-Null
 
-            $stagedBinary = Join-Path $stagingDirectory 'manifold.exe'
-            Copy-Item -LiteralPath $portableExe -Destination $stagedBinary
             [System.IO.File]::WriteAllText((Join-Path $stagingDirectory 'manifold.exe.source-commit'), $sourceCommit)
-            $binaryHash = (Get-FileHash -LiteralPath $stagedBinary -Algorithm SHA256).Hash
             $rustcVersion = Get-RustcVerboseVersion
             $releaseStatus = Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore
+            Assert-StableFileHash $networkPath $networkHash 'embedded network' | Out-Null
+            Assert-StableFileHash $stagedBinary $binaryHash 'staged portable binary' | Out-Null
             @(
                 "date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')"
-                "source commit: $sourceCommit"
+                "engine source HEAD: $sourceCommit"
                 "rustc -vV:"
                 $rustcVersion
                 "native RUSTFLAGS: $nativeRustFlags"
@@ -380,7 +411,7 @@ function Invoke-PortableBuild {
                 "portable perft 5: $portablePerft"
                 "force-magic tests: passed"
                 "disassembler: $objdump"
-                "native forbidden instruction control: $($nativeForbidden -join ', ')"
+                "native forbidden instructions (informational): $nativeScan"
                 "portable forbidden instructions: none"
                 "ordinary release: $releaseStatus"
             ) | Set-Content -LiteralPath (Join-Path $stagingDirectory 'build-metadata.txt')
@@ -389,6 +420,8 @@ function Invoke-PortableBuild {
             if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
                 throw (New-PortableFailure 'ABORT: HEAD changed immediately before portable publication.' 5)
             }
+            Assert-StableFileHash $networkPath $networkHash 'embedded network' | Out-Null
+            Assert-StableFileHash $stagedBinary $binaryHash 'staged portable binary' | Out-Null
             Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore | Out-Null
             Publish-PortableStaging $stagingDirectory $portableDirectory $backupDirectory {
                 Assert-PortableArtifacts $portableDirectory $sourceCommit $binaryHash $networkHash
