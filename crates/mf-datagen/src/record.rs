@@ -287,6 +287,11 @@ impl Record {
     ///
     /// This exists so that `datagen --validate` can report the same verdict a
     /// third-party bullet load would, without shelling out to bullet.
+    ///
+    /// The additional [`StructuralError::MaterialCountOverflow`] verdict rejects more
+    /// than 16 non-pawn, non-king pieces of one kind for either side. That is the
+    /// per-side, per-kind count range represented by [`Position`]'s Zobrist material
+    /// key; constructing a position above it would index beyond the hashing table.
     pub fn structural_errors(self) -> Vec<StructuralError> {
         let mut errors = Vec::new();
         let mut kings = [0u32; 2];
@@ -351,6 +356,11 @@ impl Record {
     /// enough to re-derive occupancy and material, which is what `--check-filters`
     /// needs to re-check in-check status against the emitted data rather than trusting
     /// the generator's own bookkeeping.
+    ///
+    /// Returns `None` when a piece code cannot map to a chess piece or when reconstructing
+    /// the board would exceed the Zobrist material bound of 16 pieces per side and
+    /// non-pawn, non-king kind. Other defects reported by [`Self::structural_errors`]
+    /// do not by themselves prevent this partial reconstruction.
     pub fn to_position(self) -> Option<Position> {
         if self.material_count_overflow().is_some() {
             return None;
@@ -378,6 +388,11 @@ pub enum StructuralError {
     },
     NoNonKingPieces,
     TooManyPieces(u32),
+    /// More than the Zobrist material table's 16 entries for one side and piece kind.
+    ///
+    /// Pawns and kings are not material-count keyed. `opponent` identifies the side
+    /// relative to the record's side to move; `found` is the observed count and `max`
+    /// is the supported bound.
     MaterialCountOverflow {
         opponent: bool,
         kind: PieceKind,
