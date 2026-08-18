@@ -34,7 +34,7 @@ fn main() -> ExitCode {
     match mf_uci::run(stdin.lock(), stdout) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("UCI I/O error: {error}");
+            eprintln!("UCI startup error: {error}");
             ExitCode::FAILURE
         }
     }

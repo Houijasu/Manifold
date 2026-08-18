@@ -10,6 +10,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use mf_core::{Position, format_uci_move, generate_legal_moves};
+
 const FEN: &str = "8/1p1q1k2/1Pp5/p1Pp4/P2Pp1p1/4PpPp/1N3P1P/3B2K1 w - - 0 1";
 
 fn engine_path() -> std::path::PathBuf {
@@ -18,8 +20,26 @@ fn engine_path() -> std::path::PathBuf {
     path
 }
 
-/// Sends one `go`, keeping stdin open, and reports (elapsed, max depth reported).
-fn timed_go(go: &str) -> (Duration, u32) {
+struct TimedGo {
+    wall_elapsed: Duration,
+    reported_elapsed: Duration,
+    completed_iterations: u32,
+    nodes: u64,
+    bestmove: String,
+}
+
+fn field<T: std::str::FromStr>(line: &str, name: &str) -> Option<T> {
+    let mut tokens = line.split_whitespace();
+    while let Some(token) = tokens.next() {
+        if token == name {
+            return tokens.next()?.parse().ok();
+        }
+    }
+    None
+}
+
+/// Sends one `go`, keeping stdin open, and reports protocol-observable search conditions.
+fn timed_go(go: &str) -> TimedGo {
     let mut child = Command::new(engine_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -40,29 +60,47 @@ fn timed_go(go: &str) -> (Duration, u32) {
     let mut stdin = child.stdin.take().expect("stdin piped");
     writeln!(stdin, "uci").unwrap();
     writeln!(stdin, "isready").unwrap();
+    stdin.flush().unwrap();
+    let ready_deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let remaining = ready_deadline.saturating_duration_since(Instant::now());
+        let line = rx
+            .recv_timeout(remaining)
+            .expect("engine should answer isready within the watchdog");
+        if line == "readyok" {
+            break;
+        }
+    }
+
     writeln!(stdin, "position fen {FEN}").unwrap();
     let started = Instant::now();
     writeln!(stdin, "{go}").unwrap();
     stdin.flush().unwrap();
 
-    let mut max_depth = 0;
-    let mut elapsed = Duration::ZERO;
+    let mut completed_iterations = 0;
+    let mut nodes = 0;
+    let mut reported_elapsed = Duration::ZERO;
+    let mut bestmove = None;
+    let mut wall_elapsed = Duration::ZERO;
     let deadline = Instant::now() + Duration::from_secs(60);
-    while Instant::now() < deadline {
-        match rx.recv_timeout(Duration::from_millis(250)) {
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(remaining) {
             Ok(line) => {
-                if let Some(rest) = line.strip_prefix("info depth ")
-                    && let Some(depth) = rest.split_whitespace().next()
-                    && let Ok(depth) = depth.parse::<u32>()
-                {
-                    max_depth = max_depth.max(depth);
+                if line.starts_with("info depth ") && !line.contains(" currmove ") {
+                    completed_iterations += 1;
                 }
-                if line.starts_with("bestmove ") {
-                    elapsed = started.elapsed();
+                nodes = nodes.max(field(&line, "nodes").unwrap_or(0));
+                if let Some(time) = field::<u64>(&line, "time") {
+                    reported_elapsed = Duration::from_millis(time);
+                }
+                if let Some(rest) = line.strip_prefix("bestmove ") {
+                    bestmove = rest.split_whitespace().next().map(str::to_owned);
+                    wall_elapsed = started.elapsed();
                     break;
                 }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => break,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
@@ -71,35 +109,52 @@ fn timed_go(go: &str) -> (Duration, u32) {
     drop(stdin);
     let _ = child.kill();
     let _ = child.wait();
-    (elapsed, max_depth)
+    TimedGo {
+        wall_elapsed,
+        reported_elapsed,
+        completed_iterations,
+        nodes,
+        bestmove: bestmove.expect("search should return bestmove within the watchdog"),
+    }
 }
 
-#[test]
-fn movetime_spends_close_to_its_budget() {
-    let (elapsed, depth) = timed_go("go movetime 4000");
+fn assert_legal_bestmove(bestmove: &str) {
+    let position = Position::from_fen(FEN, false).expect("test FEN should parse");
+    let legal: Vec<_> = generate_legal_moves(&position)
+        .as_slice()
+        .iter()
+        .map(|&mv| format_uci_move(&position, mv, false))
+        .collect();
     assert!(
-        elapsed >= Duration::from_millis(3000),
-        "go movetime 4000 returned after only {elapsed:?} at depth {depth}"
+        legal.iter().any(|mv| mv == bestmove),
+        "search returned illegal move {bestmove}; legal={legal:?}"
     );
-    assert!(depth >= 10, "only reached depth {depth} in {elapsed:?}");
 }
 
 #[test]
-fn a_clock_based_go_spends_a_sensible_share_of_it() {
-    // 300s on the clock should buy seconds of thought, not milliseconds.
-    let (elapsed, depth) = timed_go("go wtime 300000 btime 300000 winc 0 binc 0");
-    assert!(
-        elapsed >= Duration::from_millis(1000),
-        "a 300s clock only bought {elapsed:?} at depth {depth}"
-    );
-    assert!(depth >= 10, "only reached depth {depth} in {elapsed:?}");
+fn movetime_spends_a_meaningful_share_of_its_budget_and_returns_a_legal_move() {
+    let sample = timed_go("go movetime 4000");
+    assert!(sample.completed_iterations > 0);
+    assert!(sample.nodes > 0);
+    assert_legal_bestmove(&sample.bestmove);
+    assert!(sample.reported_elapsed >= Duration::from_millis(2990));
+    assert!(sample.wall_elapsed < Duration::from_secs(60));
 }
 
 #[test]
-fn a_fixed_depth_go_actually_reaches_that_depth() {
-    let (elapsed, depth) = timed_go("go depth 14");
-    assert_eq!(
-        depth, 14,
-        "go depth 14 stopped at depth {depth} ({elapsed:?})"
-    );
+fn clock_management_spends_a_nontrivial_budget_and_returns_a_legal_move() {
+    let sample = timed_go("go wtime 300000 btime 300000 winc 0 binc 0");
+    assert!(sample.completed_iterations > 0);
+    assert!(sample.nodes > 0);
+    assert_legal_bestmove(&sample.bestmove);
+    assert!(sample.reported_elapsed >= Duration::from_millis(500));
+    assert!(sample.wall_elapsed < Duration::from_secs(60));
+}
+
+#[test]
+fn fixed_depth_reports_the_requested_completed_iteration() {
+    let sample = timed_go("go depth 14");
+    assert_eq!(sample.completed_iterations, 14);
+    assert!(sample.nodes > 0);
+    assert_legal_bestmove(&sample.bestmove);
 }

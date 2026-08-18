@@ -51,7 +51,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseQSearchTT type check default true",
     "option name UseQSearchDeltaPruning type check default true",
     "option name UseQSearchChecks type check default false",
-    "option name UseCaptureLMR type check default true",
+    "option name UseCaptureLMR type check default false",
     "option name UsePostLMRDepth type check default true",
     "option name UsePostLMRContHist type check default false",
     "option name UseSingularExt type check default true",
@@ -172,11 +172,18 @@ struct EngineState {
     ponder_enabled: bool,
 }
 
-impl Default for EngineState {
-    fn default() -> Self {
+impl EngineState {
+    fn try_new() -> Result<Self, String> {
+        Self::try_new_with_network(default_network_resolution())
+    }
+
+    fn try_new_with_network(
+        network: Result<SharedNetworkResolution, String>,
+    ) -> Result<Self, String> {
+        let network = network
+            .map_err(|error| format!("manifold requires an NNUE network to evaluate: {error}"))?;
         let position = Position::startpos();
-        let network = default_network_resolution();
-        Self {
+        Ok(Self {
             position_history: vec![position.repetition_key()],
             position,
             position_is_stale: false,
@@ -184,17 +191,18 @@ impl Default for EngineState {
             network: network.network,
             network_source: network.source,
             search_pool: Arc::new(
-                SearchPool::new(1).expect("the default search worker should start"),
+                SearchPool::new(1)
+                    .map_err(|error| format!("unable to start default search worker: {error}"))?,
             ),
             search_options: SearchOptions::default(),
             transposition_table: Arc::new(
                 TranspositionTable::new(DEFAULT_HASH_MIB)
-                    .expect("the default transposition table should allocate"),
+                    .map_err(|error| format!("unable to allocate default Hash: {error}"))?,
             ),
             tablebases: None,
             move_overhead_millis: TIME_OVERHEAD_MILLIS,
             ponder_enabled: false,
-        }
+        })
     }
 }
 
@@ -206,22 +214,19 @@ struct SharedNetworkResolution {
 
 /// Resolves the automatic network once per process.
 ///
-/// Automatic resolution ends in the embedded network, so it cannot come up empty in a
-/// default build. If it fails anyway -- a corrupt explicit override of the discovery
-/// path, or an `embedded-net`-less build with nothing on disk -- the engine cannot
-/// evaluate a single position, so there is nothing useful to degrade to.
-fn default_network_resolution() -> SharedNetworkResolution {
-    static RESOLUTION: OnceLock<SharedNetworkResolution> = OnceLock::new();
+fn default_network_resolution() -> Result<SharedNetworkResolution, String> {
+    static RESOLUTION: OnceLock<Result<SharedNetworkResolution, String>> = OnceLock::new();
     RESOLUTION
-        .get_or_init(|| match resolve_network(None) {
-            Ok(resolved) => {
-                let (network, source) = resolved.into_parts();
-                SharedNetworkResolution {
-                    network: Arc::new(network),
-                    source,
-                }
-            }
-            Err(error) => panic!("manifold requires an NNUE network to evaluate: {error}"),
+        .get_or_init(|| {
+            resolve_network(None)
+                .map(|resolved| {
+                    let (network, source) = resolved.into_parts();
+                    SharedNetworkResolution {
+                        network: Arc::new(network),
+                        source,
+                    }
+                })
+                .map_err(|error| error.to_string())
         })
         .clone()
 }
@@ -264,12 +269,16 @@ impl ActiveSearch {
 }
 
 /// Serves UCI commands until `quit` or end-of-file.
+///
+/// Startup resolves the NNUE network and allocates the default search worker and hash
+/// table before reading any commands. A failure in any of those steps is returned as an
+/// [`io::Error`], so callers can report it without entering the UCI command loop.
 pub fn run<R, W>(reader: R, writer: W) -> io::Result<()>
 where
     R: BufRead,
     W: Write + Send + 'static,
 {
-    let mut state = EngineState::default();
+    let mut state = EngineState::try_new().map_err(io::Error::other)?;
     let writer = Arc::new(Mutex::new(writer));
     let mut active_search = None;
 
@@ -758,7 +767,7 @@ where
 /// is the same automatic resolution the engine plays with.
 fn benchmark_network_resolution() -> Result<SharedNetworkResolution, String> {
     let Some(path) = std::env::var_os("MF_NNUE_TEST_NET") else {
-        return Ok(default_network_resolution());
+        return default_network_resolution();
     };
     match resolve_network(Some(Path::new(&path))) {
         Ok(resolved) => {
@@ -1227,13 +1236,30 @@ fn handle_eval_file<W: Write>(
     state: &mut EngineState,
     writer: &mut W,
 ) -> io::Result<()> {
+    handle_eval_file_with_automatic_resolution(value, state, writer, default_network_resolution)
+}
+
+fn handle_eval_file_with_automatic_resolution<W: Write>(
+    value: &str,
+    state: &mut EngineState,
+    writer: &mut W,
+    automatic_resolution: impl FnOnce() -> Result<SharedNetworkResolution, String>,
+) -> io::Result<()> {
     let automatic = value.is_empty() || value.eq_ignore_ascii_case("<empty>");
     if automatic {
-        let resolution = default_network_resolution();
-        state.network = resolution.network;
-        state.network_source = resolution.source;
-        clear_eval_dependent_search_state(state, writer, "EvalFile")?;
-        return write_network_selection(writer, state, "automatic resolution");
+        return match automatic_resolution() {
+            Ok(resolution) => {
+                state.network = resolution.network;
+                state.network_source = resolution.source;
+                clear_eval_dependent_search_state(state, writer, "EvalFile")?;
+                write_network_selection(writer, state, "automatic resolution")
+            }
+            Err(error) => writeln!(
+                writer,
+                "info string unable to load EvalFile automatic resolution: {error}; keeping {}",
+                state.network_source
+            ),
+        };
     }
 
     // An explicit path that fails to load leaves the previous network in place: the
@@ -2028,12 +2054,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn engine_construction_returns_automatic_network_errors() {
+        let error = match EngineState::try_new_with_network(Err(
+            "fixture automatic network failure".to_string(),
+        )) {
+            Ok(_) => panic!("construction must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error,
+            "manifold requires an NNUE network to evaluate: fixture automatic network failure"
+        );
+    }
+
+    #[test]
+    fn automatic_evalfile_reset_keeps_the_previous_network_on_resolution_failure() {
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
+        let previous_network = Arc::clone(&state.network);
+        let previous_source = state.network_source.clone();
+        let mut output = Vec::new();
+
+        handle_eval_file_with_automatic_resolution("<empty>", &mut state, &mut output, || {
+            Err("fixture automatic network failure".to_string())
+        })
+        .expect("the diagnostic should be writable");
+
+        assert!(Arc::ptr_eq(&state.network, &previous_network));
+        assert_eq!(state.network_source, previous_source);
+        assert!(
+            String::from_utf8(output)
+                .expect("diagnostic should be UTF-8")
+                .starts_with("info string unable to load EvalFile automatic resolution:")
+        );
+    }
+
+    #[test]
     fn ucinewgame_clears_the_transposition_table_without_changing_its_size() {
         let mut state = EngineState {
             search_pool: Arc::new(
                 SearchPool::new(4).expect("four test search workers should start"),
             ),
-            ..EngineState::default()
+            ..EngineState::try_new().expect("copied automatic network should load")
         };
         let key = state.position.zobrist().main();
         let allocated_bytes = state.transposition_table.allocated_bytes();
@@ -2122,7 +2183,7 @@ mod tests {
 
     #[test]
     fn invalid_threads_resize_preserves_the_existing_pool() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption("setoption name Threads value 4", &mut state, &mut output)
             .expect("valid Threads resize should be writable");
@@ -2145,7 +2206,7 @@ mod tests {
 
     #[test]
     fn multipv_spin_clamps_values_below_the_minimum() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
 
         handle_setoption(
             "setoption name MultiPV value -100",
@@ -2159,7 +2220,7 @@ mod tests {
 
     #[test]
     fn multipv_spin_clamps_values_above_the_maximum() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
 
         handle_setoption(
             "setoption name MultiPV value 1000",
@@ -2173,7 +2234,7 @@ mod tests {
 
     #[test]
     fn malformed_multipv_spin_preserves_the_existing_value_and_reports_it() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         state.search_options.multi_pv = 7;
         let mut output = Vec::new();
 
@@ -2192,7 +2253,7 @@ mod tests {
     }
     #[test]
     fn malformed_check_values_report_a_diagnostic_and_preserve_the_existing_value() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         state.search_options.use_rfp = false;
 
         // The numeric-bool dialect some GUIs and tuners speak is not silently dropped:
@@ -2246,7 +2307,7 @@ mod tests {
 
     #[test]
     fn interpolated_time_management_check_option_persists_and_rejects_malformed_values() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         assert!(!state.search_options.use_interpolated_time_management);
 
         handle_setoption(
@@ -2286,7 +2347,7 @@ mod tests {
 
     #[test]
     fn search_again_depth_check_option_persists_and_rejects_malformed_values() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         assert!(!state.search_options.use_search_again_depth);
 
         handle_setoption(
@@ -2333,7 +2394,7 @@ mod tests {
     /// the engine actually got, and the table it leaves behind is the one it named.
     #[test]
     fn an_oversize_hash_request_clamps_to_the_maximum() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
 
         resize_hash(9_000, 8, &mut state, &mut output)
@@ -2361,7 +2422,7 @@ mod tests {
 
     #[test]
     fn a_hash_request_within_the_maximum_is_honoured_without_a_clamp_notice() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
 
         resize_hash(4, 8, &mut state, &mut output).expect("setoption output should be writable");
@@ -2392,7 +2453,7 @@ mod tests {
 
     #[test]
     fn successful_hash_resize_replaces_the_table_and_starts_empty() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let key = state.position.zobrist().main();
         state.transposition_table.store(
             key,
@@ -2417,7 +2478,7 @@ mod tests {
 
     #[test]
     fn selectivity_options_parse_case_insensitively_and_survive_new_game() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
 
         handle_setoption("SeToPtIoN NaMe uSeNmP VaLuE FaLsE", &mut state, &mut output)
@@ -2548,7 +2609,7 @@ mod tests {
 
     #[test]
     fn the_evaluator_diagnostic_always_reports_nnue_and_its_source() {
-        let state = EngineState::default();
+        let state = EngineState::try_new().expect("copied automatic network should load");
 
         let diagnostic = active_evaluator_diagnostic(&state);
 
@@ -2563,7 +2624,7 @@ mod tests {
     fn bad_explicit_eval_file_preserves_the_previous_network_arc() {
         let valid =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
             &format!("setoption name EvalFile value {}", valid.display()),
@@ -2600,7 +2661,7 @@ mod tests {
     fn good_explicit_eval_file_loads_and_reports_source_description_and_backend() {
         let path =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
 
         handle_setoption(
@@ -2625,7 +2686,7 @@ mod tests {
     fn changing_eval_file_clears_eval_dependent_search_state() {
         let path =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let key = state.position.zobrist().main();
         state.transposition_table.store(
             key,
@@ -2655,7 +2716,7 @@ mod tests {
     fn empty_marker_eval_file_value_returns_to_automatic_resolution() {
         let path =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
             &format!("setoption name EvalFile value {}", path.display()),
@@ -2688,7 +2749,7 @@ mod tests {
     fn empty_eval_file_value_returns_to_automatic_resolution() {
         let path =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
             &format!("setoption name EvalFile value {}", path.display()),
@@ -2719,7 +2780,7 @@ mod tests {
         ));
         std::fs::write(&path, b"invalid NNUE fixture")
             .expect("invalid EvalFile fixture should be written");
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
 
         handle_setoption(
@@ -3031,7 +3092,7 @@ mod tests {
 
     #[test]
     fn the_ponder_option_is_stored_on_the_engine_state() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         assert!(!state.ponder_enabled);
 
@@ -3046,7 +3107,7 @@ mod tests {
 
     #[test]
     fn move_overhead_writes_are_clamped_to_the_advertised_bounds() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
 
         handle_setoption(
@@ -3099,7 +3160,7 @@ mod tests {
 
     #[test]
     fn clear_hash_button_without_a_value_clears_the_table_in_place() {
-        let mut state = EngineState::default();
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
         let key = state.position.zobrist().main();
         let allocated_bytes = state.transposition_table.allocated_bytes();
         state.transposition_table.store(

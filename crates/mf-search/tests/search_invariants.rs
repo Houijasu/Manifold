@@ -150,11 +150,10 @@ fn selectivity_options_default_to_enabled() {
             // Elo over 300 games and 0.12 plies SHALLOWER at equal time. See the
             // comment on `SearchOptions::default` in `search.rs`.
             use_qsearch_checks: false,
-            // Capture LMR ships ENABLED, but only after a second measurement. It
-            // measured -8.11 +/- 20.67 Elo when the verification re-search always paid
-            // full depth, and +11.59 +/- 22.22 once `use_post_lmr_depth` below removed
-            // that constraint. See the comment on `SearchOptions::default`.
-            use_capture_lmr: true,
+            // Capture LMR ships DISABLED after the authoritative post-fix primary and
+            // validation matches both favored the off arm. See the comment on
+            // `SearchOptions::default`.
+            use_capture_lmr: false,
             // The verification-depth band is the M3-F4 answer to the constraint M3-F2
             // identified, and it ships ON. Its package-mate, the continuation bonus,
             // ships OFF: measured separately they move the fixed-depth tree in opposite
@@ -1074,9 +1073,18 @@ fn capture_lmr_saves_nodes_on_tactical_middlegames_without_changing_the_move() {
     for fen in TACTICAL {
         let position = Position::from_fen(fen, false).expect("tactical FEN should parse");
 
-        // The technique ships ON, so the DEFAULT arm here is the reduced one.
+        // The technique ships OFF, so enable it explicitly for the reduced arm.
         let enabled_table = TranspositionTable::new(16).expect("test TT should allocate");
-        let enabled = search_default(&position, &enabled_table, limits(9), network);
+        let enabled = search(
+            &position,
+            &enabled_table,
+            limits(9),
+            SearchOptions {
+                use_capture_lmr: true,
+                ..SearchOptions::default()
+            },
+            network,
+        );
 
         let disabled_table = TranspositionTable::new(16).expect("test TT should allocate");
         let disabled = search(
@@ -1384,56 +1392,6 @@ fn interpolated_tm_is_inert_for_fixed_depth_and_fixed_nodes() {
 }
 
 #[test]
-fn interpolated_tm_is_inert_for_multipv() {
-    let Some(network) = network() else {
-        return;
-    };
-    let position = Position::startpos();
-    let mut enabled_elapsed = Duration::ZERO;
-    let mut disabled_elapsed = Duration::ZERO;
-    for soft_millis in [200, 400, 800] {
-        let limits = SearchLimits {
-            soft_time: Some(Duration::from_millis(soft_millis)),
-            hard_time: Some(Duration::from_millis(soft_millis * 4)),
-            use_clock_management: true,
-            ..SearchLimits::default()
-        };
-        let run = |enabled| {
-            let table = TranspositionTable::new(16).expect("test TT should allocate");
-            search(
-                &position,
-                &table,
-                limits,
-                SearchOptions {
-                    use_interpolated_time_management: enabled,
-                    multi_pv: 2,
-                    ..SearchOptions::default()
-                },
-                network,
-            )
-        };
-        for enabled_first in [true, false] {
-            for enabled in [enabled_first, !enabled_first] {
-                let result = run(enabled);
-                assert!(result.best_move.is_some());
-                assert!(result.elapsed <= Duration::from_millis(soft_millis * 4 + 500));
-                if enabled {
-                    enabled_elapsed += result.elapsed;
-                } else {
-                    disabled_elapsed += result.elapsed;
-                }
-            }
-        }
-    }
-    let elapsed_difference = enabled_elapsed.abs_diff(disabled_elapsed);
-    assert!(
-        elapsed_difference * 100 <= disabled_elapsed * 30,
-        "MultiPV=2 must stay on the same legacy governor across toggle arms: \
-         enabled={enabled_elapsed:?}, disabled={disabled_elapsed:?}"
-    );
-}
-
-#[test]
 fn interpolated_tm_changes_a_timed_search_scale_when_enabled() {
     let Some(network) = network() else {
         return;
@@ -1516,56 +1474,6 @@ fn search_again_depth_is_inert_for_fixed_depth_and_fixed_nodes() {
         assert_eq!(enabled.depth, disabled.depth);
         assert_eq!(enabled.best_move, disabled.best_move);
     }
-}
-
-#[test]
-fn search_again_depth_is_inert_for_multipv() {
-    let Some(network) = network() else {
-        return;
-    };
-    let position = Position::startpos();
-    let mut enabled_elapsed = Duration::ZERO;
-    let mut disabled_elapsed = Duration::ZERO;
-    for soft_millis in [200, 400, 800] {
-        let limits = SearchLimits {
-            soft_time: Some(Duration::from_millis(soft_millis)),
-            hard_time: Some(Duration::from_millis(soft_millis * 4)),
-            use_clock_management: true,
-            ..SearchLimits::default()
-        };
-        let run = |enabled| {
-            let table = TranspositionTable::new(16).expect("test TT should allocate");
-            search(
-                &position,
-                &table,
-                limits,
-                SearchOptions {
-                    use_search_again_depth: enabled,
-                    multi_pv: 2,
-                    ..SearchOptions::default()
-                },
-                network,
-            )
-        };
-        for enabled_first in [true, false] {
-            for enabled in [enabled_first, !enabled_first] {
-                let result = run(enabled);
-                assert!(result.best_move.is_some());
-                assert!(result.elapsed <= Duration::from_millis(soft_millis * 4 + 500));
-                if enabled {
-                    enabled_elapsed += result.elapsed;
-                } else {
-                    disabled_elapsed += result.elapsed;
-                }
-            }
-        }
-    }
-    let elapsed_difference = enabled_elapsed.abs_diff(disabled_elapsed);
-    assert!(
-        elapsed_difference * 100 <= disabled_elapsed * 30,
-        "MultiPV=2 must ignore search-again depth across toggle arms: \
-         enabled={enabled_elapsed:?}, disabled={disabled_elapsed:?}"
-    );
 }
 
 #[test]

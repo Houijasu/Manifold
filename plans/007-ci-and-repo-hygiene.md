@@ -10,12 +10,25 @@
 
 ## Status
 
+- **Execution status**: IN PROGRESS
 - **Priority**: P2
 - **Effort**: M
 - **Risk**: MED (the fresh-clone build problem in step 1 must be solved before any CI can go green; CPU-flag and test-duration caveats below)
 - **Depends on**: none
 - **Category**: dx + docs
 - **Planned at**: commit `b9d15bf` + working tree, 2026-08-15
+
+### Targeted hygiene update (2026-08-18)
+
+The original findings and steps below are retained as planning history.
+
+- [x] Refresh the live crate, UCI command, and option maps.
+- [x] Preserve the legacy root match snapshot as historical experiment evidence and
+      document `experiments/<run-name>/` as the live run-state contract.
+- [x] Add narrow tracked ignores for root `config.json` and per-run `games.pgn`.
+- [ ] Add and validate the CI workflow.
+- [ ] Decide and document fresh-clone network provisioning.
+- [ ] Clean up absolute harness paths; this was not requested by the targeted execution.
 
 ## Why this matters
 

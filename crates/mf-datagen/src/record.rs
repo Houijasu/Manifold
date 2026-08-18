@@ -21,6 +21,8 @@ pub const RECORD_BYTES: usize = 32;
 /// piece count in chess, so a well-formed record never approaches it from above.
 pub const MAX_PIECES: usize = 32;
 
+const MAX_ZOBRIST_MATERIAL_COUNT: u32 = 16;
+
 /// The game result, from the perspective of the side to move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -252,11 +254,44 @@ impl Record {
         })
     }
 
+    fn material_count_overflow(self) -> Option<StructuralError> {
+        let mut counts = [[0u32; 4]; 2];
+        for (code, _) in self.iter_pieces() {
+            let Some(&kind) = PieceKind::ALL.get(usize::from(code & 0b0111)) else {
+                continue;
+            };
+            let kind_index = match kind {
+                PieceKind::Knight => 0,
+                PieceKind::Bishop => 1,
+                PieceKind::Rook => 2,
+                PieceKind::Queen => 3,
+                PieceKind::Pawn | PieceKind::King => continue,
+            };
+            let opponent = code >> 3 != 0;
+            let count = &mut counts[usize::from(opponent)][kind_index];
+            *count += 1;
+            if *count > MAX_ZOBRIST_MATERIAL_COUNT {
+                return Some(StructuralError::MaterialCountOverflow {
+                    opponent,
+                    kind,
+                    found: *count,
+                    max: MAX_ZOBRIST_MATERIAL_COUNT,
+                });
+            }
+        }
+        None
+    }
+
     /// Returns the structural defects in this record, using bullet's own validation
     /// rules (`bullet-utils validate`), plus a check that piece codes are in range.
     ///
     /// This exists so that `datagen --validate` can report the same verdict a
     /// third-party bullet load would, without shelling out to bullet.
+    ///
+    /// The additional [`StructuralError::MaterialCountOverflow`] verdict rejects more
+    /// than 16 non-pawn, non-king pieces of one kind for either side. That is the
+    /// per-side, per-kind count range represented by [`Position`]'s Zobrist material
+    /// key; constructing a position above it would index beyond the hashing table.
     pub fn structural_errors(self) -> Vec<StructuralError> {
         let mut errors = Vec::new();
         let mut kings = [0u32; 2];
@@ -308,6 +343,9 @@ impl Record {
         if self.outcome().is_none() {
             errors.push(StructuralError::InvalidResult(self.result));
         }
+        if let Some(error) = self.material_count_overflow() {
+            errors.push(error);
+        }
         errors
     }
 
@@ -318,7 +356,15 @@ impl Record {
     /// enough to re-derive occupancy and material, which is what `--check-filters`
     /// needs to re-check in-check status against the emitted data rather than trusting
     /// the generator's own bookkeeping.
+    ///
+    /// Returns `None` when a piece code cannot map to a chess piece or when reconstructing
+    /// the board would exceed the Zobrist material bound of 16 pieces per side and
+    /// non-pawn, non-king kind. Other defects reported by [`Self::structural_errors`]
+    /// do not by themselves prevent this partial reconstruction.
     pub fn to_position(self) -> Option<Position> {
+        if self.material_count_overflow().is_some() {
+            return None;
+        }
         let mut position = Position::empty(Color::White);
         for (code, square) in self.iter_pieces() {
             let kind = *PieceKind::ALL.get(usize::from(code & 0b0111))?;
@@ -336,9 +382,23 @@ impl Record {
 /// A structural defect found in a record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StructuralError {
-    WrongKingCount { opponent: bool, found: u32 },
+    WrongKingCount {
+        opponent: bool,
+        found: u32,
+    },
     NoNonKingPieces,
     TooManyPieces(u32),
+    /// More than the supported count of 16 for one side and piece kind.
+    ///
+    /// Pawns and kings are not material-count keyed. `opponent` identifies the side
+    /// relative to the record's side to move; `found` is the observed count and `max`
+    /// is the supported bound.
+    MaterialCountOverflow {
+        opponent: bool,
+        kind: PieceKind,
+        found: u32,
+        max: u32,
+    },
     KingSquareMismatch,
     PawnOnBackRank(u8),
     InvalidPieceCode(u8),
@@ -354,6 +414,18 @@ impl core::fmt::Display for StructuralError {
             }
             Self::NoNonKingPieces => write!(formatter, "no non-king pieces on the board"),
             Self::TooManyPieces(count) => write!(formatter, "too many pieces ({count})"),
+            Self::MaterialCountOverflow {
+                opponent,
+                kind,
+                found,
+                max,
+            } => {
+                let side = if *opponent { "nstm" } else { "stm" };
+                write!(
+                    formatter,
+                    "too many {side} {kind:?} pieces ({found}, maximum {max})"
+                )
+            }
             Self::KingSquareMismatch => {
                 write!(formatter, "king square does not match occupancy")
             }
@@ -386,6 +458,22 @@ mod tests {
 
     fn position(fen: &str) -> Position {
         Position::from_fen(fen, false).expect("test FEN parses")
+    }
+
+    fn record_with_seventeen_stm_knights() -> Record {
+        let mut bytes = Record::encode(&Position::startpos(), 0, Outcome::Draw)
+            .expect("encodes")
+            .to_bytes();
+        bytes[0..8].copy_from_slice(&((1u64 << 19) - 1).to_le_bytes());
+        bytes[8..24].fill(0);
+
+        let codes = [5, 13, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+        for (index, code) in codes.into_iter().enumerate() {
+            bytes[8 + index / 2] |= code << (4 * (index & 1));
+        }
+        bytes[27] = 0;
+        bytes[28] = 1 ^ 56;
+        Record::from_bytes(bytes)
     }
 
     #[test]
@@ -487,6 +575,27 @@ mod tests {
                 .structural_errors()
                 .contains(&StructuralError::InvalidResult(9))
         );
+    }
+
+    #[test]
+    fn structural_validation_reports_material_count_overflow() {
+        let record = record_with_seventeen_stm_knights();
+        assert!(
+            record
+                .structural_errors()
+                .contains(&StructuralError::MaterialCountOverflow {
+                    opponent: false,
+                    kind: mf_core::PieceKind::Knight,
+                    found: 17,
+                    max: 16,
+                })
+        );
+    }
+
+    #[test]
+    fn malformed_material_is_rejected_before_position_reconstruction() {
+        let record = record_with_seventeen_stm_knights();
+        assert_eq!(record.to_position(), None);
     }
 
     #[test]

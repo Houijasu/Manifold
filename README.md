@@ -37,10 +37,14 @@ manifold mtbench   # the same benchmark at 1, 2, 4, and 8 threads
 manifold perft 5 [--fen <FEN>] [--chess960]
 ```
 
-Implemented commands: `uci`, `isready`, `ucinewgame`, `setoption`, `position`,
-`go depth|nodes|movetime|wtime/btime|infinite`, `stop`, and `quit`.
-Unsupported commands are ignored, so pondering is effectively limited to ordinary search
-for now.
+Implemented interactive UCI commands: `uci`, `isready`, `ucinewgame`, `setoption`,
+`position`, `go` time/depth/nodes/mate/searchmoves/ponder/infinite/perft forms,
+`ponderhit`, `stop`, `d`, `eval`, `bench`, and `quit`. On otherwise recognized `go`
+commands, unsupported or invalid arguments are diagnosed and ignored; wholly
+unrecognized argument lists are ignored as malformed.
+
+`manifold mtbench` is the standalone CLI subcommand shown above, not an interactive UCI
+command.
 
 Key options (the `uci` handshake lists everything, including the search-tunable spins):
 
@@ -48,8 +52,11 @@ Key options (the `uci` handshake lists everything, including the search-tunable 
 | --- | --- | --- |
 | `Threads` | 1 | Lazy SMP; 1-256. |
 | `Hash` | 16 MiB | Range adapts to the machine's memory. |
+| `MultiPV` | 1 | Number of principal variations; 1-256. |
+| `Ponder` | false | Search while waiting for the predicted reply. |
 | `UCI_Chess960` | false | X-FEN and king-takes-rook castling notation. |
 | `EvalFile` | *(empty)* | Path to a `.nnue` network; overrides the embedded net. |
+| `SyzygyPath` | *(empty)* | Path list used to discover and probe Syzygy WDL/DTZ tables. |
 
 `position fen` rejects unreachable material (pawns on the back rank, side-not-to-move
 in check, illegal promotion material) rather than crashing or searching garbage.
@@ -78,8 +85,9 @@ crates/mf-nnue     network loading, accumulators (Finny), threat features
 crates/mf-search   alpha-beta, move ordering, TT, thread pool, tunables
 crates/mf-uci      protocol surface and the `manifold` binary
 crates/mf-datagen  self-play data generation for network training
-crates/mf-tune     SPSA tuner for the search parameters
-crates/mf-lab      experiment scaffolding (stub)
+crates/mf-tb       Syzygy WDL/DTZ discovery and probing for UCI/search/datagen
+crates/mf-tune     SPSA tuner with checkpoint/resume and process-driven matches
+crates/mf-lab      corrhist-regression and experiment tooling
 research/          design notes; research/_src is read-only Stockfish reference
 experiments/       match results and mission write-ups
 ```
@@ -87,6 +95,10 @@ experiments/       match results and mission write-ups
 `AGENTS.md` carries the detailed repository guidelines, including the fastchess
 harness rules (affinity and concurrency settings are load-bearing on this machine's
 hybrid CPU).
+
+Run matches through `harness/run_match.ps1` with an explicit
+`-OutDir experiments/<run-name>` so command metadata, console output, PGN, and the
+result write-up stay together. There is no live root `config.json` contract.
 
 ## License
 

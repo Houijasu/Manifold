@@ -1,3 +1,5 @@
 * text=auto eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
+experiments/legacy-root-fastchess-config/config.json -text whitespace=cr-at-eol
+experiments/2026-08-18-recommended-order/**/fastchess.log -text whitespace=-blank-at-eol,-blank-at-eof

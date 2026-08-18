@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(test)]
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use mf_core::{
@@ -229,6 +229,28 @@ const _: () = assert!(
 /// `u8` field. Interior depths are stored biased and compared after decoding, so the
 /// ordering between all three domains is preserved exactly.
 const TT_DEPTH_OFFSET: i32 = -QSEARCH_CAPTURES_TT_DEPTH;
+
+trait TablebaseProbe: Sync {
+    fn max_pieces(&self) -> usize;
+    fn probe_wdl(&self, position: &Position) -> Option<Wdl>;
+    fn preserving_root_moves(&self, position: &Position) -> Option<Vec<Move>>;
+}
+
+impl TablebaseProbe for Tablebases {
+    fn max_pieces(&self) -> usize {
+        Tablebases::max_pieces(self)
+    }
+
+    fn probe_wdl(&self, position: &Position) -> Option<Wdl> {
+        Tablebases::probe_wdl(self, position)
+    }
+
+    fn preserving_root_moves(&self, position: &Position) -> Option<Vec<Move>> {
+        Tablebases::probe_root(self, position)
+            .map(|probe| probe.preserving_moves().map(|entry| entry.mv).collect())
+    }
+}
+
 /// Number of consecutive iterations agreeing on the root move after which no further
 /// time is saved. Past this the move is settled and the saving has been banked.
 const TIME_STABILITY_CAP: u32 = 6;
@@ -523,6 +545,7 @@ pub struct SearchLimits {
 pub struct PonderState {
     pondering: AtomicBool,
     rebased_start: Mutex<Option<Instant>>,
+    released: Condvar,
 }
 
 impl PonderState {
@@ -531,6 +554,7 @@ impl PonderState {
         Self {
             pondering: AtomicBool::new(true),
             rebased_start: Mutex::new(None),
+            released: Condvar::new(),
         }
     }
 
@@ -555,6 +579,7 @@ impl PonderState {
         // Release-ordered after the clock base is written, so a worker that observes
         // the flip is guaranteed to see the instant it must measure from.
         self.pondering.store(false, Ordering::Release);
+        self.released.notify_all();
     }
 
     /// Ends the ponder wait without converting to a timed search.
@@ -565,7 +590,26 @@ impl PonderState {
     /// which happens while still pondering whenever the search exhausts its depth
     /// ceiling or the root is terminal, and answering then would violate the protocol.
     pub fn abort(&self) {
+        let rebased = self
+            .rebased_start
+            .lock()
+            .expect("ponder clock lock should not be poisoned");
         self.pondering.store(false, Ordering::Release);
+        drop(rebased);
+        self.released.notify_all();
+    }
+
+    fn wait_until_released(&self) {
+        let mut rebased = self
+            .rebased_start
+            .lock()
+            .expect("ponder clock lock should not be poisoned");
+        while self.is_pondering() {
+            rebased = self
+                .released
+                .wait(rebased)
+                .expect("ponder clock lock should not be poisoned");
+        }
     }
 
     /// The instant `ponderhit` arrived, once it has.
@@ -710,9 +754,9 @@ impl Default for SearchOptions {
             // evidence. TT moves, checking captures, and queen promotions are exempt;
             // see `capture_reduction_allowed` for why each one is.
             //
-            // Ships **ON**, but only on the second measurement. This toggle is the
-            // record of a feature whose verdict was decided by something outside
-            // itself, so both measurements are kept here.
+            // Ships **OFF** after the authoritative post-fix primary and validation
+            // matches both favored disabling it. The older measurements remain here
+            // because they explain why the option was re-tested.
             //
             // M3-F2 measured it single-variable against the M2 kept build over 300
             // games at 8+0.08, Threads=1, `-use-affinity -concurrency 8`, zero
@@ -736,10 +780,19 @@ impl Default for SearchOptions {
             // instead of always paying full depth. M4-F1b re-measured on top of it, one
             // match, same conditions, against the M3 kept build (bench 44,737):
             // **+11.59 +/- 22.22 Elo**, Ptnml [3,31,72,41,3], LOS 84.7%, PairsRatio
-            // 1.29, zero forfeits. Point estimate positive, so it ships. The error bar
-            // still covers zero and the two intervals overlap heavily -- this is a
-            // ~20 Elo swing in the point estimate after the constraint was removed, not
-            // a proof.
+            // 1.29, zero forfeits. That positive point estimate made it the shipped
+            // default at the time. The error bar still covers zero and the two
+            // intervals overlap heavily -- this is a ~20 Elo swing in the point
+            // estimate after the constraint was removed, not a proof.
+            //
+            // The recommended-order post-fix binary measured the alternative OFF
+            // against that shipped-ON default in two independent 300-game matches.
+            // From the OFF arm's perspective: primary **+2.32 +/- 21.80 Elo**,
+            // validation **+4.63 +/- 19.00 Elo**, pooled **+3.47 Elo**, with zero
+            // integrity-guardrail failures. The decision policy requires positive
+            // primary and pooled point estimates plus a non-negative validation
+            // estimate, so all three conditions support flipping the default OFF. See
+            // `experiments/2026-08-18-recommended-order/UseCaptureLMR/results.md`.
             //
             // Two designs were measured, and the first is recorded because the second
             // only looks obvious afterwards. A FLAT one-ply discount -- the design this
@@ -751,7 +804,7 @@ impl Default for SearchOptions {
             // Write-ups: `experiments/MSN-S2-capture-lmr/results.md` (the negative and
             // the mechanism) and `experiments/MSN-S7-capture-lmr-v2/results.md` (the
             // re-measurement).
-            use_capture_lmr: true,
+            use_capture_lmr: false,
             // M3-F4 was specified as ONE package of two sub-mechanisms hanging off the
             // same LMR fail-high, "unless the worker finds cause to split". A four-arm
             // fixed-depth sweep over 24 book positions found the cause: measured
@@ -990,7 +1043,7 @@ pub(crate) struct WorkerParameters<'a> {
     root_move_reporter: Option<Box<dyn FnMut(RootMoveInfo) + 'a>>,
     #[cfg(feature = "corrhist-regression")]
     correction_sample_reporter: Option<Box<dyn FnMut(CorrectionSample) + 'a>>,
-    tablebases: Option<&'a Tablebases>,
+    tablebases: Option<&'a dyn TablebaseProbe>,
     tb_hit_counters: Option<&'a [NodeCounter]>,
     root_moves: Option<Vec<Move>>,
     ponder: Option<&'a PonderState>,
@@ -1033,6 +1086,18 @@ impl<'a> WorkerParameters<'a> {
     pub(crate) fn with_tablebases(
         mut self,
         tablebases: &'a Tablebases,
+        tb_hit_counters: &'a [NodeCounter],
+    ) -> Self {
+        assert!(self.worker_id < tb_hit_counters.len());
+        self.tablebases = Some(tablebases);
+        self.tb_hit_counters = Some(tb_hit_counters);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_tablebase_probe(
+        mut self,
+        tablebases: &'a dyn TablebaseProbe,
         tb_hit_counters: &'a [NodeCounter],
     ) -> Self {
         assert!(self.worker_id < tb_hit_counters.len());
@@ -1287,7 +1352,7 @@ where
             ..limits
         }
     };
-    let maximum_depth = iteration_ceiling(&limits);
+    let maximum_depth = iteration_ceiling(&limits, ponder.is_some());
     // Allocated once per worker per search, outside the deepening loop; each iteration
     // only refills it in place.
     let low_ply_history = LowPlyHistory::new();
@@ -1322,12 +1387,8 @@ where
     // replaced: both constraints must hold.
     if let Some(tablebases) = tablebases
         && position.occupancy().count() as usize <= tablebases.max_pieces()
-        && let Some(root_probe) = tablebases.probe_root(position)
+        && let Some(mut allowed) = tablebases.preserving_root_moves(position)
     {
-        let mut allowed: Vec<Move> = root_probe
-            .preserving_moves()
-            .map(|entry| entry.mv)
-            .collect();
         if let Some(requested) = context.root_move_filter.as_ref() {
             allowed.retain(|mv| requested.contains(mv));
         }
@@ -1623,6 +1684,114 @@ where
         }
     }
 
+    let saturated_clocked_ponder = ponder.is_some()
+        && limits.depth.is_none()
+        && limits.nodes.is_none()
+        && !limits.infinite
+        && limits.soft_time.is_some()
+        && limits.hard_time.is_some()
+        && completed
+            .as_ref()
+            .is_some_and(|iteration| iteration.depth == maximum_depth);
+    if saturated_clocked_ponder {
+        let ponder = ponder.expect("a pondering context should retain its latch");
+        ponder.wait_until_released();
+
+        if ponder.rebased_start().is_some() {
+            let root_move_reporter = context.root_move_reporter.take();
+            loop {
+                low_ply_history.fill_prior();
+                context.begin_root_iteration();
+                context.seldepth = maximum_depth;
+                let attempt =
+                    aspiration_search(position, maximum_depth, previous_score, &mut context);
+                let Some((score, pv)) = attempt else {
+                    break;
+                };
+
+                let best_move = pv.first().copied();
+                if context.uses_interpolated_time_management() {
+                    if best_move.is_some() && best_move != previous_best_move {
+                        last_best_move_change_depth = maximum_depth;
+                    }
+                    previous_best_move = best_move;
+                    let previous_average = if has_score_history {
+                        previous_average_score
+                    } else {
+                        score
+                    };
+                    let older_score = if has_score_history {
+                        score_history[score_history_index]
+                    } else {
+                        score
+                    };
+                    context.set_time_scale(interpolated_time_scale_percent(
+                        previous_average,
+                        older_score,
+                        score,
+                        maximum_depth.saturating_sub(last_best_move_change_depth),
+                        context.root_time_statistics.best_move_changes,
+                        context.node_counters.len(),
+                        context.root_time_statistics.nodes_effort(best_move),
+                    ));
+
+                    if has_score_history {
+                        previous_average_score = (previous_average_score + score) / 2;
+                    } else {
+                        previous_average_score = score;
+                        score_history.fill(score);
+                        has_score_history = true;
+                    }
+                    score_history[score_history_index] = score;
+                    score_history_index = (score_history_index + 1) % score_history.len();
+                } else {
+                    if best_move.is_some() && best_move == previous_best_move {
+                        stability = (stability + 1).min(TIME_STABILITY_CAP);
+                    } else {
+                        stability = 0;
+                    }
+                    previous_best_move = best_move;
+                    let effort_percent = context.best_move_effort_percent(best_move);
+                    context.set_time_scale(scaled_time_percent(
+                        time_scale_percent(stability, score - previous_score),
+                        effort_percent,
+                    ));
+                }
+                previous_score = score;
+                context.recompute_soft_time_reached();
+                context.publish_nodes();
+                completed = Some(IterationInfo {
+                    depth: maximum_depth,
+                    seldepth: context.seldepth.max(maximum_depth),
+                    multipv_index: 1,
+                    score,
+                    nodes: context.reported_nodes(),
+                    hashfull: context.transposition_table.hashfull_per_mille(),
+                    tbhits: context.reported_tb_hits(),
+                    elapsed: context.elapsed(),
+                    time_scale_percent: context.time_scale_percent,
+                    pv,
+                });
+
+                if context.should_stop_after_iteration() {
+                    break;
+                }
+            }
+            context.root_move_reporter = root_move_reporter;
+
+            context.publish_nodes();
+            if let Some(info) = completed.as_mut() {
+                info.nodes = context.reported_nodes();
+                info.hashfull = context.transposition_table.hashfull_per_mille();
+                info.tbhits = context.reported_tb_hits();
+                info.elapsed = context.elapsed();
+                info.time_scale_percent = context.time_scale_percent;
+                on_iteration(info);
+                context.iterations.push(info.clone());
+            }
+        }
+    }
+
     let completed = completed.unwrap_or_else(|| IterationInfo {
         depth: 0,
         seldepth: 0,
@@ -1663,8 +1832,8 @@ where
 ///
 /// Reaching the ceiling is not a reason to answer, though. UCI forbids a `bestmove`
 /// before `stop` in infinite mode, so the caller idles there instead.
-fn iteration_ceiling(limits: &SearchLimits) -> u32 {
-    if limits.infinite {
+fn iteration_ceiling(limits: &SearchLimits, pondering: bool) -> u32 {
+    if limits.infinite || (pondering && limits.depth.is_none() && limits.nodes.is_none()) {
         MAX_ITERATIVE_DEEPENING_DEPTH
     } else {
         limits
@@ -4405,7 +4574,7 @@ struct SearchContext<'a> {
     continuation_keys: [Option<ContinuationKey>; MAX_SEARCH_PLY],
     nmp_min_ply: usize,
     /// Syzygy tablebases, absent when the caller loaded none.
-    tablebases: Option<&'a Tablebases>,
+    tablebases: Option<&'a dyn TablebaseProbe>,
     /// Published tbhits slots parallel to `node_counters`, absent without tablebases.
     tb_hit_counters: Option<&'a [NodeCounter]>,
     /// This worker's successful tablebase probes.
@@ -4806,8 +4975,11 @@ pub fn clamp_centipawn_score(score: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::path::PathBuf;
     use std::sync::OnceLock;
+    use std::sync::atomic::AtomicU32;
+    use std::thread;
 
     use super::*;
 
@@ -4893,6 +5065,150 @@ mod tests {
     }
 
     #[test]
+    fn ponder_wait_wakes_on_ponderhit_and_records_one_clock_base() {
+        let ponder = PonderState::new();
+        thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let ponder = &ponder;
+            scope.spawn(move || {
+                ponder.wait_until_released();
+                tx.send(()).expect("wake should be observable");
+            });
+            assert!(rx.recv_timeout(Duration::from_millis(20)).is_err());
+            ponder.ponderhit();
+            assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        });
+        let first = ponder.rebased_start().expect("ponderhit records a base");
+        ponder.ponderhit();
+        assert_eq!(ponder.rebased_start(), Some(first));
+    }
+
+    #[test]
+    fn ponder_wait_wakes_on_abort_without_recording_a_clock_base() {
+        let ponder = PonderState::new();
+        thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let ponder = &ponder;
+            scope.spawn(move || {
+                ponder.wait_until_released();
+                tx.send(()).expect("wake should be observable");
+            });
+            assert!(rx.recv_timeout(Duration::from_millis(20)).is_err());
+            ponder.abort();
+            assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        });
+        assert_eq!(ponder.rebased_start(), None);
+    }
+
+    #[test]
+    fn ponder_hit_from_the_ceiling_callback_runs_one_quiet_rebased_iteration() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position =
+            Position::from_fen("7k/8/6QK/8/8/8/8/8 w - - 0 1", false).expect("valid test FEN");
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let ponder = PonderState::new();
+        let ceiling_iterations = Cell::new(0);
+        let post_hit_currmoves = Cell::new(0);
+        let parameters = WorkerParameters::new(0, 0, &counters, &shared_history, network)
+            .with_ponder(&ponder)
+            .with_root_move_reporter(|root_move| {
+                if !ponder.is_pondering() && root_move.depth == MAX_ITERATIVE_DEEPENING_DEPTH {
+                    post_hit_currmoves.set(post_hit_currmoves.get() + 1);
+                }
+            });
+
+        let result = search_worker_with_history_callback_options(
+            &position,
+            &history,
+            &table,
+            SearchLimits {
+                soft_time: Some(Duration::from_millis(100)),
+                hard_time: Some(Duration::from_millis(400)),
+                use_clock_management: true,
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            parameters,
+            |iteration| {
+                if iteration.depth == MAX_ITERATIVE_DEEPENING_DEPTH {
+                    ceiling_iterations.set(ceiling_iterations.get() + 1);
+                    if ponder.is_pondering() {
+                        ponder.ponderhit();
+                    }
+                }
+            },
+        );
+
+        assert_eq!(
+            ceiling_iterations.get(),
+            2,
+            "the pre-hit ceiling callback must be followed by one rebased callback"
+        );
+        assert_eq!(
+            post_hit_currmoves.get(),
+            0,
+            "repeated ceiling searches must not emit currmove progress"
+        );
+        assert!(
+            result.elapsed >= Duration::from_millis(40),
+            "the callback-seam ponderhit must spend the rebased budget, got {:?}",
+            result.elapsed
+        );
+    }
+
+    #[test]
+    fn clocked_ponder_without_a_primary_limit_uses_the_analysis_ceiling() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position =
+            Position::from_fen("7k/8/6QK/8/8/8/8/8 w - - 0 1", false).expect("valid test FEN");
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let ponder = PonderState::new();
+        let deepest = AtomicU32::new(0);
+        let parameters =
+            WorkerParameters::new(0, 0, &counters, &shared_history, network).with_ponder(&ponder);
+
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_secs(2));
+                ponder.abort();
+            });
+            let result = search_worker_with_history_callback_options(
+                &position,
+                &history,
+                &table,
+                SearchLimits {
+                    soft_time: Some(Duration::from_millis(100)),
+                    hard_time: Some(Duration::from_millis(400)),
+                    use_clock_management: true,
+                    ..SearchLimits::default()
+                },
+                SearchOptions::default(),
+                &stop,
+                parameters,
+                |iteration| {
+                    deepest.fetch_max(iteration.depth, Ordering::Relaxed);
+                },
+            );
+
+            assert_eq!(deepest.load(Ordering::Relaxed), MAX_SEARCH_PLY as u32);
+            assert_eq!(result.depth, MAX_SEARCH_PLY as u32);
+        });
+    }
+
+    #[test]
     fn late_timed_iteration_repeats_effective_depth_next() {
         assert!(!should_increase_search_depth(
             false,
@@ -4944,6 +5260,248 @@ mod tests {
                 }))
             })
             .as_ref()
+    }
+
+    fn tablebase_test_network() -> &'static mf_nnue::Network {
+        local_network().expect("tablebase search tests require copied nets/main.nnue")
+    }
+
+    struct FakeTablebase {
+        root_moves: Option<(u64, Vec<Move>)>,
+        wdl: Option<(u64, Wdl)>,
+    }
+
+    impl TablebaseProbe for FakeTablebase {
+        fn max_pieces(&self) -> usize {
+            32
+        }
+
+        fn probe_wdl(&self, position: &Position) -> Option<Wdl> {
+            self.wdl
+                .filter(|(key, _)| *key == position.repetition_key())
+                .map(|(_, wdl)| wdl)
+        }
+
+        fn preserving_root_moves(&self, position: &Position) -> Option<Vec<Move>> {
+            self.root_moves
+                .as_ref()
+                .filter(|(key, _)| *key == position.repetition_key())
+                .map(|(_, moves)| moves.clone())
+        }
+    }
+
+    struct EveryPositionTablebase(Wdl);
+
+    impl TablebaseProbe for EveryPositionTablebase {
+        fn max_pieces(&self) -> usize {
+            32
+        }
+
+        fn probe_wdl(&self, _position: &Position) -> Option<Wdl> {
+            Some(self.0)
+        }
+
+        fn preserving_root_moves(&self, _position: &Position) -> Option<Vec<Move>> {
+            None
+        }
+    }
+
+    struct DirectTablebaseResult {
+        score: i32,
+        entry: EntryData,
+        tb_hits: u64,
+    }
+
+    fn direct_tablebase_pvs(
+        fen: &str,
+        wdl: Wdl,
+        depth: i32,
+        alpha: i32,
+        beta: i32,
+        pv_node: bool,
+    ) -> DirectTablebaseResult {
+        let network = tablebase_test_network();
+        let mut position = Position::from_fen(fen, false).expect("test FEN should parse");
+        let probe = FakeTablebase {
+            root_moves: None,
+            wdl: Some((position.repetition_key(), wdl)),
+        };
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits::default(),
+            None,
+            &stop,
+            &position,
+            &history,
+            &shared_history,
+            &low_ply_history,
+            SearchOptions::default(),
+            0,
+            0,
+            &counters,
+            network,
+        );
+        context.tablebases = Some(&probe);
+        let mut pv = PvLine::new();
+        let score = pvs(
+            &mut position,
+            depth,
+            alpha,
+            beta,
+            1,
+            pv_node,
+            !pv_node,
+            true,
+            false,
+            None,
+            &mut context,
+            &mut pv,
+        )
+        .expect("unbounded test search should complete");
+        let entry = table
+            .probe(position.repetition_key())
+            .expect("tablebase cutoff should write a TT entry");
+        DirectTablebaseResult {
+            score,
+            entry,
+            tb_hits: context.tb_hits,
+        }
+    }
+
+    fn fixed_depth_tablebase_search(
+        position: &Position,
+        tablebases: Option<&dyn TablebaseProbe>,
+    ) -> SearchResult {
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let tb_hit_counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let mut worker =
+            WorkerParameters::new(0, 0, &counters, &shared_history, tablebase_test_network());
+        if let Some(tablebases) = tablebases {
+            worker = worker.with_tablebase_probe(tablebases, &tb_hit_counters);
+        }
+        search_worker_with_history_callback_options(
+            position,
+            &history,
+            &table,
+            SearchLimits {
+                depth: Some(2),
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            worker,
+            |_| {},
+        )
+    }
+
+    #[test]
+    fn tablebase_root_probe_restricts_the_searched_moves() {
+        let position =
+            Position::from_fen("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", false).expect("valid test FEN");
+        let unrestricted = fixed_depth_tablebase_search(&position, None)
+            .best_move
+            .expect("unrestricted search should select a move");
+        let legal_moves = generate_legal_moves(&position);
+        let allowed = legal_moves
+            .iter()
+            .copied()
+            .find(|mv| *mv != unrestricted)
+            .expect("test position should have an alternative legal move");
+        let probe = FakeTablebase {
+            root_moves: Some((position.repetition_key(), vec![allowed])),
+            wdl: None,
+        };
+        let restricted = fixed_depth_tablebase_search(&position, Some(&probe));
+
+        assert_ne!(Some(unrestricted), restricted.best_move);
+        assert_eq!(restricted.best_move, Some(allowed));
+    }
+
+    #[test]
+    fn tablebase_wdl_cutoff_records_hit_and_six_ply_tt_depth_bonus() {
+        let probe =
+            direct_tablebase_pvs("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", Wdl::Win, 4, -1, 0, false);
+
+        assert_eq!(probe.score, TABLEBASE_SCORE - 1);
+        assert_eq!(probe.entry.bound, Bound::Lower);
+        assert_eq!(tt_entry_depth(probe.entry.depth), 4 + SYZYGY_TT_DEPTH_BONUS);
+        assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn tablebase_draw_cutoff_is_exact_with_six_ply_tt_depth_bonus() {
+        let probe =
+            direct_tablebase_pvs("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", Wdl::Draw, 4, -1, 1, false);
+
+        assert_eq!(probe.score, 0);
+        assert_eq!(probe.entry.bound, Bound::Exact);
+        assert_eq!(tt_entry_depth(probe.entry.depth), 4 + SYZYGY_TT_DEPTH_BONUS);
+        assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn tablebase_loss_upper_cutoff_has_six_ply_tt_depth_bonus() {
+        let probe =
+            direct_tablebase_pvs("8/8/8/8/8/2k5/8/K2Q4 b - - 0 1", Wdl::Loss, 4, 0, 1, false);
+
+        assert_eq!(probe.score, -(TABLEBASE_SCORE - 1));
+        assert_eq!(probe.entry.bound, Bound::Upper);
+        assert_eq!(tt_entry_depth(probe.entry.depth), 4 + SYZYGY_TT_DEPTH_BONUS);
+        assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn fixed_depth_search_publishes_interior_tablebase_hits() {
+        let position = Position::startpos();
+        let result =
+            fixed_depth_tablebase_search(&position, Some(&EveryPositionTablebase(Wdl::Draw)));
+
+        assert!(result.tbhits > 0);
+        assert!(!result.iterations.is_empty());
+        assert_eq!(
+            result.iterations.last().map(|iteration| iteration.tbhits),
+            Some(result.tbhits)
+        );
+    }
+
+    #[test]
+    fn noncutting_tablebase_win_sets_a_search_floor() {
+        let probe = direct_tablebase_pvs(
+            "8/8/8/8/8/2k5/8/KQ6 w - - 0 1",
+            Wdl::Win,
+            4,
+            -INFINITY,
+            INFINITY,
+            true,
+        );
+
+        assert!(probe.score >= TABLEBASE_SCORE - 1);
+        assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn noncutting_tablebase_loss_sets_a_search_ceiling() {
+        let probe = direct_tablebase_pvs(
+            "8/8/8/8/8/2k5/8/K2Q4 b - - 0 1",
+            Wdl::Loss,
+            4,
+            -INFINITY,
+            INFINITY,
+            true,
+        );
+
+        assert!(probe.score <= -(TABLEBASE_SCORE - 1));
+        assert_eq!(probe.tb_hits, 1);
     }
 
     #[test]
@@ -5298,23 +5856,32 @@ mod tests {
             infinite: true,
             ..SearchLimits::default()
         };
-        assert_eq!(iteration_ceiling(&infinite), MAX_ITERATIVE_DEEPENING_DEPTH);
+        assert_eq!(
+            iteration_ceiling(&infinite, false),
+            MAX_ITERATIVE_DEEPENING_DEPTH
+        );
 
         // An `infinite` request carrying a depth is still infinite: `search_limits`
         // drops the depth, and the ceiling must not resurrect it.
         assert_eq!(
-            iteration_ceiling(&SearchLimits {
-                depth: Some(4),
-                ..infinite
-            }),
+            iteration_ceiling(
+                &SearchLimits {
+                    depth: Some(4),
+                    ..infinite
+                },
+                true,
+            ),
             MAX_ITERATIVE_DEEPENING_DEPTH
         );
 
         let at = |depth| {
-            iteration_ceiling(&SearchLimits {
-                depth: Some(depth),
-                ..SearchLimits::default()
-            })
+            iteration_ceiling(
+                &SearchLimits {
+                    depth: Some(depth),
+                    ..SearchLimits::default()
+                },
+                true,
+            )
         };
         assert_eq!(at(0), 1, "depth 0 still owes the GUI one iteration");
         assert_eq!(at(12), 12, "a depth within the ceiling is honoured exactly");
@@ -5324,7 +5891,21 @@ mod tests {
 
         // No depth at all keeps the historical default.
         assert_eq!(
-            iteration_ceiling(&SearchLimits::default()),
+            iteration_ceiling(&SearchLimits::default(), false),
+            DEFAULT_MAX_DEPTH
+        );
+        assert_eq!(
+            iteration_ceiling(&SearchLimits::default(), true),
+            MAX_ITERATIVE_DEEPENING_DEPTH
+        );
+        assert_eq!(
+            iteration_ceiling(
+                &SearchLimits {
+                    nodes: Some(10_000),
+                    ..SearchLimits::default()
+                },
+                true,
+            ),
             DEFAULT_MAX_DEPTH
         );
     }

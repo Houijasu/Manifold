@@ -1,0 +1,26 @@
+Commit:      5021efdfd73f8b69a003257150867260577c63c2
+Binary A:    tt-move-history-on -> C:\Users\Samaritan\AppData\Local\Temp\manifold-execution-order\baselines\recommended-order-post-fix\manifold.exe
+SHA-256 A:   48D65DECCD56DF1670CB727C4045F465CC3C20B691052AB97B61D337D2DFF229
+Binary B:    tt-move-history-off -> C:\Users\Samaritan\AppData\Local\Temp\manifold-execution-order\baselines\recommended-order-post-fix\manifold.exe
+SHA-256 B:   48D65DECCD56DF1670CB727C4045F465CC3C20B691052AB97B61D337D2DFF229
+TC:          tc=8+0.08
+Seed:        2026081821
+Book:        C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd  -format epd -order random -repeat -games 2
+Affinity:    enabled   Concurrency: 8   Threads: A=1 B=1   Hash: 64
+SPRT:        (none -- fixed-length match)
+Rounds:      150 (x2 games, paired openings)
+Guardrail:   both engines run Threads=1; AGENTS.md 4.451 makes -use-affinity mandatory
+Pre-run CPU: 13% (max of 5 samples, AGENTS.md 4.8)
+Purpose:     Post-fix primary: measure UseTtMoveHistory=true against false after all correctness commits
+Date:        2026-08-18T07:16:18Z
+Driver:      harness/run_match.ps1
+Command:
+C:\Users\Samaritan\Projects\Manifold\tools\fastchess\fastchess.exe -engine cmd=C:\Users\Samaritan\AppData\Local\Temp\manifold-execution-order\baselines\recommended-order-post-fix\manifold.exe name=tt-move-history-on option.Hash=64 option.Threads=1 option.UseTtMoveHistory=true -engine cmd=C:\Users\Samaritan\AppData\Local\Temp\manifold-execution-order\baselines\recommended-order-post-fix\manifold.exe name=tt-move-history-off option.Hash=64 option.Threads=1 -each proto=uci tc=8+0.08 -openings file=C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd format=epd order=random -repeat -games 2 -rounds 150 -concurrency 8 -srand 2026081821 -report penta=true -ratinginterval 50 -pgnout file=C:\Users\Samaritan\AppData\Local\Temp\manifold-execution-order\experiments\2026-08-18-recommended-order\UseTtMoveHistory\post-fix-primary\games.pgn append=false -log file=C:\Users\Samaritan\AppData\Local\Temp\manifold-execution-order\experiments\2026-08-18-recommended-order\UseTtMoveHistory\post-fix-primary\fastchess.log level=warn append=false -use-affinity
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  tt-move-history-on time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  tt-move-history-off time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================
