@@ -229,6 +229,28 @@ const _: () = assert!(
 /// `u8` field. Interior depths are stored biased and compared after decoding, so the
 /// ordering between all three domains is preserved exactly.
 const TT_DEPTH_OFFSET: i32 = -QSEARCH_CAPTURES_TT_DEPTH;
+
+trait TablebaseProbe: Sync {
+    fn max_pieces(&self) -> usize;
+    fn probe_wdl(&self, position: &Position) -> Option<Wdl>;
+    fn preserving_root_moves(&self, position: &Position) -> Option<Vec<Move>>;
+}
+
+impl TablebaseProbe for Tablebases {
+    fn max_pieces(&self) -> usize {
+        Tablebases::max_pieces(self)
+    }
+
+    fn probe_wdl(&self, position: &Position) -> Option<Wdl> {
+        Tablebases::probe_wdl(self, position)
+    }
+
+    fn preserving_root_moves(&self, position: &Position) -> Option<Vec<Move>> {
+        Tablebases::probe_root(self, position)
+            .map(|probe| probe.preserving_moves().map(|entry| entry.mv).collect())
+    }
+}
+
 /// Number of consecutive iterations agreeing on the root move after which no further
 /// time is saved. Past this the move is settled and the saving has been banked.
 const TIME_STABILITY_CAP: u32 = 6;
@@ -1012,7 +1034,7 @@ pub(crate) struct WorkerParameters<'a> {
     root_move_reporter: Option<Box<dyn FnMut(RootMoveInfo) + 'a>>,
     #[cfg(feature = "corrhist-regression")]
     correction_sample_reporter: Option<Box<dyn FnMut(CorrectionSample) + 'a>>,
-    tablebases: Option<&'a Tablebases>,
+    tablebases: Option<&'a dyn TablebaseProbe>,
     tb_hit_counters: Option<&'a [NodeCounter]>,
     root_moves: Option<Vec<Move>>,
     ponder: Option<&'a PonderState>,
@@ -1055,6 +1077,18 @@ impl<'a> WorkerParameters<'a> {
     pub(crate) fn with_tablebases(
         mut self,
         tablebases: &'a Tablebases,
+        tb_hit_counters: &'a [NodeCounter],
+    ) -> Self {
+        assert!(self.worker_id < tb_hit_counters.len());
+        self.tablebases = Some(tablebases);
+        self.tb_hit_counters = Some(tb_hit_counters);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_tablebase_probe(
+        mut self,
+        tablebases: &'a dyn TablebaseProbe,
         tb_hit_counters: &'a [NodeCounter],
     ) -> Self {
         assert!(self.worker_id < tb_hit_counters.len());
@@ -1344,12 +1378,8 @@ where
     // replaced: both constraints must hold.
     if let Some(tablebases) = tablebases
         && position.occupancy().count() as usize <= tablebases.max_pieces()
-        && let Some(root_probe) = tablebases.probe_root(position)
+        && let Some(mut allowed) = tablebases.preserving_root_moves(position)
     {
-        let mut allowed: Vec<Move> = root_probe
-            .preserving_moves()
-            .map(|entry| entry.mv)
-            .collect();
         if let Some(requested) = context.root_move_filter.as_ref() {
             allowed.retain(|mv| requested.contains(mv));
         }
@@ -4535,7 +4565,7 @@ struct SearchContext<'a> {
     continuation_keys: [Option<ContinuationKey>; MAX_SEARCH_PLY],
     nmp_min_ply: usize,
     /// Syzygy tablebases, absent when the caller loaded none.
-    tablebases: Option<&'a Tablebases>,
+    tablebases: Option<&'a dyn TablebaseProbe>,
     /// Published tbhits slots parallel to `node_counters`, absent without tablebases.
     tb_hit_counters: Option<&'a [NodeCounter]>,
     /// This worker's successful tablebase probes.
@@ -5175,6 +5205,183 @@ mod tests {
                 }))
             })
             .as_ref()
+    }
+
+    struct FakeTablebase {
+        root_moves: Option<(u64, Vec<Move>)>,
+        wdl: Option<(u64, Wdl)>,
+    }
+
+    impl TablebaseProbe for FakeTablebase {
+        fn max_pieces(&self) -> usize {
+            32
+        }
+
+        fn probe_wdl(&self, position: &Position) -> Option<Wdl> {
+            self.wdl
+                .filter(|(key, _)| *key == position.repetition_key())
+                .map(|(_, wdl)| wdl)
+        }
+
+        fn preserving_root_moves(&self, position: &Position) -> Option<Vec<Move>> {
+            self.root_moves
+                .as_ref()
+                .filter(|(key, _)| *key == position.repetition_key())
+                .map(|(_, moves)| moves.clone())
+        }
+    }
+
+    struct DirectTablebaseResult {
+        score: i32,
+        entry: EntryData,
+        tb_hits: u64,
+    }
+
+    fn direct_tablebase_pvs(
+        fen: &str,
+        wdl: Wdl,
+        depth: i32,
+        alpha: i32,
+        beta: i32,
+        pv_node: bool,
+    ) -> Option<DirectTablebaseResult> {
+        let network = local_network()?;
+        let mut position = Position::from_fen(fen, false).expect("test FEN should parse");
+        let probe = FakeTablebase {
+            root_moves: None,
+            wdl: Some((position.repetition_key(), wdl)),
+        };
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits::default(),
+            None,
+            &stop,
+            &position,
+            &history,
+            &shared_history,
+            &low_ply_history,
+            SearchOptions::default(),
+            0,
+            0,
+            &counters,
+            network,
+        );
+        context.tablebases = Some(&probe);
+        let mut pv = PvLine::new();
+        let score = pvs(
+            &mut position,
+            depth,
+            alpha,
+            beta,
+            1,
+            pv_node,
+            !pv_node,
+            true,
+            false,
+            None,
+            &mut context,
+            &mut pv,
+        )
+        .expect("unbounded test search should complete");
+        let entry = table
+            .probe(position.repetition_key())
+            .expect("tablebase cutoff should write a TT entry");
+        Some(DirectTablebaseResult {
+            score,
+            entry,
+            tb_hits: context.tb_hits,
+        })
+    }
+
+    #[test]
+    fn tablebase_root_probe_restricts_the_searched_moves() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position =
+            Position::from_fen("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", false).expect("valid test FEN");
+        let legal_moves = generate_legal_moves(&position);
+        let allowed = legal_moves[legal_moves.len() - 1];
+        let probe = FakeTablebase {
+            root_moves: Some((position.repetition_key(), vec![allowed])),
+            wdl: None,
+        };
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let tb_hit_counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let result = search_worker_with_history_callback_options(
+            &position,
+            &history,
+            &table,
+            SearchLimits {
+                depth: Some(2),
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            WorkerParameters::new(0, 0, &counters, &shared_history, network)
+                .with_tablebase_probe(&probe, &tb_hit_counters),
+            |_| {},
+        );
+
+        assert_eq!(result.best_move, Some(allowed));
+    }
+
+    #[test]
+    fn tablebase_wdl_cutoff_records_hit_and_six_ply_tt_depth_bonus() {
+        let Some(probe) =
+            direct_tablebase_pvs("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", Wdl::Win, 4, -1, 0, false)
+        else {
+            return;
+        };
+
+        assert_eq!(probe.score, TABLEBASE_SCORE - 1);
+        assert_eq!(probe.entry.bound, Bound::Lower);
+        assert_eq!(tt_entry_depth(probe.entry.depth), 4 + SYZYGY_TT_DEPTH_BONUS);
+        assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn noncutting_tablebase_win_sets_a_search_floor() {
+        let Some(probe) = direct_tablebase_pvs(
+            "8/8/8/8/8/2k5/8/KQ6 w - - 0 1",
+            Wdl::Win,
+            4,
+            -INFINITY,
+            INFINITY,
+            true,
+        ) else {
+            return;
+        };
+
+        assert!(probe.score >= TABLEBASE_SCORE - 1);
+        assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn noncutting_tablebase_loss_sets_a_search_ceiling() {
+        let Some(probe) = direct_tablebase_pvs(
+            "8/8/8/8/8/2k5/8/K2Q4 b - - 0 1",
+            Wdl::Loss,
+            4,
+            -INFINITY,
+            INFINITY,
+            true,
+        ) else {
+            return;
+        };
+
+        assert!(probe.score <= -(TABLEBASE_SCORE - 1));
+        assert_eq!(probe.tb_hits, 1);
     }
 
     #[test]
