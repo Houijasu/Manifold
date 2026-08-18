@@ -1,8 +1,8 @@
 //! Deterministic self-play generation of training records.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, mpsc};
 
 use mf_core::{Position, generate_legal_moves, has_legal_move, is_in_check};
 use mf_nnue::Network;
@@ -94,7 +94,8 @@ impl GenerateStats {
         self.rejected.iter().sum()
     }
 
-    fn merge(&mut self, other: &Self) {
+    /// Adds every counter from `other` to this run's totals.
+    pub fn merge(&mut self, other: &Self) {
         self.games += other.games;
         self.positions += other.positions;
         self.considered += other.considered;
@@ -136,95 +137,128 @@ pub fn generate<S>(
     config: GenerateConfig,
     network: &Network,
     tablebases: Option<&Tablebases>,
-    mut sink: S,
+    sink: S,
 ) -> Result<GenerateStats, String>
 where
     S: FnMut(&[Record]) -> Result<(), String>,
 {
-    let threads = config.threads.max(1);
-    let next_game = Arc::new(AtomicU64::new(0));
-    let pending: Arc<Mutex<PendingGames>> = Arc::new(Mutex::new(PendingGames::new()));
+    generate_from(config, 0, network, tablebases, sink, |_, _| Ok(()))
+}
 
-    std::thread::scope(|scope| -> Result<GenerateStats, String> {
-        let mut handles = Vec::with_capacity(threads);
-        for _ in 0..threads {
+/// Generates records starting at `first_game`, reporting progress after each whole game.
+pub fn generate_from<S, P>(
+    config: GenerateConfig,
+    first_game: u64,
+    network: &Network,
+    tablebases: Option<&Tablebases>,
+    sink: S,
+    progress: P,
+) -> Result<GenerateStats, String>
+where
+    S: FnMut(&[Record]) -> Result<(), String>,
+    P: FnMut(u64, &GenerateStats) -> Result<(), String>,
+{
+    generate_with_worker(
+        config,
+        first_game,
+        || {
+            let transposition_table = TranspositionTable::new(WORKER_HASH_MIB)
+                .map_err(|error| format!("unable to allocate datagen Hash: {error}"))?;
+            Ok((transposition_table, SharedHistory::new()))
+        },
+        |(transposition_table, history), index| {
+            Ok(play_game(
+                index,
+                &config,
+                transposition_table,
+                history,
+                network,
+                tablebases,
+            ))
+        },
+        sink,
+        progress,
+    )
+}
+
+fn generate_with_worker<S, W, F, P, G>(
+    config: GenerateConfig,
+    first_game: u64,
+    make_worker: F,
+    play: P,
+    mut sink: S,
+    mut progress: G,
+) -> Result<GenerateStats, String>
+where
+    S: FnMut(&[Record]) -> Result<(), String>,
+    F: Fn() -> Result<W, String> + Sync,
+    P: Fn(&mut W, u64) -> Result<GameOutput, String> + Sync,
+    G: FnMut(u64, &GenerateStats) -> Result<(), String>,
+{
+    let next_game = Arc::new(AtomicU64::new(first_game));
+    let cancelled = Arc::new(AtomicBool::new(false));
+
+    std::thread::scope(|scope| {
+        let (sender, receiver) = mpsc::channel();
+        for _ in 0..config.threads.max(1) {
             let next_game = Arc::clone(&next_game);
-            let pending = Arc::clone(&pending);
-            handles.push(scope.spawn(move || -> Result<(), String> {
-                let transposition_table = TranspositionTable::new(WORKER_HASH_MIB)
-                    .map_err(|error| format!("unable to allocate datagen Hash: {error}"))?;
-                let history = SharedHistory::new();
+            let cancelled = Arc::clone(&cancelled);
+            let sender = sender.clone();
+            let make_worker = &make_worker;
+            let play = &play;
+            scope.spawn(move || {
+                let mut worker = match make_worker() {
+                    Ok(worker) => worker,
+                    Err(error) => {
+                        let _ = sender.send(Err(error));
+                        return;
+                    }
+                };
                 loop {
+                    if cancelled.load(Ordering::Relaxed) {
+                        return;
+                    }
                     let index = next_game.fetch_add(1, Ordering::Relaxed);
                     if index >= config.games {
-                        return Ok(());
+                        return;
                     }
-                    let output = play_game(
-                        index,
-                        &config,
-                        &transposition_table,
-                        &history,
-                        network,
-                        tablebases,
-                    );
-                    pending
-                        .lock()
-                        .map_err(|_| "datagen output queue poisoned".to_string())?
-                        .push(output);
+                    let result = play(&mut worker, index);
+                    let failed = result.is_err();
+                    if sender.send(result).is_err() || failed {
+                        return;
+                    }
                 }
-            }));
+            });
         }
+        drop(sender);
 
-        let mut stats = GenerateStats::default();
-        let mut next_to_emit = 0u64;
-        while next_to_emit < config.games {
-            let ready = {
-                let mut queue = pending
-                    .lock()
-                    .map_err(|_| "datagen output queue poisoned".to_string())?;
-                queue.take_ready(next_to_emit)
-            };
-            match ready {
-                Some(output) => {
-                    debug_assert_eq!(output.index, next_to_emit);
+        let result = (|| {
+            let mut stats = GenerateStats::default();
+            let mut pending = BTreeMap::new();
+            let mut next_to_emit = first_game;
+
+            while next_to_emit < config.games {
+                let output = receiver.recv().map_err(|_| {
+                    "datagen workers stopped before every game was produced".to_string()
+                })??;
+                pending.insert(output.index, output);
+
+                while let Some(output) = pending.remove(&next_to_emit) {
                     sink(&output.records)?;
                     stats.merge(&output.stats);
                     next_to_emit += 1;
+                    progress(next_to_emit, &stats)?;
                 }
-                None => std::thread::yield_now(),
             }
-        }
 
-        for handle in handles {
-            handle
-                .join()
-                .map_err(|_| "datagen worker panicked".to_string())??;
+            Ok(stats)
+        })();
+
+        if result.is_err() {
+            cancelled.store(true, Ordering::Relaxed);
         }
-        Ok(stats)
+        result
     })
-}
-
-/// Completed games awaiting their turn in the canonical order.
-struct PendingGames {
-    ready: Vec<GameOutput>,
-}
-
-impl PendingGames {
-    fn new() -> Self {
-        Self { ready: Vec::new() }
-    }
-
-    fn push(&mut self, output: GameOutput) {
-        self.ready.push(output);
-    }
-
-    fn take_ready(&mut self, wanted: u64) -> Option<GameOutput> {
-        let slot = self
-            .ready
-            .iter()
-            .position(|output| output.index == wanted)?;
-        Some(self.ready.swap_remove(slot))
-    }
 }
 
 /// The state of a game as it is being played.
@@ -514,12 +548,82 @@ const _MATE_THRESHOLD_IS_SANE: () = assert!(crate::filter::MATE_SCORE_THRESHOLD 
 mod tests {
     use std::path::PathBuf;
     use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
     use mf_nnue::Network;
 
-    use super::{GenerateConfig, generate};
+    use super::{GameOutput, GenerateConfig, GenerateStats, generate, generate_with_worker};
     use crate::filter::Rejection;
     use crate::record::Record;
+
+    fn empty_output(index: u64) -> GameOutput {
+        GameOutput {
+            index,
+            records: Vec::new(),
+            stats: GenerateStats {
+                games: 1,
+                ..GenerateStats::default()
+            },
+        }
+    }
+
+    #[test]
+    fn a_worker_error_is_returned_instead_of_waiting_for_the_missing_game() {
+        let config = GenerateConfig {
+            games: 8,
+            threads: 4,
+            ..GenerateConfig::default()
+        };
+        let error = generate_with_worker(
+            config,
+            0,
+            || Ok(()),
+            |_, index| {
+                if index == 0 {
+                    Err("worker failed at game 0".to_string())
+                } else {
+                    Ok(empty_output(index))
+                }
+            },
+            |_| Ok(()),
+            |_, _| Ok(()),
+        )
+        .expect_err("worker failure must end generation");
+        assert_eq!(error, "worker failed at game 0");
+    }
+
+    #[test]
+    fn a_sink_error_cancels_before_the_run_claims_every_game() {
+        let claimed = AtomicU64::new(0);
+        let sink_failed = AtomicBool::new(false);
+        let config = GenerateConfig {
+            games: 10_000,
+            threads: 4,
+            ..GenerateConfig::default()
+        };
+        let error = generate_with_worker(
+            config,
+            0,
+            || Ok(()),
+            |_, index| {
+                claimed.fetch_add(1, Ordering::Relaxed);
+                if index != 0 {
+                    while !sink_failed.load(Ordering::Relaxed) {
+                        std::thread::yield_now();
+                    }
+                }
+                Ok(empty_output(index))
+            },
+            |_| {
+                sink_failed.store(true, Ordering::Relaxed);
+                Err("disk full".to_string())
+            },
+            |_, _| Ok(()),
+        )
+        .expect_err("sink failure must end generation");
+        assert_eq!(error, "disk full");
+        assert!(claimed.load(Ordering::Relaxed) < config.games);
+    }
 
     /// Self-play evaluates with NNUE, so datagen tests need a network.
     ///
