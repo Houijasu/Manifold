@@ -1907,7 +1907,7 @@ fn a_clocked_ponder_that_reaches_the_analysis_ceiling_spends_the_converted_clock
     assert!(
         engine
             .receive_until(watchdog(Duration::from_secs(10)), |line| {
-                is_completed_iteration(line) && field(line, "depth") == 64
+                is_completed_iteration(line) && field(line, "depth") == 128
             })
             .is_some(),
         "the forced-mate ponder must reach the bounded analysis ceiling"
@@ -1934,7 +1934,7 @@ fn a_clocked_ponder_that_reaches_the_analysis_ceiling_spends_the_converted_clock
             post_hit_currmoves += 1;
         }
         if is_completed_iteration(line)
-            && field(line, "depth") == 64
+            && field(line, "depth") == 128
             && let Some(time) = optional_field(line, "time")
         {
             post_hit_ceiling_iterations += 1;
@@ -1976,7 +1976,7 @@ fn a_finite_ponder_without_the_side_to_move_clock_cannot_busy_loop_after_ponderh
     assert!(
         engine
             .receive_until(watchdog(Duration::from_secs(10)), |line| {
-                is_completed_iteration(line) && field(line, "depth") == 64
+                is_completed_iteration(line) && field(line, "depth") == 128
             })
             .is_some(),
         "the finite ponder must reach the bounded analysis ceiling"

@@ -1343,7 +1343,7 @@ where
             ..limits
         }
     };
-    let maximum_depth = iteration_ceiling(&limits);
+    let maximum_depth = iteration_ceiling(&limits, ponder.is_some());
     // Allocated once per worker per search, outside the deepening loop; each iteration
     // only refills it in place.
     let low_ply_history = LowPlyHistory::new();
@@ -1823,8 +1823,8 @@ where
 ///
 /// Reaching the ceiling is not a reason to answer, though. UCI forbids a `bestmove`
 /// before `stop` in infinite mode, so the caller idles there instead.
-fn iteration_ceiling(limits: &SearchLimits) -> u32 {
-    if limits.infinite {
+fn iteration_ceiling(limits: &SearchLimits, pondering: bool) -> u32 {
+    if limits.infinite || (pondering && limits.depth.is_none() && limits.nodes.is_none()) {
         MAX_ITERATIVE_DEEPENING_DEPTH
     } else {
         limits
@@ -4969,6 +4969,7 @@ mod tests {
     use std::cell::Cell;
     use std::path::PathBuf;
     use std::sync::OnceLock;
+    use std::sync::atomic::AtomicU32;
     use std::thread;
 
     use super::*;
@@ -5108,7 +5109,7 @@ mod tests {
         let parameters = WorkerParameters::new(0, 0, &counters, &shared_history, network)
             .with_ponder(&ponder)
             .with_root_move_reporter(|root_move| {
-                if !ponder.is_pondering() && root_move.depth == DEFAULT_MAX_DEPTH {
+                if !ponder.is_pondering() && root_move.depth == MAX_ITERATIVE_DEEPENING_DEPTH {
                     post_hit_currmoves.set(post_hit_currmoves.get() + 1);
                 }
             });
@@ -5127,7 +5128,7 @@ mod tests {
             &stop,
             parameters,
             |iteration| {
-                if iteration.depth == DEFAULT_MAX_DEPTH {
+                if iteration.depth == MAX_ITERATIVE_DEEPENING_DEPTH {
                     ceiling_iterations.set(ceiling_iterations.get() + 1);
                     if ponder.is_pondering() {
                         ponder.ponderhit();
@@ -5151,6 +5152,51 @@ mod tests {
             "the callback-seam ponderhit must spend the rebased budget, got {:?}",
             result.elapsed
         );
+    }
+
+    #[test]
+    fn clocked_ponder_without_a_primary_limit_uses_the_analysis_ceiling() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position =
+            Position::from_fen("7k/8/6QK/8/8/8/8/8 w - - 0 1", false).expect("valid test FEN");
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let ponder = PonderState::new();
+        let deepest = AtomicU32::new(0);
+        let parameters =
+            WorkerParameters::new(0, 0, &counters, &shared_history, network).with_ponder(&ponder);
+
+        thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_secs(2));
+                ponder.abort();
+            });
+            let result = search_worker_with_history_callback_options(
+                &position,
+                &history,
+                &table,
+                SearchLimits {
+                    soft_time: Some(Duration::from_millis(100)),
+                    hard_time: Some(Duration::from_millis(400)),
+                    use_clock_management: true,
+                    ..SearchLimits::default()
+                },
+                SearchOptions::default(),
+                &stop,
+                parameters,
+                |iteration| {
+                    deepest.fetch_max(iteration.depth, Ordering::Relaxed);
+                },
+            );
+
+            assert_eq!(deepest.load(Ordering::Relaxed), MAX_SEARCH_PLY as u32);
+            assert_eq!(result.depth, MAX_SEARCH_PLY as u32);
+        });
     }
 
     #[test]
@@ -5749,23 +5795,32 @@ mod tests {
             infinite: true,
             ..SearchLimits::default()
         };
-        assert_eq!(iteration_ceiling(&infinite), MAX_ITERATIVE_DEEPENING_DEPTH);
+        assert_eq!(
+            iteration_ceiling(&infinite, false),
+            MAX_ITERATIVE_DEEPENING_DEPTH
+        );
 
         // An `infinite` request carrying a depth is still infinite: `search_limits`
         // drops the depth, and the ceiling must not resurrect it.
         assert_eq!(
-            iteration_ceiling(&SearchLimits {
-                depth: Some(4),
-                ..infinite
-            }),
+            iteration_ceiling(
+                &SearchLimits {
+                    depth: Some(4),
+                    ..infinite
+                },
+                true,
+            ),
             MAX_ITERATIVE_DEEPENING_DEPTH
         );
 
         let at = |depth| {
-            iteration_ceiling(&SearchLimits {
-                depth: Some(depth),
-                ..SearchLimits::default()
-            })
+            iteration_ceiling(
+                &SearchLimits {
+                    depth: Some(depth),
+                    ..SearchLimits::default()
+                },
+                true,
+            )
         };
         assert_eq!(at(0), 1, "depth 0 still owes the GUI one iteration");
         assert_eq!(at(12), 12, "a depth within the ceiling is honoured exactly");
@@ -5775,7 +5830,21 @@ mod tests {
 
         // No depth at all keeps the historical default.
         assert_eq!(
-            iteration_ceiling(&SearchLimits::default()),
+            iteration_ceiling(&SearchLimits::default(), false),
+            DEFAULT_MAX_DEPTH
+        );
+        assert_eq!(
+            iteration_ceiling(&SearchLimits::default(), true),
+            MAX_ITERATIVE_DEEPENING_DEPTH
+        );
+        assert_eq!(
+            iteration_ceiling(
+                &SearchLimits {
+                    nodes: Some(10_000),
+                    ..SearchLimits::default()
+                },
+                true,
+            ),
             DEFAULT_MAX_DEPTH
         );
     }
