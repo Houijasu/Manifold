@@ -605,6 +605,51 @@ fn readiness_unknown_commands_and_quit_are_safe() {
 }
 
 #[test]
+fn malformed_finite_go_returns_one_legal_bestmove_and_exits_cleanly() {
+    let position = Position::startpos();
+    let legal_moves: Vec<_> = generate_legal_moves(&position)
+        .into_iter()
+        .map(|mv| format_uci_move(&position, *mv, false))
+        .collect();
+    let mut engine = InteractiveUci::spawn();
+
+    engine.send("position startpos");
+    engine.send("go depth banana");
+    assert_eq!(
+        engine.receive_until(watchdog(Duration::from_secs(2)), |line| {
+            line == "info string ignoring unrecognized go arguments: depth banana"
+        }),
+        Some("info string ignoring unrecognized go arguments: depth banana".to_string())
+    );
+    let bestmove = engine
+        .receive_until(watchdog(Duration::from_secs(2)), |line| {
+            line.starts_with("bestmove ")
+        })
+        .expect("the emergency node budget should return a bestmove");
+    let mv = bestmove
+        .strip_prefix("bestmove ")
+        .expect("bestmove prefix")
+        .split_whitespace()
+        .next()
+        .expect("bestmove carries a move");
+    assert!(
+        legal_moves.iter().any(|legal| legal == mv),
+        "emergency search returned illegal move {mv}"
+    );
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+    assert!(
+        engine
+            .child
+            .try_wait()
+            .expect("process status should be readable")
+            .expect("process should have exited")
+            .success()
+    );
+}
+
+#[test]
 fn malformed_no_argument_commands_are_ignored() {
     let output = run_uci(&[
         "uci trailing",
