@@ -223,28 +223,40 @@ function Publish-PgoStaging {
         [string]$StagingDirectory,
         [string]$FinalDirectory,
         [string]$BackupDirectory,
-        [scriptblock]$ValidatePublished
+        [scriptblock]$ValidatePublished,
+        [scriptblock]$MovePath = {
+            param([string]$LiteralPath, [string]$Destination)
+            Move-Item -LiteralPath $LiteralPath -Destination $Destination
+        }
     )
 
     if (Test-Path -LiteralPath $BackupDirectory) {
         throw (New-PgoFailure "ABORT: stale PGO publication backup requires inspection: $BackupDirectory." 8)
     }
     $hadFinalDirectory = Test-Path -LiteralPath $FinalDirectory
+    $backupMoveSucceeded = $false
+    $stagingInstallAttempted = $false
     try {
         if ($hadFinalDirectory) {
-            Move-Item -LiteralPath $FinalDirectory -Destination $BackupDirectory
+            & $MovePath $FinalDirectory $BackupDirectory
+            $backupMoveSucceeded = $true
         }
-        Move-Item -LiteralPath $StagingDirectory -Destination $FinalDirectory
+        $stagingInstallAttempted = $true
+        & $MovePath $StagingDirectory $FinalDirectory
         & $ValidatePublished
-        if ($hadFinalDirectory) {
+        if ($backupMoveSucceeded) {
             Remove-Item -LiteralPath $BackupDirectory -Recurse -Force
+            $backupMoveSucceeded = $false
         }
     } catch {
         $publicationFailure = $_
         try {
-            Remove-Item -LiteralPath $FinalDirectory -Recurse -Force -ErrorAction SilentlyContinue
-            if ($hadFinalDirectory -and (Test-Path -LiteralPath $BackupDirectory)) {
-                Move-Item -LiteralPath $BackupDirectory -Destination $FinalDirectory
+            if ($backupMoveSucceeded) {
+                Remove-Item -LiteralPath $FinalDirectory -Recurse -Force -ErrorAction SilentlyContinue
+                & $MovePath $BackupDirectory $FinalDirectory
+                $backupMoveSucceeded = $false
+            } elseif (-not $hadFinalDirectory -and $stagingInstallAttempted) {
+                Remove-Item -LiteralPath $FinalDirectory -Recurse -Force -ErrorAction SilentlyContinue
             }
         } catch {
             throw (New-PgoFailure "ABORT: PGO publication failed and rollback also failed: $($_.Exception.Message)" 8)

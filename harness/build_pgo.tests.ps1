@@ -62,6 +62,74 @@ $testRoot = Join-Path $root 'target\pgo-script-tests'
 $staging = Join-Path $testRoot 'staging'
 $final = Join-Path $testRoot 'final'
 $backup = Join-Path $testRoot 'backup'
+
+Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $staging | Out-Null
+New-Item -ItemType Directory -Path $final | Out-Null
+Set-Content (Join-Path $staging 'new.txt') 'new'
+Set-Content (Join-Path $final 'old.txt') 'old'
+$moveCalls = [ref]0
+try {
+    try {
+        Publish-PgoStaging -StagingDirectory $staging -FinalDirectory $final `
+            -BackupDirectory $backup -ValidatePublished {} -MovePath {
+                param([string]$LiteralPath, [string]$Destination)
+                $moveCalls.Value++
+                throw 'initial backup move failed'
+            }
+        throw 'initial backup failure must throw'
+    } catch {
+        if ($_.Exception.Message -eq 'initial backup failure must throw') { throw }
+        if ($_.Exception.Message -ne 'initial backup move failed') { throw }
+    }
+    if (-not (Test-Path (Join-Path $final 'old.txt'))) {
+        throw 'initial backup failure deleted the old publication'
+    }
+    if (Test-Path $staging) {
+        throw 'initial backup failure leaked staging'
+    }
+    if (Test-Path $backup) {
+        throw 'initial backup failure left a backup'
+    }
+    if ($moveCalls.Value -ne 1) {
+        throw 'initial backup failure attempted a destructive rollback move'
+    }
+
+    Remove-Item $testRoot -Recurse -Force
+    New-Item -ItemType Directory -Path $staging | Out-Null
+    New-Item -ItemType Directory -Path $final | Out-Null
+    Set-Content (Join-Path $staging 'new.txt') 'new'
+    Set-Content (Join-Path $final 'old.txt') 'old'
+    $moveCalls.Value = 0
+    try {
+        Publish-PgoStaging -StagingDirectory $staging -FinalDirectory $final `
+            -BackupDirectory $backup -ValidatePublished {} -MovePath {
+                param([string]$LiteralPath, [string]$Destination)
+                $moveCalls.Value++
+                if ($moveCalls.Value -eq 2) { throw 'staging move failed' }
+                Move-Item -LiteralPath $LiteralPath -Destination $Destination
+            }
+        throw 'post-backup staging failure must throw'
+    } catch {
+        if ($_.Exception.Message -eq 'post-backup staging failure must throw') { throw }
+        if ($_.Exception.Message -ne 'staging move failed') { throw }
+    }
+    if (-not (Test-Path (Join-Path $final 'old.txt'))) {
+        throw 'post-backup staging failure did not restore the old publication'
+    }
+    if (Test-Path $staging) {
+        throw 'post-backup staging failure leaked staging'
+    }
+    if (Test-Path $backup) {
+        throw 'post-backup staging failure left a backup'
+    }
+    if ($moveCalls.Value -ne 3) {
+        throw 'post-backup staging failure did not perform exactly one restore move'
+    }
+} finally {
+    Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $staging | Out-Null
 New-Item -ItemType Directory -Path $final | Out-Null
