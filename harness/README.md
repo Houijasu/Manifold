@@ -90,9 +90,15 @@ script that ends in `quit` aborts the search and manufactures convincing false p
 `.\harness\build_pgo.ps1 [-BenchRuns 3] [-MeasureNps]`
 
 Runs the `research/rust-perf-and-nnue-training.md` §0.5 PGO round-trip as one command:
-plain build (baseline preserved at `target\release\manifold-nopgo.exe`), instrumented
-`-Cprofile-generate` build, `bench` profiling runs, `llvm-profdata` merge from the pinned
-toolchain, `-Cprofile-use` rebuild, and provenance in `target\pgo\pgo-metadata.txt`.
+plain, instrumented `-Cprofile-generate`, and optimised `-Cprofile-use` builds isolated under
+`target\pgo-build\baseline`, `target\pgo-build\instrumented`, and
+`target\pgo-build\optimized`; `bench` profiling runs; `llvm-profdata` merge from the pinned
+toolchain; and provenance in `target\pgo\pgo-metadata.txt`.
+
+The verified copies are published as experimental artifacts at
+`target\pgo\manifold-nopgo.exe` and `target\pgo\manifold-pgo.exe`, each with an exact 40-hex
+`.source-commit` sidecar. The script never replaces `target\release\manifold.exe`; these PGO
+outputs are not shipping/release artifacts.
 
 Two things it enforces mechanically:
 
