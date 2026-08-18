@@ -2941,9 +2941,11 @@ fn pvs(
                     } else {
                         child_pv.clear();
                         #[cfg(feature = "instrumentation")]
-                        crate::instrumentation::record(|counters| {
-                            counters.full_depth_researches += 1;
-                        });
+                        crate::instrumentation::record_full_depth_research(
+                            reduced_depth,
+                            verification_depth,
+                            child_depth,
+                        );
                         pvs(
                             position,
                             verification_depth,
@@ -2965,6 +2967,12 @@ fn pvs(
                 };
                 if score > alpha && score < beta {
                     child_pv.clear();
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record_full_depth_research(
+                        reduced_depth,
+                        child_depth,
+                        child_depth,
+                    );
                     pvs(
                         position,
                         child_depth,

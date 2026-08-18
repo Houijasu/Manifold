@@ -9,33 +9,31 @@ use mf_search::{
     search_counters,
 };
 
-fn network() -> Option<Network> {
+fn network() -> Network {
     let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
     let path = explicit_path.clone().map_or_else(
         || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
         PathBuf::from,
     );
     if !path.is_file() {
-        assert!(
-            explicit_path.is_none(),
-            "MF_NNUE_TEST_NET requires an existing network file: {}",
+        if explicit_path.is_some() {
+            panic!(
+                "MF_NNUE_TEST_NET requires an existing network file: {}",
+                path.display()
+            );
+        }
+        panic!(
+            "search instrumentation requires an NNUE fixture; set MF_NNUE_TEST_NET or provision {}",
             path.display()
         );
-        eprintln!("SKIPPED: search instrumentation needs {}", path.display());
-        return None;
     }
-    Some(
-        Network::load(&path).unwrap_or_else(|error| {
-            panic!("failed to load NNUE network {}: {error}", path.display())
-        }),
-    )
+    Network::load(&path)
+        .unwrap_or_else(|error| panic!("failed to load NNUE network {}: {error}", path.display()))
 }
 
 #[test]
 fn instrumentation_counts_a_search_and_resets_between_searches() {
-    let Some(network) = network() else {
-        return;
-    };
+    let network = network();
     let position = Position::startpos();
 
     reset_search_counters();
