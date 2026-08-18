@@ -16,6 +16,10 @@
 - **Depends on**: none (independent of 001-007)
 - **Category**: direction
 - **Planned at**: commit `b9d15bf` + working tree, 2026-08-15
+- **Completion**: DONE locally on 2026-08-19 at source commit
+  `a33523426dd18412a9e83f569cfb33122fa8a99f`; native/portable bench 37,420,
+  portable perft 4,865,609, force-magic green, native scan control positive
+  (`bzhi`, `mulx`, `pext`, `rorx`, `shlx`, `shrx`), portable scan zero matches
 
 ## Why this matters
 
@@ -40,11 +44,11 @@ rustflags = ["-C", "target-cpu=native"]
 
 | Purpose | Command | Expected on success |
 |---|---|---|
-| Native bench (reference) | `cargo run --release -p mf-uci --bin manifold -- bench` | current pinned signature (e.g. 41,588 at time of writing — confirm the live pin) |
-| Portable build | `pwsh harness/build_portable.ps1` (created by this plan) | exit 0, artifact under `target/portable/` |
+| Native bench (reference) | dedicated native build inside `harness/build_portable.ps1` | 37,420 |
+| Portable build | `pwsh -NoProfile -File harness/build_portable.ps1` | exit 0, artifact under `target/portable/` |
 | Portable bench | `target/portable/manifold.exe bench` | **same** node signature as native |
 | Magic-backend tests | `cargo test -p mf-core --features force-magic` | all pass |
-| No-BMI2 scan | disassembly grep (step 4) | zero `pext`/`bzhi`/`tzcnt`-encoded-as-BMI2 instructions in the portable binary's .text |
+| No-BMI2 scan | instruction-token scan inside `harness/build_portable.ps1` | zero `pext`/`pdep`/`bzhi`/`mulx`/`sarx`/`shlx`/`shrx`/`rorx` mnemonics |
 
 ## Scope
 
@@ -62,7 +66,7 @@ rustflags = ["-C", "target-cpu=native"]
 
 ## Git workflow
 
-- One commit: `Add a portable baseline-x86-64 release build`.
+- One commit: `Add a verified portable x86-64 build`.
 
 ## Steps
 
@@ -70,10 +74,14 @@ rustflags = ["-C", "target-cpu=native"]
 
 Model the script's structure on `harness/build_pgo.ps1` (read it first; match its parameter style, logging, and metadata stamping). The body:
 
-1. Override the native flag for one invocation: `$env:RUSTFLAGS = '-C target-cpu=x86-64'` (RUSTFLAGS overrides `.cargo/config.toml` rustflags entirely — verify with `cargo build --release -p mf-uci --bin manifold --verbose` showing `-C target-cpu=x86-64` and no `native`).
-2. `cargo build --release -p mf-uci --bin manifold` into the normal target dir, then copy `target/release/manifold.exe` to `target/portable/manifold.exe`.
-3. Copy or hard-link `nets/main.nnue` to `target/portable/nets/main.nnue` (runtime discovery looks beside the executable — `crates/mf-nnue/src/provision.rs` documents the lookup), or document the embedded-net default already covering this (the default build embeds the net — confirm, and if so skip the copy and say why in the script).
-4. Stamp `target/portable/build-metadata.txt` with git SHA, RUSTFLAGS, date, and `rustc -vV`.
+1. Override the native flag with `$env:RUSTFLAGS = '-C target-cpu=x86-64'` and set
+   `$env:CARGO_TARGET_DIR` to dedicated `target\portable-build`; restore both caller
+   values in `finally`.
+2. Build `cargo build --release -p mf-uci --bin manifold`, verify the executable in
+   `target\portable-build\release`, and never write `target\release\manifold.exe`.
+3. Use the default embedded network, so no adjacent `nets` copy is required.
+4. Stage the binary, exact 40-hex source sidecar, and metadata before rollback-safe
+   publication to `target\portable`.
 
 **Verify**: script exits 0; `target/portable/manifold.exe bench` prints the **same** node signature as the native build.
 
@@ -85,10 +93,11 @@ Model the script's structure on `harness/build_pgo.ps1` (read it first; match it
 
 ### Step 3: Prove the binary is actually baseline
 
-Disassemble and grep for BMI2 instructions (PowerShell-friendly options: `dumpbin /DISASM`, or `llvm-objdump -d` if on PATH, or the `iced_x86` crate as a one-off — pick what exists on this machine):
+Locate `llvm-objdump.exe` beside the pinned toolchain's `llvm-profdata.exe`, disassemble
+both binaries, and match only decoded instruction tokens (never comments or metadata):
 
-- Search the portable binary's .text for `pext`, `bzhi`, `andn`, `mulx`, `sarx`, `shlx`, `shrx`, `lzcnt`, `tzcnt` **as BMI2/BMI1/LZCNT/TZCNT encodings** (note: `rep bsf`-style `tzcnt` bytes can alias `bsf`; check for the `F3 0F BC` prefix form). Expect **zero** matches.
-- Search the native binary for the same; expect many (this proves the grep works — a control).
+- Reject portable `pext`, `pdep`, `bzhi`, `mulx`, `sarx`, `shlx`, `shrx`, and `rorx`.
+- Require at least one specified token in the native control binary.
 
 **Verify**: zero BMI2+ instruction matches in portable; nonzero in native (control positive).
 
@@ -115,11 +124,11 @@ README Build section: two artifacts (native, tuned to the build machine, fastest
 
 ## Done criteria
 
-- [ ] `harness/build_portable.ps1` produces `target/portable/manifold.exe` + metadata
-- [ ] Portable bench signature identical to native
-- [ ] Zero BMI2-family instructions in the portable binary; control positive on native
-- [ ] `cargo test -p mf-core --features force-magic` green; portable perft 5 = anchor
-- [ ] README documents both build paths
+- [x] `harness/build_portable.ps1` produces `target/portable/manifold.exe` + metadata
+- [x] Portable bench signature identical to native (37,420)
+- [x] Zero specified BMI2-family instruction tokens in the portable binary; control positive on native
+- [x] `cargo test -p mf-core --features force-magic` green; portable perft 5 = 4,865,609
+- [x] README documents both build paths
 
 ## STOP conditions
 

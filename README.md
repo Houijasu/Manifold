@@ -13,20 +13,33 @@ competitive with top engines. Interfaces and defaults may change without notice.
 
 Requires a stable Rust toolchain recent enough for edition 2024.
 
-```
+```text
 cargo build --release
 ```
 
-The binary is `target/release/manifold` (`manifold.exe` on Windows).
+This produces the fastest binary for the build machine at `target/release/manifold`
+(`manifold.exe` on Windows). `.cargo/config.toml` sets `target-cpu=native`, so this
+artifact can use BMI2 and other local CPU features and may not run on older CPUs.
 
-Two build details matter:
+For a verified baseline x86-64 Windows build:
 
-- `.cargo/config.toml` compiles with `target-cpu=native`, so the release binary is
-  tuned to the machine that built it and will not run on older CPUs.
-- The default `embedded-net` feature embeds the network into the binary, so a GUI can
-  launch the engine from any working directory. `EvalFile` (below) overrides it at
-  runtime. A build with `--no-default-features` has *no* fallback evaluation and cannot
-  search without an `EvalFile`.
+```powershell
+pwsh -NoProfile -File harness/build_portable.ps1
+```
+
+The verified artifact is `target/portable/manifold.exe`, with its exact source commit
+in `manifold.exe.source-commit` and build evidence in `build-metadata.txt`. The script
+builds in dedicated `target/native-build` and `target/portable-build` directories,
+leaves `target/release/manifold.exe` byte-for-byte unchanged, and publishes only after
+bench, perft, force-magic, and disassembly gates pass. It requires Rust's
+`llvm-tools-preview` component for `llvm-objdump`; if absent, follow the exact install
+command printed by the script. The portable build runs on baseline x86-64 machines but
+is meaningfully slower than the native build on BMI2-capable CPUs.
+
+The default `embedded-net` feature embeds the network into both binaries, so a GUI can
+launch either engine from any working directory. `EvalFile` (below) overrides it at
+runtime. A build with `--no-default-features` has *no* fallback evaluation and cannot
+search without an `EvalFile`.
 
 ## Run
 

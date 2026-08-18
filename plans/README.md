@@ -15,7 +15,7 @@ Note: the repo's earlier feature plans live in `docs/plans/` (multipv, syzygy, p
 | 005  | NNUE hash validation + king-move prefetches | P2 | S | — | DONE (bench 40705 unchanged; all mf-nnue tests green) |
 | 006  | Targeted TT-move legality predicate | P2 | S-M | after 001/002 (bench re-pin collisions only) | DONE (bench 40705 unchanged; equivalence + fuzz differential green) |
 | 007  | CI + stale repo map | P2 | M | — | IN PROGRESS (CI and checksum-pinned net provisioning implemented locally; remote Windows and Ubuntu jobs not yet run) |
-| 008  | Portable release build | P2 | S-M | — | TODO |
+| 008  | Portable release build | P2 | S-M | — | DONE locally (bench native/portable 37420; perft 4865609; force-magic green; native scan control positive; portable BMI2-token scan clean) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 

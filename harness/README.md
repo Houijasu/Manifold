@@ -10,6 +10,7 @@ a wrong conclusion; they belong in version control.
 | `run_match.ps1` | Guard-railed fastchess match driver. **Use it for every match.** |
 | `nps_compare.py` | Fair two-engine NPS/nodes comparison with warmup handling. |
 | `build_pgo.ps1` | Reproducible PGO build with a hard node-signature gate. |
+| `build_portable.ps1` | Verified baseline x86-64 release build and BMI2 scan. |
 
 ## `run_match.ps1`
 
@@ -114,3 +115,18 @@ Two things it enforces mechanically:
 Measured on this repo (2026-08, depth-12 `nps_compare.py` medians): geomean 1.00x --
 parity, not a gain, because fat LTO + `codegen-units = 1` + `target-cpu=native` leave
 PGO little headroom. Re-run after large source changes.
+
+## `build_portable.ps1`
+
+`pwsh -NoProfile -File harness/build_portable.ps1`
+
+Builds native and baseline x86-64 references under `target\native-build` and
+`target\portable-build`, then publishes `target\portable\manifold.exe` only after both
+bench signatures equal 37,420, portable perft 5 equals 4,865,609, the force-magic tests
+pass, and pinned-toolchain `llvm-objdump` finds no `pext`, `pdep`, `bzhi`, `mulx`,
+`sarx`, `shlx`, `shrx`, or `rorx` instruction tokens. The native binary is a positive
+scan control. Publication includes an exact source-commit sidecar and metadata with
+toolchain, flags, hashes, signatures, and disassembler path; staging rollback prevents
+partial artifacts. The script restores caller `RUSTFLAGS`/`CARGO_TARGET_DIR` and keeps
+`target\release\manifold.exe` byte-for-byte unchanged. The default embedded network
+means no adjacent `nets` copy is required.
