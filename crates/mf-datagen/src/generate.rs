@@ -1,6 +1,7 @@
 //! Deterministic self-play generation of training records.
 
 use std::collections::{BTreeMap, HashSet};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 
@@ -145,7 +146,11 @@ where
     generate_from(config, 0, network, tablebases, sink, |_, _| Ok(()))
 }
 
-/// Generates records starting at `first_game`, reporting progress after each whole game.
+/// Generates records for `[first_game, config.games)` in canonical game order.
+///
+/// `progress` runs after each complete game is emitted. Its first argument is the
+/// absolute number of completed games, so a restarted run beginning at game 12 first
+/// reports 13.
 pub fn generate_from<S, P>(
     config: GenerateConfig,
     first_game: u64,
@@ -207,26 +212,32 @@ where
             let make_worker = &make_worker;
             let play = &play;
             scope.spawn(move || {
-                let mut worker = match make_worker() {
-                    Ok(worker) => worker,
-                    Err(error) => {
-                        let _ = sender.send(Err(error));
-                        return;
+                let panic_sender = sender.clone();
+                let result = catch_unwind(AssertUnwindSafe(move || {
+                    let mut worker = match make_worker() {
+                        Ok(worker) => worker,
+                        Err(error) => {
+                            let _ = sender.send(Err(error));
+                            return;
+                        }
+                    };
+                    loop {
+                        if cancelled.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        let index = next_game.fetch_add(1, Ordering::Relaxed);
+                        if index >= config.games {
+                            return;
+                        }
+                        let result = play(&mut worker, index);
+                        let failed = result.is_err();
+                        if sender.send(result).is_err() || failed {
+                            return;
+                        }
                     }
-                };
-                loop {
-                    if cancelled.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    let index = next_game.fetch_add(1, Ordering::Relaxed);
-                    if index >= config.games {
-                        return;
-                    }
-                    let result = play(&mut worker, index);
-                    let failed = result.is_err();
-                    if sender.send(result).is_err() || failed {
-                        return;
-                    }
+                }));
+                if result.is_err() {
+                    let _ = panic_sender.send(Err("datagen worker panicked".to_string()));
                 }
             });
         }
@@ -237,10 +248,8 @@ where
             let mut pending = BTreeMap::new();
             let mut next_to_emit = first_game;
 
-            while next_to_emit < config.games {
-                let output = receiver.recv().map_err(|_| {
-                    "datagen workers stopped before every game was produced".to_string()
-                })??;
+            while let Ok(output) = receiver.recv() {
+                let output = output?;
                 pending.insert(output.index, output);
 
                 while let Some(output) = pending.remove(&next_to_emit) {
@@ -251,7 +260,11 @@ where
                 }
             }
 
-            Ok(stats)
+            if next_to_emit < config.games {
+                Err("datagen workers stopped before every game was produced".to_string())
+            } else {
+                Ok(stats)
+            }
         })();
 
         if result.is_err() {
@@ -623,6 +636,164 @@ mod tests {
         .expect_err("sink failure must end generation");
         assert_eq!(error, "disk full");
         assert!(claimed.load(Ordering::Relaxed) < config.games);
+    }
+
+    #[test]
+    fn a_late_worker_initialization_error_is_not_lost_after_the_final_game() {
+        let worker_number = AtomicU64::new(0);
+        let release_failure = AtomicBool::new(false);
+        let config = GenerateConfig {
+            games: 1,
+            threads: 2,
+            ..GenerateConfig::default()
+        };
+        let error = generate_with_worker(
+            config,
+            0,
+            || {
+                if worker_number.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(())
+                } else {
+                    while !release_failure.load(Ordering::SeqCst) {
+                        std::thread::yield_now();
+                    }
+                    Err("late worker initialization failed".to_string())
+                }
+            },
+            |_, index| {
+                release_failure.store(true, Ordering::SeqCst);
+                Ok(empty_output(index))
+            },
+            |_| Ok(()),
+            |_, _| Ok(()),
+        )
+        .expect_err("every worker initialization result must be observed");
+        assert_eq!(error, "late worker initialization failed");
+    }
+
+    #[test]
+    fn a_worker_panic_is_returned_as_an_error() {
+        let config = GenerateConfig {
+            games: 1,
+            threads: 1,
+            ..GenerateConfig::default()
+        };
+        let error = generate_with_worker(
+            config,
+            0,
+            || Ok(()),
+            |_, _| panic!("worker exploded"),
+            |_| Ok(()),
+            |_, _| Ok(()),
+        )
+        .expect_err("worker panics must not escape the Result API");
+        assert_eq!(error, "datagen worker panicked");
+    }
+
+    #[test]
+    fn a_nonzero_restart_emits_the_requested_range_in_order_and_reports_absolute_progress() {
+        let claimed = AtomicU64::new(0);
+        let mut progress = Vec::new();
+        let mut sink_calls = 0;
+        let config = GenerateConfig {
+            games: 5,
+            threads: 3,
+            ..GenerateConfig::default()
+        };
+        let stats = generate_with_worker(
+            config,
+            2,
+            || Ok(()),
+            |_, index| {
+                claimed.fetch_or(1 << index, Ordering::SeqCst);
+                if index == 2 {
+                    while claimed.load(Ordering::SeqCst) & ((1 << 3) | (1 << 4))
+                        != (1 << 3) | (1 << 4)
+                    {
+                        std::thread::yield_now();
+                    }
+                }
+                let mut output = empty_output(index);
+                output.stats.considered = index;
+                Ok(output)
+            },
+            |_| {
+                sink_calls += 1;
+                Ok(())
+            },
+            |completed, stats| {
+                progress.push((completed, stats.games, stats.considered));
+                Ok(())
+            },
+        )
+        .expect("the restarted range must complete");
+
+        assert_eq!(
+            claimed.load(Ordering::SeqCst),
+            (1 << 2) | (1 << 3) | (1 << 4)
+        );
+        assert_eq!(sink_calls, 3);
+        assert_eq!(stats.games, 3);
+        assert_eq!(
+            progress,
+            vec![(3, 1, 2), (4, 2, 5), (5, 3, 9)],
+            "progress must follow canonical game order"
+        );
+    }
+
+    #[test]
+    fn a_progress_error_cancels_before_the_run_claims_every_game() {
+        let claimed = AtomicU64::new(0);
+        let progress_failed = AtomicBool::new(false);
+        let config = GenerateConfig {
+            games: 10_000,
+            threads: 4,
+            ..GenerateConfig::default()
+        };
+        let error = generate_with_worker(
+            config,
+            0,
+            || Ok(()),
+            |_, index| {
+                claimed.fetch_add(1, Ordering::Relaxed);
+                if index != 0 {
+                    while !progress_failed.load(Ordering::Relaxed) {
+                        std::thread::yield_now();
+                    }
+                }
+                Ok(empty_output(index))
+            },
+            |_| Ok(()),
+            |_, _| {
+                progress_failed.store(true, Ordering::Relaxed);
+                Err("checkpoint failed".to_string())
+            },
+        )
+        .expect_err("progress failure must end generation");
+        assert_eq!(error, "checkpoint failed");
+        assert!(claimed.load(Ordering::Relaxed) < config.games);
+    }
+
+    #[test]
+    fn a_premature_channel_disconnect_has_the_stable_error_text() {
+        let config = GenerateConfig {
+            games: 1,
+            threads: 1,
+            ..GenerateConfig::default()
+        };
+        let error = generate_with_worker(
+            config,
+            0,
+            || Ok(()),
+            |_, index| Ok(empty_output(index + 1)),
+            |_| Ok(()),
+            |_, _| Ok(()),
+        )
+        .expect_err("a missing requested game must be diagnosed");
+        assert_eq!(
+            error,
+            "datagen workers stopped before every game was produced"
+        );
     }
 
     /// Self-play evaluates with NNUE, so datagen tests need a network.
