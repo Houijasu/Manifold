@@ -5281,6 +5281,22 @@ mod tests {
         }
     }
 
+    struct EveryPositionTablebase(Wdl);
+
+    impl TablebaseProbe for EveryPositionTablebase {
+        fn max_pieces(&self) -> usize {
+            32
+        }
+
+        fn probe_wdl(&self, _position: &Position) -> Option<Wdl> {
+            Some(self.0)
+        }
+
+        fn preserving_root_moves(&self, _position: &Position) -> Option<Vec<Move>> {
+            None
+        }
+    }
+
     struct DirectTablebaseResult {
         score: i32,
         entry: EntryData,
@@ -5411,6 +5427,42 @@ mod tests {
         assert_eq!(probe.entry.bound, Bound::Lower);
         assert_eq!(tt_entry_depth(probe.entry.depth), 4 + SYZYGY_TT_DEPTH_BONUS);
         assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn tablebase_draw_cutoff_is_exact_with_six_ply_tt_depth_bonus() {
+        let probe =
+            direct_tablebase_pvs("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", Wdl::Draw, 4, -1, 1, false);
+
+        assert_eq!(probe.score, 0);
+        assert_eq!(probe.entry.bound, Bound::Exact);
+        assert_eq!(tt_entry_depth(probe.entry.depth), 4 + SYZYGY_TT_DEPTH_BONUS);
+        assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn tablebase_loss_upper_cutoff_has_six_ply_tt_depth_bonus() {
+        let probe =
+            direct_tablebase_pvs("8/8/8/8/8/2k5/8/K2Q4 b - - 0 1", Wdl::Loss, 4, 0, 1, false);
+
+        assert_eq!(probe.score, -(TABLEBASE_SCORE - 1));
+        assert_eq!(probe.entry.bound, Bound::Upper);
+        assert_eq!(tt_entry_depth(probe.entry.depth), 4 + SYZYGY_TT_DEPTH_BONUS);
+        assert_eq!(probe.tb_hits, 1);
+    }
+
+    #[test]
+    fn fixed_depth_search_publishes_interior_tablebase_hits() {
+        let position = Position::startpos();
+        let result =
+            fixed_depth_tablebase_search(&position, Some(&EveryPositionTablebase(Wdl::Draw)));
+
+        assert!(result.tbhits > 0);
+        assert!(!result.iterations.is_empty());
+        assert_eq!(
+            result.iterations.last().map(|iteration| iteration.tbhits),
+            Some(result.tbhits)
+        );
     }
 
     #[test]
