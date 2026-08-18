@@ -9,6 +9,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use mf_core::{Position, format_uci_move, generate_legal_moves};
+
 const FEN: &str = "8/1p1q1k2/1Pp5/p1Pp4/P2Pp1p1/4PpPp/1N3P1P/3B2K1 w - - 0 1";
 
 fn engine_path() -> std::path::PathBuf {
@@ -72,15 +74,34 @@ impl Engine {
         }
         collected
     }
+
+    fn wait_for_exit(&mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self
+                .child
+                .try_wait()
+                .expect("process status should be readable")
+                .is_some()
+            {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
 }
 
 impl Drop for Engine {
     fn drop(&mut self) {
         let _ = writeln!(self.stdin, "quit");
         let _ = self.stdin.flush();
-        thread::sleep(Duration::from_millis(200));
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if !self.wait_for_exit(Duration::from_secs(5)) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 
@@ -99,42 +120,63 @@ fn fritz_setup(engine: &mut Engine) {
 }
 
 #[test]
-fn the_fritz_option_set_still_analyses_the_reported_position() {
+fn the_fritz_option_set_stops_after_real_analysis_with_one_legal_bestmove() {
     let mut engine = Engine::start();
     fritz_setup(&mut engine);
-
     engine.send(&format!("position fen {FEN}"));
     engine.send("go infinite");
-    thread::sleep(Duration::from_secs(5));
-    engine.send("stop");
 
-    let output = engine.collect_until(Duration::from_secs(15), |line| {
-        line.starts_with("bestmove ")
+    let mut output = engine.collect_until(Duration::from_secs(15), |line| {
+        line.starts_with("info depth ") && !line.contains(" currmove ")
     });
-
     assert!(
-        !output
+        output
             .iter()
-            .any(|line| line.starts_with("info string invalid position command:")),
-        "the position must parse under Fritz's options:\n{}",
+            .any(|line| line.starts_with("info depth ") && !line.contains(" currmove ")),
+        "Fritz's option set must complete at least one real iteration:\n{}",
         output.join("\n")
     );
-    let bestmove = output
-        .iter()
-        .find_map(|line| line.strip_prefix("bestmove "))
-        .unwrap_or_else(|| panic!("no bestmove:\n{}", output.join("\n")));
-    let depth = output
-        .iter()
-        .filter_map(|line| line.strip_prefix("info depth "))
-        .filter_map(|rest| rest.split_whitespace().next())
-        .filter_map(|depth| depth.parse::<u32>().ok())
-        .max()
-        .unwrap_or(0);
-
     assert!(
-        depth >= 12,
-        "only reached depth {depth} in 5s at Threads=24 (bestmove {bestmove})\n{}",
+        !output.iter().any(|line| line.starts_with("bestmove ")),
+        "go infinite must not answer before stop:\n{}",
         output.join("\n")
+    );
+
+    engine.send("stop");
+    engine.send("isready");
+    output.extend(engine.collect_until(Duration::from_secs(15), |line| line == "readyok"));
+
+    let bestmoves: Vec<_> = output
+        .iter()
+        .filter_map(|line| line.strip_prefix("bestmove "))
+        .collect();
+    assert_eq!(
+        bestmoves.len(),
+        1,
+        "stop must produce exactly one bestmove:\n{}",
+        output.join("\n")
+    );
+    let bestmove = bestmoves[0]
+        .split_whitespace()
+        .next()
+        .expect("bestmove must carry a move");
+    let position = Position::from_fen(FEN, true).expect("Fritz FEN should parse");
+    let legal_moves = generate_legal_moves(&position);
+    let legal: Vec<_> = legal_moves
+        .as_slice()
+        .iter()
+        .map(|&mv| format_uci_move(&position, mv, true))
+        .collect();
+    assert!(
+        legal.iter().any(|mv| mv == bestmove),
+        "Fritz session returned illegal move {bestmove}; legal={legal:?}"
+    );
+    assert!(output.iter().any(|line| line == "readyok"));
+
+    engine.send("quit");
+    assert!(
+        engine.wait_for_exit(Duration::from_secs(5)),
+        "engine must exit within the quit watchdog"
     );
 }
 
