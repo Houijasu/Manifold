@@ -16,12 +16,21 @@ fn every_semicolon_delimited_path_segment_is_trimmed() {
     let first = unique_temp_dir("syzygy-first");
     let second = unique_temp_dir("syzygy-second");
     fs::create_dir_all(&first).expect("first fixture directory should be created");
-    fs::create_dir_all(&second).expect("second fixture directory should be created");
 
     let paths = format!("  {}  ;\t{}\t", first.display(), second.display());
     let opened = Tablebases::new(&paths);
-
     fs::remove_dir_all(&first).expect("first fixture directory should be removed");
+    assert!(
+        opened.is_ok(),
+        "the trimmed first directory should be accepted"
+    );
+
+    fs::create_dir_all(&second).expect("second fixture directory should be created");
+    let paths = format!("  {}  ;\t{}\t", first.display(), second.display());
+    let opened = Tablebases::new(&paths);
     fs::remove_dir_all(&second).expect("second fixture directory should be removed");
-    assert!(opened.is_ok(), "trimmed existing directories should be accepted");
+    assert!(
+        opened.is_ok(),
+        "the trimmed second directory should be accepted"
+    );
 }
