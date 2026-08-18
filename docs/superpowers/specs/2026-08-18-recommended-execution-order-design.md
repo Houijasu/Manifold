@@ -134,6 +134,10 @@ Replace:
 - tests that wait for a scheduler-dependent depth before issuing `stop` with a
   deterministic condition such as observing at least one completed iteration, a node
   budget, or a test-only state transition.
+- `fritz_session.rs`'s unconditional five-second sleep and `depth >= 12` quality
+  assertion with a protocol-condition test: wait for one completed iteration, send
+  `stop`, require exactly one legal `bestmove`, send `quit`, and require process exit
+  within a watchdog deadline.
 
 Do not weaken protocol properties: `bestmove` cardinality, legality, monotone completed
 iterations, no answer before `stop`/`ponderhit`, and hard-budget enforcement remain
@@ -180,9 +184,13 @@ harness rewrites remain outside this execution.
 - Update `AGENTS.md` and `README.md` to describe all live crates, including `mf-tb`,
   `mf-tune`, and `mf-lab`, and the real UCI command/option surface including pondering,
   MultiPV, `SyzygyPath`, bench, and mtbench.
-- Replace the absent/stale root run-state concept by documenting
-  `experiments/<run-name>/` as the location for harness-owned run state; ignore only the
-  generated per-run PGN and any developer-owned root `/config.json`.
+- Move the tracked, non-portable root `config.json` unchanged to
+  `experiments/legacy-root-fastchess-config/config.json`. Add a colocated README stating
+  that the snapshot is historical experiment evidence, contains machine-specific stale
+  paths/run results, and is not a reusable config. Document
+  `experiments/<run-name>/` as the location for new harness-owned run state.
+- Add `/config.json` to the tracked ignore policy so future developer-owned root run
+  state remains local. Ignore only the generated per-run PGN in experiment directories.
 - Keep experiment evidence trackable. Do not ignore `experiments/` or broad extensions
   such as all `*.log`, `*.txt`, or `*.pgn` repository-wide.
 - Update plan-007 bookkeeping to state that the targeted map/config/ignore subset is
@@ -205,6 +213,12 @@ Do not run matches concurrently. Each run must complete with zero Manifold time
 forfeits, crashes, illegal moves, and “No output” failures. Store the command,
 binary hash, commit, seed, pentanomial result, Elo point estimate/error, and decision in
 an experiment result document.
+
+This machine's shared `.git/info/exclude` broadly ignores `experiments/`. Staging each
+new match result must therefore use `git add -f` scoped to that toggle's exact result
+directory, with an explicit pathspec exclusion for `games.pgn`. Never force-add the
+whole `experiments/` tree or the common
+`experiments/2026-08-18-recommended-order/` parent.
 
 #### Default-change validation policy
 
@@ -237,8 +251,8 @@ After default decisions:
 3. run `cargo test --workspace`;
 4. run `cargo test -p mf-core --features force-magic`;
 5. run release bench twice and require identical signatures;
-6. run release perft validation if the execution changes any move-generation behavior
-   (none is currently planned);
+6. always run `cargo test --release -p mf-core --test perft`, regardless of whether any
+   move-generation code changed;
 7. review the complete branch diff for accidental production changes, stale
    documentation, generated artifacts, and unsupported claims.
 

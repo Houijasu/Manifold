@@ -65,6 +65,9 @@ fastchess through `harness/run_match.ps1`.
   - ceiling-saturated ponder conversion and condition-based UCI behavior.
 - `crates/mf-uci/tests/movetime_budget.rs`
   - budget/legality assertions instead of minimum-depth assertions.
+- `crates/mf-uci/tests/fritz_session.rs`
+  - protocol-condition stop/legality/exit coverage instead of a five-second
+    sleep and depth-quality assertion.
 - `crates/mf-tb/tests/path_lists.rs`
   - whitespace-normalized semicolon path lists.
 - `crates/mf-search/tests/tablebase_integration.rs`
@@ -82,6 +85,10 @@ fastchess through `harness/run_match.ps1`.
 - `.gitignore`
   - root `config.json` and experiment `games.pgn` only; never ignore
     `experiments/` itself.
+- `experiments/legacy-root-fastchess-config/config.json`
+  - historical snapshot moved unchanged from the non-portable tracked root config.
+- `experiments/legacy-root-fastchess-config/README.md`
+  - explains why the snapshot is evidence and must not be reused as live config.
 - `plans/007-ci-and-repo-hygiene.md`, `plans/README.md`
   - targeted subset completion and remaining CI/net-provisioning work.
 - `experiments/2026-08-18-recommended-order/<toggle>/`
@@ -791,6 +798,7 @@ git commit -m $message
 - Modify: `crates/mf-uci/tests/movetime_budget.rs`
 - Modify: `crates/mf-uci/tests/uci_protocol.rs:1510-1725`
 - Modify: `crates/mf-uci/tests/uci_protocol.rs:2284-2335`
+- Modify: `crates/mf-uci/tests/fritz_session.rs`
 
 **Interfaces:**
 - Consumes: UCI `info ... time`, node counts, legal move generation, completed-iteration
@@ -881,7 +889,86 @@ assert!(reported < 80, "sample {sample} reported {reported} ms");
 Use the 10-second receive deadline only as a hang watchdog. Remove the debug/release
 wall-clock overshoot branches and their scheduler-specific commentary.
 
-- [ ] **Step 4: Stop finite/interrupted searches on observed conditions**
+- [ ] **Step 4: Replace the Fritz sleep/depth quality assertion**
+
+In `crates/mf-uci/tests/fritz_session.rs`:
+
+1. import `mf_core::{Position, format_uci_move, generate_legal_moves}`;
+2. add `Engine::wait_for_exit(&mut self, timeout: Duration) -> bool`, polling
+   `child.try_wait()` until a deadline and sleeping only 5 ms between polls;
+3. remove the unconditional 200 ms sleep from `Drop`; send `quit`, wait through the
+   same exit watchdog, then use `kill` only as cleanup fallback;
+4. replace `the_fritz_option_set_still_analyses_the_reported_position` with:
+
+```rust
+#[test]
+fn the_fritz_option_set_stops_after_real_analysis_with_one_legal_bestmove() {
+    let mut engine = Engine::start();
+    fritz_setup(&mut engine);
+    engine.send(&format!("position fen {FEN}"));
+    engine.send("go infinite");
+
+    let mut output = engine.collect_until(Duration::from_secs(15), |line| {
+        line.starts_with("info depth ") && !line.contains(" currmove ")
+    });
+    assert!(
+        output
+            .iter()
+            .any(|line| line.starts_with("info depth ") && !line.contains(" currmove ")),
+        "Fritz's option set must complete at least one real iteration:\n{}",
+        output.join("\n")
+    );
+    assert!(
+        !output.iter().any(|line| line.starts_with("bestmove ")),
+        "go infinite must not answer before stop:\n{}",
+        output.join("\n")
+    );
+
+    engine.send("stop");
+    engine.send("isready");
+    output.extend(engine.collect_until(Duration::from_secs(15), |line| line == "readyok"));
+
+    let bestmoves: Vec<_> = output
+        .iter()
+        .filter_map(|line| line.strip_prefix("bestmove "))
+        .collect();
+    assert_eq!(
+        bestmoves.len(),
+        1,
+        "stop must produce exactly one bestmove:\n{}",
+        output.join("\n")
+    );
+    let bestmove = bestmoves[0]
+        .split_whitespace()
+        .next()
+        .expect("bestmove must carry a move");
+    let position = Position::from_fen(FEN, true).expect("Fritz FEN should parse");
+    let legal_moves = generate_legal_moves(&position);
+    let legal: Vec<_> = legal_moves
+        .as_slice()
+        .iter()
+        .map(|&mv| format_uci_move(&position, mv, true))
+        .collect();
+    assert!(
+        legal.iter().any(|mv| mv == bestmove),
+        "Fritz session returned illegal move {bestmove}; legal={legal:?}"
+    );
+    assert!(output.iter().any(|line| line == "readyok"));
+
+    engine.send("quit");
+    assert!(
+        engine.wait_for_exit(Duration::from_secs(5)),
+        "engine must exit within the quit watchdog"
+    );
+}
+```
+
+Delete the five-second `thread::sleep`, the maximum-depth collection, and the
+`depth >= 12` assertion. The durations above are watchdog deadlines only; the pass
+conditions are completed iteration, pre-stop silence, one legal answer, readiness, and
+process exit.
+
+- [ ] **Step 5: Stop finite/interrupted searches on observed conditions**
 
 For `finite_search_can_be_stopped_before_its_budget_expires`, issue `stop` after the
 first completed iteration rather than requiring depth 2.
@@ -894,7 +981,7 @@ For `interrupted_iteration_does_not_duplicate_a_completed_depth`, wait until:
 Then send `stop` and retain the strict-increasing-depth assertion. The receive durations
 remain generous hang watchdogs, not quality thresholds.
 
-- [ ] **Step 5: Run the modified targets repeatedly**
+- [ ] **Step 6: Run the modified targets repeatedly**
 
 Run:
 
@@ -911,14 +998,23 @@ Run:
     cargo test -p mf-uci --test uci_protocol interrupted_iteration_does_not_duplicate -- --nocapture
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
+1..10 | ForEach-Object {
+    cargo test -p mf-uci --test fritz_session `
+      the_fritz_option_set_stops_after_real_analysis_with_one_legal_bestmove `
+      -- --nocapture
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 ```
 
-Expected: all 20 target runs exit 0.
+Expected: all 50 focused test invocations exit 0: 10 `movetime_budget`, 30 selected
+`uci_protocol`, and 10 Fritz-session runs.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```powershell
-git add crates/mf-uci/tests/movetime_budget.rs crates/mf-uci/tests/uci_protocol.rs
+git add crates/mf-uci/tests/movetime_budget.rs `
+  crates/mf-uci/tests/uci_protocol.rs `
+  crates/mf-uci/tests/fritz_session.rs
 git diff --cached --check
 $message = @"
 Make UCI budget tests condition based
@@ -1168,6 +1264,8 @@ four required STOP facts for the final report.
 - Modify: `AGENTS.md`
 - Modify: `README.md`
 - Modify: `.gitignore`
+- Move: `config.json` to `experiments/legacy-root-fastchess-config/config.json`
+- Create: `experiments/legacy-root-fastchess-config/README.md`
 - Modify: `plans/007-ci-and-repo-hygiene.md`
 - Modify: `plans/README.md`
 
@@ -1183,6 +1281,8 @@ Run these checks before editing and save the failing output in the task notes:
 ```powershell
 rg -n "stubs|config\.json|unsupported commands|mf-tb|SyzygyPath|ponder|mtbench" `
   AGENTS.md README.md
+git ls-files --error-unmatch config.json
+rg -n "C:[/\\\\]Users|AppData[/\\\\]Local[/\\\\]Temp|\"stats\"" config.json
 git check-ignore -v experiments\probe\results.md experiments\probe\games.pgn config.json
 ```
 
@@ -1190,7 +1290,12 @@ Expected current defects:
 
 - stale stub/config/unsupported-command claims;
 - missing or incomplete `mf-tb`/`SyzygyPath` map;
-- root `config.json` and experiment PGN policy not expressed in tracked ignore rules.
+- tracked root `config.json` contains non-portable machine paths and run-state evidence;
+- root `config.json` and experiment PGN policy are not expressed in tracked ignore rules;
+- the shared `.git/info/exclude` reports a broad `/experiments/` rule.
+
+If `git ls-files --error-unmatch config.json` fails, STOP and reconcile the branch drift;
+do not fabricate a replacement snapshot.
 
 - [ ] **Step 2: Update the live crate and UCI maps**
 
@@ -1211,7 +1316,37 @@ Document that match run state belongs under an explicit
 `experiments/<run-name>/` output directory created by `harness/run_match.ps1`; there is
 no live root `config.json` contract.
 
-- [ ] **Step 3: Add only narrow tracked ignores**
+- [ ] **Step 3: Move the tracked root run state into historical evidence**
+
+Run:
+
+```powershell
+New-Item -ItemType Directory `
+  experiments\legacy-root-fastchess-config `
+  -Force | Out-Null
+git mv config.json `
+  experiments\legacy-root-fastchess-config\config.json
+```
+
+Do not edit the moved JSON. Create
+`experiments/legacy-root-fastchess-config/README.md` with:
+
+```markdown
+# Legacy root fastchess config
+
+This directory preserves the exact tracked `config.json` snapshot that previously lived
+at the repository root.
+
+The JSON is historical experiment evidence, not a reusable tournament template. It
+contains machine-specific paths and completed-run state from the environment that
+produced it. Do not copy it back to the root or use it for a new match.
+
+Run new matches through `harness/run_match.ps1` and place each run under a named
+`experiments/<run-name>/` directory so the command, metadata, console output, and result
+write-up stay together.
+```
+
+- [ ] **Step 4: Add only narrow tracked ignores**
 
 Change `.gitignore` to:
 
@@ -1225,7 +1360,7 @@ Change `.gitignore` to:
 
 Do not add `/experiments/`, `*.log`, `*.txt`, or repository-wide `*.pgn`.
 
-- [ ] **Step 4: Update plan-007 bookkeeping**
+- [ ] **Step 5: Update plan-007 bookkeeping**
 
 In `plans/007-ci-and-repo-hygiene.md`, mark the live-map/root-run-state/narrow-ignore
 subset complete and explicitly leave these items pending:
@@ -1240,7 +1375,7 @@ In `plans/README.md`, set plan 007 to:
 IN PROGRESS (targeted live-map/run-state/ignore hygiene complete; CI and net provisioning pending)
 ```
 
-- [ ] **Step 5: Verify the documentation against live output**
+- [ ] **Step 6: Verify the documentation and historical move**
 
 Run:
 
@@ -1251,6 +1386,10 @@ quit
 "@ | cargo run -q -p mf-uci --bin manifold
 $uci | Select-String 'option name (Threads|Hash|MultiPV|Ponder|UCI_Chess960|EvalFile|SyzygyPath)'
 rg -n "stubs containing|Root `config\.json`|pondering is effectively limited" AGENTS.md README.md
+git ls-files config.json experiments/legacy-root-fastchess-config
+git diff --cached --summary -- `
+  config.json experiments/legacy-root-fastchess-config
+rg -n "^/experiments/$|^\*\.log$|^\*\.txt$|^\*\.pgn$" .gitignore
 git check-ignore -v experiments\probe\results.md experiments\probe\games.pgn config.json
 ```
 
@@ -1258,13 +1397,23 @@ Expected:
 
 - all seven named options appear in live output and docs;
 - stale-claim search has no matches;
-- `results.md` is not ignored;
-- only `games.pgn` and root `config.json` are ignored.
+- root `config.json` is no longer tracked;
+- the historical JSON and README are tracked under
+  `experiments/legacy-root-fastchess-config/`;
+- the moved JSON has no content edit beyond its rename;
+- `.gitignore` has no broad experiment or extension rule;
+- `/config.json` is ignored by the tracked `.gitignore`;
+- the shared `.git/info/exclude` may still report `/experiments/` for both probe paths,
+  which is why Tasks 10-12 use exact force-add commands.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```powershell
-git add AGENTS.md README.md .gitignore plans/007-ci-and-repo-hygiene.md plans/README.md
+git add AGENTS.md README.md .gitignore `
+  plans/007-ci-and-repo-hygiene.md plans/README.md
+git add -f -- `
+  experiments/legacy-root-fastchess-config/config.json `
+  experiments/legacy-root-fastchess-config/README.md
 git diff --cached --check
 $message = @"
 Refresh the live repository map
@@ -1385,7 +1534,9 @@ Create `results.md` with exact:
 - [ ] **Step 3: Commit the primary evidence**
 
 ```powershell
-git add experiments/2026-08-18-recommended-order/UseTtMoveHistory
+git add -f -- `
+  'experiments/2026-08-18-recommended-order/UseTtMoveHistory' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseTtMoveHistory/primary/games.pgn'
 git diff --cached --check
 $message = @"
 Record the ttMove-history match
@@ -1428,7 +1579,9 @@ Expected: the same admissibility conditions as Task 10.
 Use the same result fields and decision rule as Task 10.
 
 ```powershell
-git add experiments/2026-08-18-recommended-order/UseCorrplexity
+git add -f -- `
+  'experiments/2026-08-18-recommended-order/UseCorrplexity' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseCorrplexity/primary/games.pgn'
 git diff --cached --check
 $message = @"
 Record the corrplexity match
@@ -1475,7 +1628,9 @@ For this toggle, alternative `false`:
 - point estimate `> 0` requires independent validation before turning it off.
 
 ```powershell
-git add experiments/2026-08-18-recommended-order/UseCaptureLMR
+git add -f -- `
+  'experiments/2026-08-18-recommended-order/UseCaptureLMR' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseCaptureLMR/primary/games.pgn'
 git diff --cached --check
 $message = @"
 Record the capture LMR match
@@ -1553,8 +1708,24 @@ toggle's `results.md`.
 
 - [ ] **Step 5: Commit validation evidence**
 
+For each toggle that actually ran validation, force-add only that exact toggle result
+directory. Do not run a single force-add against
+`experiments/2026-08-18-recommended-order/` or `experiments/`.
+
 ```powershell
-git add experiments/2026-08-18-recommended-order
+# Run only the lines whose validation match exists.
+git add -f -- `
+  'experiments/2026-08-18-recommended-order/UseTtMoveHistory' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseTtMoveHistory/primary/games.pgn' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseTtMoveHistory/validation/games.pgn'
+git add -f -- `
+  'experiments/2026-08-18-recommended-order/UseCorrplexity' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseCorrplexity/primary/games.pgn' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseCorrplexity/validation/games.pgn'
+git add -f -- `
+  'experiments/2026-08-18-recommended-order/UseCaptureLMR' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseCaptureLMR/primary/games.pgn' `
+  ':(exclude)experiments/2026-08-18-recommended-order/UseCaptureLMR/validation/games.pgn'
 git diff --cached --check
 $message = @"
 Validate positive option match results
@@ -1686,7 +1857,7 @@ cargo test -p mf-core --features force-magic
 
 Expected: both exit 0.
 
-- [ ] **Step 3: Run release validations**
+- [ ] **Step 3: Always run release perft and deterministic bench validations**
 
 ```powershell
 cargo test --release -p mf-core --test perft
@@ -1699,7 +1870,8 @@ $bench2
 if ("$bench1" -ne "$bench2") { throw "release bench signature is not deterministic" }
 ```
 
-Expected: release perft exits 0 and bench signatures match.
+Expected: release perft exits 0 and bench signatures match. This perft command is
+mandatory even though no move-generation change is planned.
 
 - [ ] **Step 4: Review the complete diff and commit history**
 
