@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  NNUE_URL: https://github.com/Houijasu/Manifold/releases/download/nnue-e8449b6/manifold-main-e8449b6.nnue
+  NNUE_SHA256: E8449B689E26E40DFD8FAC0423E7825377AFDE8B7D40FC14BFB96DFA32FF908A
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provision NNUE
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path nets -Force | Out-Null
+          Invoke-WebRequest -Uri $env:NNUE_URL -OutFile nets/main.nnue
+          $actual = (Get-FileHash -Algorithm SHA256 nets/main.nnue).Hash
+          if ($actual -ne $env:NNUE_SHA256) { throw "NNUE checksum mismatch: $actual" }
+          "MF_NNUE_TEST_NET=$PWD\nets\main.nnue" >> $env:GITHUB_ENV
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo test -p mf-core --features force-magic
+
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Provision NNUE
+        shell: bash
+        run: |
+          mkdir -p nets
+          curl --fail --location --retry 3 "$NNUE_URL" --output nets/main.nnue
+          echo "$NNUE_SHA256  nets/main.nnue" | sha256sum --check -
+          echo "MF_NNUE_TEST_NET=$PWD/nets/main.nnue" >> "$GITHUB_ENV"
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace

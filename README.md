@@ -71,6 +71,28 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+Fresh clones need the pinned NNUE network from
+`https://github.com/Houijasu/Manifold/releases/download/nnue-e8449b6/manifold-main-e8449b6.nnue`.
+Its SHA-256 checksum is
+`E8449B689E26E40DFD8FAC0423E7825377AFDE8B7D40FC14BFB96DFA32FF908A`.
+
+PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Path nets -Force | Out-Null
+Invoke-WebRequest -Uri 'https://github.com/Houijasu/Manifold/releases/download/nnue-e8449b6/manifold-main-e8449b6.nnue' -OutFile nets/main.nnue
+$actual = (Get-FileHash -Algorithm SHA256 nets/main.nnue).Hash
+if ($actual -ne 'E8449B689E26E40DFD8FAC0423E7825377AFDE8B7D40FC14BFB96DFA32FF908A') { throw "NNUE checksum mismatch: $actual" }
+```
+
+POSIX shell:
+
+```sh
+mkdir -p nets
+curl --fail --location --retry 3 'https://github.com/Houijasu/Manifold/releases/download/nnue-e8449b6/manifold-main-e8449b6.nnue' --output nets/main.nnue
+echo 'E8449B689E26E40DFD8FAC0423E7825377AFDE8B7D40FC14BFB96DFA32FF908A  nets/main.nnue' | sha256sum --check -
+```
+
 `bench` has a pinned node signature asserted by `bench_cli` tests. Any change that
 moves the signature is a strength change -- deliberate or bug -- and must be justified
 and re-pinned explicitly, never silently.

@@ -14,7 +14,7 @@ Note: the repo's earlier feature plans live in `docs/plans/` (multipv, syzygy, p
 | 004  | Syzygy parser hardening | P1 | S | — | DONE (bench 40705 unchanged; depth cap 256 justified in-code; real-table tests green) |
 | 005  | NNUE hash validation + king-move prefetches | P2 | S | — | DONE (bench 40705 unchanged; all mf-nnue tests green) |
 | 006  | Targeted TT-move legality predicate | P2 | S-M | after 001/002 (bench re-pin collisions only) | DONE (bench 40705 unchanged; equivalence + fuzz differential green) |
-| 007  | CI + stale repo map | P2 | M | — | IN PROGRESS (targeted live-map/run-state/ignore hygiene complete; CI and net provisioning pending) |
+| 007  | CI + stale repo map | P2 | M | — | IN PROGRESS (CI and checksum-pinned net provisioning implemented locally; remote Windows and Ubuntu jobs not yet run) |
 | 008  | Portable release build | P2 | S-M | — | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)

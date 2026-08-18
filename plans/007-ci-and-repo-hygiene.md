@@ -30,6 +30,9 @@ The original findings and steps below are retained as planning history.
 - [ ] Decide and document fresh-clone network provisioning.
 - [ ] Clean up absolute harness paths; this was not requested by the targeted execution.
 
+The checksum-pinned workflow and fresh-clone provisioning instructions are implemented
+locally. These two items remain open until the branch is pushed and both remote jobs pass.
+
 ## Why this matters
 
 The repo declares three "authoritative gates" (`cargo test --workspace`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`) and enforces **none of them**: there is no CI at all (no `.github/`), and the current tree demonstrates the failure mode — `crates/mf-tb/` is a fully wired, untracked crate that exists on exactly one machine. Meanwhile the repo's own instruction file is materially wrong: AGENTS.md calls `mf-tune` and `mf-lab` "stubs containing only a crate-level doc comment" (mf-tune is a ~100 KB SPSA tuner that spawns engine processes; mf-lab is a working corrhist-regression CLI), omits `mf-tb` from the crate list entirely, and lists six UCI commands where the engine implements the full set. Every agent and human entering this repo is misdirected. Three smaller hygiene items ride along: root `config.json` is leftover scratch pointing at a deleted temp worktree, and `harness/run_match.ps1` hardcodes this machine's absolute paths.
