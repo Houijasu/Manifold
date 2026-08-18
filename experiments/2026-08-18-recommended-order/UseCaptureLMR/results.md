@@ -102,6 +102,17 @@ The pooled point estimate uses fastchess's score convention: `400 * log10(score 
 
 Flip the default to `UseCaptureLMR=false`. The policy conditions all pass for the alternative-off configuration: primary `+2.32 > 0`, validation `+4.63 >= 0`, and pooled `+3.47 > 0`.
 
+## Applied default
+
+Task 13 applied only this evidence-backed flip:
+
+- `SearchOptions::default().use_capture_lmr`: `true` -> `false`
+- UCI `UseCaptureLMR` advertised default: `true` -> `false`
+- Shipped deterministic bench signature: `35,859` -> `37,420` nodes
+
+`UseTtMoveHistory=false` and `UseCorrplexity=false` remain unchanged. The capture-LMR
+heuristic and all numeric parameters remain unchanged.
+
 ## Concern
 
 The confidence intervals for the individual runs include zero, so the point estimates are not statistically decisive in isolation. The specified decision policy is point-estimate based and is satisfied. The only provenance caveat is the separately disclosed hard-coded checkout commit in raw metadata; binary identity was independently verified by source commit record, SHA-256, and two matching bench node counts.

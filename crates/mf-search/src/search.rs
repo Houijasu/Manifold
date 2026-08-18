@@ -754,9 +754,9 @@ impl Default for SearchOptions {
             // evidence. TT moves, checking captures, and queen promotions are exempt;
             // see `capture_reduction_allowed` for why each one is.
             //
-            // Ships **ON**, but only on the second measurement. This toggle is the
-            // record of a feature whose verdict was decided by something outside
-            // itself, so both measurements are kept here.
+            // Ships **OFF** after the authoritative post-fix primary and validation
+            // matches both favored disabling it. The older measurements remain here
+            // because they explain why the option was re-tested.
             //
             // M3-F2 measured it single-variable against the M2 kept build over 300
             // games at 8+0.08, Threads=1, `-use-affinity -concurrency 8`, zero
@@ -780,10 +780,19 @@ impl Default for SearchOptions {
             // instead of always paying full depth. M4-F1b re-measured on top of it, one
             // match, same conditions, against the M3 kept build (bench 44,737):
             // **+11.59 +/- 22.22 Elo**, Ptnml [3,31,72,41,3], LOS 84.7%, PairsRatio
-            // 1.29, zero forfeits. Point estimate positive, so it ships. The error bar
-            // still covers zero and the two intervals overlap heavily -- this is a
-            // ~20 Elo swing in the point estimate after the constraint was removed, not
-            // a proof.
+            // 1.29, zero forfeits. That positive point estimate made it the shipped
+            // default at the time. The error bar still covers zero and the two
+            // intervals overlap heavily -- this is a ~20 Elo swing in the point
+            // estimate after the constraint was removed, not a proof.
+            //
+            // The recommended-order post-fix binary measured the alternative OFF
+            // against that shipped-ON default in two independent 300-game matches.
+            // From the OFF arm's perspective: primary **+2.32 +/- 21.80 Elo**,
+            // validation **+4.63 +/- 19.00 Elo**, pooled **+3.47 Elo**, with zero
+            // integrity guardrails. The decision policy requires positive primary and
+            // pooled point estimates plus a non-negative validation estimate, so all
+            // three conditions support flipping the default OFF. See
+            // `experiments/2026-08-18-recommended-order/UseCaptureLMR/results.md`.
             //
             // Two designs were measured, and the first is recorded because the second
             // only looks obvious afterwards. A FLAT one-ply discount -- the design this
@@ -795,7 +804,7 @@ impl Default for SearchOptions {
             // Write-ups: `experiments/MSN-S2-capture-lmr/results.md` (the negative and
             // the mechanism) and `experiments/MSN-S7-capture-lmr-v2/results.md` (the
             // re-measurement).
-            use_capture_lmr: true,
+            use_capture_lmr: false,
             // M3-F4 was specified as ONE package of two sub-mechanisms hanging off the
             // same LMR fail-high, "unless the worker finds cause to split". A four-arm
             // fixed-depth sweep over 24 book positions found the cause: measured

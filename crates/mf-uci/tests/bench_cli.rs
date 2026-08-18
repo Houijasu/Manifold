@@ -3,7 +3,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// The all-on bench signature.
+/// The shipped bench signature.
 ///
 /// The HCE milestones moved this from `175_944` to `138_600` (-21.2%) by adding butterfly and
 /// capture history to move ordering. M4-F2 then moved it to `135_257` (-2.4%) by
@@ -63,14 +63,14 @@ use std::time::{Duration, Instant};
 /// Elo higher afterwards. Neither interval excludes zero, so what is established is the
 /// ORDER of the two measurements, not a proven gain from either.
 ///
-/// The consequence for this file is that the two features now form an attribution
-/// SQUARE rather than a chain, and all four corners are pinned:
+/// The consequence for this file is that the two features form an attribution SQUARE,
+/// and all four corners are pinned:
 ///
 ///   UseCaptureLMR   UsePostLMRDepth   signature   pinned in
-///   on  (shipped)   on  (shipped)     41_588      here
-///   off             on                44_737      `capture_lmr_ships_enabled_...`
-///   on              off               42_409      `post_lmr_depth_ships_enabled_...`
-///   off             off               45_036      `the_shipped_search_decomposes_...`
+///   on              on                35_859      `capture_lmr_ships_disabled_...`
+///   off (shipped)   on  (shipped)     37_420      here
+///   on              off               37_137      `capture_lmr_ships_disabled_...`
+///   off             off               37_547      `post_lmr_depth_ships_enabled_...`
 ///
 /// So `44_737` and `45_036` are not lost, and neither feature can be blamed for the
 /// other's contribution: any drift identifies which corner moved.
@@ -106,34 +106,41 @@ use std::time::{Duration, Instant};
 /// the singular double margin. Attribution is pinned in
 /// `corrplexity_off_reproduces_the_pre_change_signature`, and every anchor measured
 /// with `UseCorrHistory=false` is unchanged because a zero correction is a zero proxy.
-const BENCH_NODE_COUNT: u64 = 35_859;
-const BENCH_NODES: &str = "Nodes searched: 35859";
+///
+/// The authoritative recommended-order post-fix matches then favored
+/// `UseCaptureLMR=false` in both independent runs: +2.32 Elo primary, +4.63 Elo
+/// validation, +3.47 Elo pooled from the OFF arm. Flipping that one default moved the
+/// shipped signature from `35_859` to `37_420`; explicitly enabling capture LMR still
+/// reproduces the pre-flip signature exactly.
+const BENCH_NODE_COUNT: u64 = 37_420;
+const BENCH_NODES: &str = "Nodes searched: 37420";
 
 /// The signature with `UseCorrplexity=true`: the low-ply-plus-proxy tree. The toggle
 /// gates the three consumption reads only, so an exact anchor proves the feature adds
 /// no computation and no side effect beyond them. Pinned from the OFF side since the
 /// default flipped; the pre-flip all-on tree is the `39_051` both-reads-on arm of
 /// `per_worker_history_toggles_reproduce_the_pre_change_signature`.
-const BENCH_NODE_COUNT_WITH_CORRPLEXITY: u64 = 36_970;
+const BENCH_NODE_COUNT_WITH_CORRPLEXITY: u64 = 38_578;
 
-/// The signature with `UsePostLMRDepth=false`, capture LMR still on.
+/// The signature with `UsePostLMRDepth=false` under the shipped capture-LMR-off default.
 ///
-/// This is the number M3-F2 measured its -8.11 Elo with, which is not a coincidence:
-/// that build was capture LMR without the verification-depth band, and this arm
-/// reconstructs it exactly.
-const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 37_137;
+/// Both LMR extensions are off in this arm, so it matches
+/// `BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE`.
+const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 37_547;
 
 /// The signature with `UsePostLMRContHist=true`.
 ///
 /// Pinned so the disabled half of the M3-F4 package stays measurable without a rebuild.
-const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 41_454;
+const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 46_552;
 
-/// The signature with `UseCaptureLMR=false`: the M3 shipped signature, bit-for-bit.
+/// The signature with `UseCaptureLMR=true`: the pre-flip shipped signature, bit-for-bit.
 ///
-/// The attribution proof that M4-F1b moved the signature by flipping one default and
-/// nothing else. If `44_737` does not come back exactly, something other than capture
-/// LMR moved the tree.
-const BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR: u64 = 37_420;
+/// This is the attribution proof that the evidence-backed default flip changed only
+/// the default option vector, not the heuristic implementation.
+const BENCH_NODE_COUNT_WITH_CAPTURE_LMR: u64 = 35_859;
+
+/// The signature with `UseCaptureLMR=true` and `UsePostLMRDepth=false`.
+const BENCH_NODE_COUNT_WITH_CAPTURE_LMR_WITHOUT_POST_LMR_DEPTH: u64 = 37_137;
 
 /// The signature with `UseCaptureLMR=false` AND `UsePostLMRDepth=false`: the M7/M2
 /// signature both features were measured against, bit-for-bit.
@@ -144,27 +151,26 @@ const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 37_547;
 /// Pinned so the disabled technique stays measurable without a rebuild, and so a change
 /// to the quiet-check generator is still caught by the suite even though nothing in the
 /// shipped search reaches it.
-const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 37_543;
+const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 41_383;
 
 /// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
-const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 37_654;
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 40_369;
 
 /// The NNUE signature reproduced exactly by `UseContHistory=false`.
 ///
 /// This is measured with correction history off so the anchor isolates continuation
 /// history rather than folding correction-history changes into the same number.
-const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 35_442;
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 46_231;
 
 /// The signature with both per-worker history reads off.
 ///
 /// This anchor is the maintenance/read-separation proof for the Stage-3 pair. Both
 /// tables are still built and updated on every search in this arm, so an exact anchor
 /// proves the updates have no side effect on the tree — the same statement every other
-/// `Use*` control in this file makes. With the corrplexity default now OFF alongside
-/// the ttMove-history read, this arm reproduces the pre-pair `35_886` bit-for-bit
-/// again — the strongest form of the separation proof, reconnecting the suite to the
-/// signature the pair was originally measured against.
-const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 35_886;
+/// `Use*` control in this file makes. The capture-LMR default flip moved this exact
+/// arm from `35_886` to `37_450`; explicitly enabling capture LMR still reaches the
+/// historical tree.
+const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 37_450;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -643,7 +649,7 @@ fn history_toggles_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 4);
 
-    assert_eq!(nodes, [37_654, 43_888, 38_035, 35_442]);
+    assert_eq!(nodes, [40_369, 45_146, 40_948, 46_231]);
 }
 
 /// `UseContHistory=false` must reproduce its NNUE signature bit-for-bit.
@@ -744,7 +750,7 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 3);
 
-    assert_eq!(nodes, [BENCH_NODE_COUNT, 41_709, 35_802]);
+    assert_eq!(nodes, [BENCH_NODE_COUNT, 39_313, 45_176]);
 }
 
 /// `UseQSearchChecks` ships OFF, and this test records WHY in an executable form.
@@ -795,7 +801,7 @@ fn qsearch_checks_ships_disabled_and_is_wired_through_to_the_search() {
     );
 }
 
-/// `UseCaptureLMR` ships ON, and turning it off must reproduce the M3 signature.
+/// `UseCaptureLMR` ships OFF, and turning it on must reproduce the pre-flip signature.
 ///
 /// M3-F2 extended LMR to late captures: the same log-log formula quiets use, fed a
 /// capture `statScore` of captured material plus capture history, with TT moves,
@@ -803,8 +809,8 @@ fn qsearch_checks_ships_disabled_and_is_wired_through_to_the_search() {
 /// -- **-8.11 +/- 20.67 Elo**, Ptnml [2,37,79,30,2] -- and this test used to assert
 /// exactly that.
 ///
-/// It ships ON now, on the strength of a second match, and the reason the verdict
-/// changed is not that anyone re-ran the same experiment. M3-F2's write-up diagnosed
+/// It later shipped ON on the strength of a second match, and the reason that verdict
+/// changed was not that anyone re-ran the same experiment. M3-F2's write-up diagnosed
 /// the mechanism: the technique really does shrink the tree by a fifth to a third at
 /// fixed depth and really does play the same moves, but converted only +0.12 plies at
 /// equal time, because a reduced capture that fails high was re-searched at FULL depth
@@ -818,21 +824,23 @@ fn qsearch_checks_ships_disabled_and_is_wired_through_to_the_search() {
 ///
 ///   * **+11.59 +/- 22.22 Elo**, Ptnml [3,31,72,41,3], LOS 84.7%, PairsRatio 1.29
 ///
-/// Both intervals cover zero and they overlap heavily, so the claim this test encodes
-/// is deliberately modest: the point estimate moved ~20 Elo in the direction the
-/// diagnosis predicted once the constraint it named was removed. That is why the
-/// disabled anchor here is `BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR` rather than a bare
-/// inequality -- it is the attribution control proving M4-F1b moved the shipped
-/// signature by flipping this one default and nothing else.
+/// Both intervals cover zero and overlap heavily. The authoritative recommended-order
+/// post-fix binary therefore re-tested the shipped ON default with two independent
+/// 300-game matches. From the OFF arm's perspective the primary was +2.32 Elo, the
+/// validation was +4.63 Elo, and the pooled point estimate was +3.47 Elo. That satisfies
+/// the specified decision policy, so capture LMR now ships OFF.
 ///
-/// Write-ups: `experiments/MSN-S2-capture-lmr/results.md` and
-/// `experiments/MSN-S7-capture-lmr-v2/results.md`.
+/// The two enabled anchors remain exact attribution controls: ON+post-depth-ON restores
+/// the pre-flip shipped signature, and then disabling post-depth reaches the fourth
+/// corner of the LMR attribution square.
 #[test]
-fn capture_lmr_ships_enabled_and_reproduces_the_m3_signature_when_disabled() {
+fn capture_lmr_ships_disabled_and_reproduces_the_pre_flip_signatures_when_enabled() {
     require_bench_network!();
     let output = run_uci_session(
         "bench\n\
-         setoption name UseCaptureLMR value false\n\
+         setoption name UseCaptureLMR value true\n\
+         bench\n\
+         setoption name UsePostLMRDepth value false\n\
          bench\n\
          quit\n",
         "UCI capture LMR session",
@@ -842,21 +850,25 @@ fn capture_lmr_ships_enabled_and_reproduces_the_m3_signature_when_disabled() {
 
     let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
     let nodes = metrics(stdout, "Nodes searched: ");
-    assert_eq!(nodes.len(), 2);
+    assert_eq!(nodes.len(), 3);
 
     assert_eq!(
         nodes,
-        [BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITHOUT_CAPTURE_LMR],
-        "capture LMR must be ON in the shipped default and must restore the exact M3 \
-         signature when disabled"
+        [
+            BENCH_NODE_COUNT,
+            BENCH_NODE_COUNT_WITH_CAPTURE_LMR,
+            BENCH_NODE_COUNT_WITH_CAPTURE_LMR_WITHOUT_POST_LMR_DEPTH,
+        ],
+        "capture LMR must be OFF in the shipped default and enabling it must restore \
+         both pre-flip LMR attribution anchors"
     );
 }
 
-/// `UsePostLMRDepth` ships ON, and turning it off must reproduce M3-F2's build.
+/// `UsePostLMRDepth` ships ON, and turning it off must reproduce the both-off build.
 ///
-/// M3-F4 was the first M3 feature to ship enabled, and this is its attribution control.
-/// The arm it reproduces is now the more interesting one: with capture LMR also on,
-/// `UsePostLMRDepth=false` is exactly the build M3-F2 measured its -8.11 Elo with.
+/// M3-F4 was the first M3 feature to ship enabled, and this remains its attribution
+/// control. With capture LMR now off by default, `UsePostLMRDepth=false` reaches the
+/// both-off predecessor signature.
 ///
 /// The mechanism: a reduced scout that beats alpha is re-searched one ply DEEPER when
 /// it cleared the incumbent best score by more than 53, one ply SHALLOWER when it
@@ -866,7 +878,7 @@ fn capture_lmr_ships_enabled_and_reproduces_the_m3_signature_when_disabled() {
 /// re-measurement on top of this band is what turned that diagnosis into a shipped
 /// default.
 #[test]
-fn post_lmr_depth_ships_enabled_and_reproduces_the_m3_f2_build() {
+fn post_lmr_depth_ships_enabled_and_reproduces_the_both_off_build() {
     require_bench_network!();
     let output = run_uci_session(
         "bench\n\
@@ -883,18 +895,16 @@ fn post_lmr_depth_ships_enabled_and_reproduces_the_m3_f2_build() {
         metrics(stdout, "Nodes searched: "),
         vec![BENCH_NODE_COUNT, BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH],
         "the verification-depth band must be ON by default and must restore the exact \
-         M3-F2 signature when disabled"
+         both-off signature when disabled"
     );
 }
 
-/// The two shipped LMR features must decompose to the M7 signature they were measured
-/// against.
+/// The two LMR option writes must decompose to the pinned both-off signature.
 ///
-/// `44_737` and `45_036` are the anchors M3 and M2/M7 shipped, and both are still
-/// reachable from the current default by switching off one or both of the LMR features
-/// added since. Together with the two tests above this closes the attribution square:
-/// each corner is pinned, so a drift in the shipped `41_588` identifies WHICH feature's
-/// contribution moved rather than merely that something did.
+/// Explicitly writing both shipped-off values must reproduce the same both-off anchor
+/// as disabling post-LMR depth from the default. Together with the two tests above this
+/// closes the attribution square: each corner is pinned, so a drift identifies WHICH
+/// feature's contribution moved rather than merely that something did.
 #[test]
 fn the_shipped_search_decomposes_to_its_two_predecessor_signatures() {
     require_bench_network!();
@@ -912,7 +922,7 @@ fn the_shipped_search_decomposes_to_its_two_predecessor_signatures() {
     assert_eq!(
         metrics(stdout, "Nodes searched: "),
         vec![BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE],
-        "with both LMR features off the search must be the M7 build bit-for-bit"
+        "with both LMR features off the predecessor signature must return bit-for-bit"
     );
 }
 
@@ -1006,7 +1016,7 @@ fn post_lmr_handling_cannot_reach_the_tree_without_lmr() {
 /// proves it cannot.
 ///
 /// It therefore also stands in for the ablation anchors `UseQSearchChecks` and
-/// `UseCaptureLMR` carry. Those two toggles pin a DIFFERENT number in their off
+/// `UseCaptureLMR` carry. Those toggles pin a DIFFERENT number in their enabled
 /// position; this one ships off (-17.39 +/- 18.99 Elo at 8+0.08, -34.86 +/- 44.35 at
 /// 30+0.3) and pins the SAME number in both positions, because it does not touch the
 /// tree at all -- only the clock.
@@ -1229,7 +1239,7 @@ fn pawn_history_ships_disabled_and_is_wired_through_to_the_search() {
 ///
 /// This is the attribution control for the Stage-3 pair (ttMove history in the
 /// singular double margin, low-ply history in quiet ordering). Both tables are still
-/// allocated, refilled, and updated on every search in the both-off arm, so `35_886`
+/// allocated, refilled, and updated on every search in the both-off arm, so `37_450`
 /// coming back exactly is the proof that maintenance is separated from the reads: the
 /// toggles gate consumption only, and the updates leave no fingerprint on the tree.
 /// The single-off arms pin that each feature reaches the search independently, so the
@@ -1267,9 +1277,9 @@ fn per_worker_history_toggles_reproduce_the_pre_change_signature() {
          proving the unconditional maintenance has no side effect on the tree"
     );
     assert_eq!(
-        nodes[2], 39_051,
-        "both reads ON must reproduce the pre-corrplexity all-on signature exactly, \
-         proving UseTtMoveHistory still reaches the search from its new OFF default"
+        nodes[2], 38_862,
+        "both reads ON must reproduce its pinned signature exactly, proving \
+         UseTtMoveHistory still reaches the search from its OFF default"
     );
     assert_ne!(
         nodes[3], nodes[2],
@@ -1379,6 +1389,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UsePawnHistory",
         "UseHistoryPruning",
         "UseQSearchChecks",
+        "UseCaptureLMR",
         "UsePostLMRContHist",
         "UseTtMoveHistory",
         "UseCorrplexity",
@@ -1399,7 +1410,6 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseContHistory",
         "UseLowPlyHistory",
         "UsePostLMRDepth",
-        "UseCaptureLMR",
     ] {
         assert!(
             stdout
@@ -1457,7 +1467,7 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 60_381,
+        nodes[2], 59_960,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(

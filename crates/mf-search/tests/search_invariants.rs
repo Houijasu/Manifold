@@ -150,11 +150,10 @@ fn selectivity_options_default_to_enabled() {
             // Elo over 300 games and 0.12 plies SHALLOWER at equal time. See the
             // comment on `SearchOptions::default` in `search.rs`.
             use_qsearch_checks: false,
-            // Capture LMR ships ENABLED, but only after a second measurement. It
-            // measured -8.11 +/- 20.67 Elo when the verification re-search always paid
-            // full depth, and +11.59 +/- 22.22 once `use_post_lmr_depth` below removed
-            // that constraint. See the comment on `SearchOptions::default`.
-            use_capture_lmr: true,
+            // Capture LMR ships DISABLED after the authoritative post-fix primary and
+            // validation matches both favored the off arm. See the comment on
+            // `SearchOptions::default`.
+            use_capture_lmr: false,
             // The verification-depth band is the M3-F4 answer to the constraint M3-F2
             // identified, and it ships ON. Its package-mate, the continuation bonus,
             // ships OFF: measured separately they move the fixed-depth tree in opposite
@@ -1074,9 +1073,18 @@ fn capture_lmr_saves_nodes_on_tactical_middlegames_without_changing_the_move() {
     for fen in TACTICAL {
         let position = Position::from_fen(fen, false).expect("tactical FEN should parse");
 
-        // The technique ships ON, so the DEFAULT arm here is the reduced one.
+        // The technique ships OFF, so enable it explicitly for the reduced arm.
         let enabled_table = TranspositionTable::new(16).expect("test TT should allocate");
-        let enabled = search_default(&position, &enabled_table, limits(9), network);
+        let enabled = search(
+            &position,
+            &enabled_table,
+            limits(9),
+            SearchOptions {
+                use_capture_lmr: true,
+                ..SearchOptions::default()
+            },
+            network,
+        );
 
         let disabled_table = TranspositionTable::new(16).expect("test TT should allocate");
         let disabled = search(
