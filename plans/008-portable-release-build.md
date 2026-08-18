@@ -23,7 +23,13 @@
 
 ## Why this matters
 
-`.cargo/config.toml` compiles the Windows MSVC target with `target-cpu=native`. Every release binary this repo has ever produced SIGILLs on any CPU without BMI2 — which currently blocks shipping the engine to anyone who did not build it. The codebase already contains everything needed for a portable build: the sliding-attack backend auto-selects black-magics when BMI2 is absent at compile time, and the NNUE SIMD backend dispatches at **runtime** (Scalar/Avx2/Avx2Vnni), so only the sliding layer and generic codegen need a baseline target. This plan adds a portable build path and a check that keeps it honest.
+`.cargo/config.toml` compiles the Windows MSVC target with `target-cpu=native`. Release
+binaries built on BMI2-capable machines may therefore contain BMI2 instructions and
+fail on older CPUs. The codebase already contains everything needed for a portable
+build: the sliding-attack backend auto-selects black-magics when BMI2 is absent at
+compile time, and the NNUE SIMD backend dispatches at **runtime**
+(Scalar/Avx2/Avx2Vnni), so only the sliding layer and generic codegen need a baseline
+target. This plan adds a portable build path and a check that keeps it honest.
 
 ## Current state
 
@@ -32,7 +38,8 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=native"]
 ```
-  (AGENTS.md documents the consequence: native builds select the PEXT backend via BMI2; `force-magic` selects black-magics for testing.)
+  (AGENTS.md documents the consequence: native builds on BMI2-capable hosts select the
+  PEXT backend; `force-magic` selects black-magics for testing.)
 - `crates/mf-core/Cargo.toml:9` — the `force-magic` feature exists precisely to exercise the non-PEXT backend.
 - `crates/mf-core/src/sliding.rs` — PEXT code is gated on `target_feature = "bmi2"` with a debug cross-check; without BMI2 at compile time the black-magic backend is selected automatically (per AGENTS.md "Non-Obvious Build & Test Behavior").
 - `crates/mf-nnue/src/simd.rs` — `SimdBackend` dispatch is runtime-detected (`is_x86_feature_detected!` style; backends Scalar/Avx2/Avx2Vnni) — no portability work needed there.
@@ -61,7 +68,8 @@ rustflags = ["-C", "target-cpu=native"]
 **Out of scope**:
 - `.cargo/config.toml` — the default stays native; portability is an explicit build path, not a default change.
 - Multiple-architecture targets (ARM64 etc.).
-- Installers/packages; this plan produces a runnable .exe next to its net, nothing more.
+- Installers/packages; the default network is embedded, so this plan produces a
+  self-contained runnable `.exe` and requires no adjacent network file.
 - PGO for the portable build (contradiction in terms).
 
 ## Git workflow
@@ -89,7 +97,11 @@ Model the script's structure on `harness/build_pgo.ps1` (read it first; match it
 
 ### Step 2: Runtime sanity on this machine
 
-`target/portable/manifold.exe` on a BMI2-capable machine still works (baseline code runs everywhere): run `bench`, plus a 10-game smoke against the native build if fastchess is configured (`harness/run_match.ps1`, honoring the AGENTS.md affinity rules for 1T). Both binaries should be closely matched in strength (the portable one simply lacks BMI2 speed).
+`target/portable/manifold.exe` on a BMI2-capable machine still works while retaining
+baseline x86-64 compatibility: run `bench`, plus a 10-game smoke against the native
+build if fastchess is configured (`harness/run_match.ps1`, honoring the AGENTS.md
+affinity rules for 1T). Both binaries should be closely matched in strength (the
+portable one simply lacks BMI2 speed).
 
 **Verify**: bench signature identical; smoke match 0 forfeits (score irrelevant).
 
