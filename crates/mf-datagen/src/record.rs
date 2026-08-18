@@ -388,7 +388,7 @@ pub enum StructuralError {
     },
     NoNonKingPieces,
     TooManyPieces(u32),
-    /// More than the Zobrist material table's 16 entries for one side and piece kind.
+    /// More than the supported count of 16 for one side and piece kind.
     ///
     /// Pawns and kings are not material-count keyed. `opponent` identifies the side
     /// relative to the record's side to move; `found` is the observed count and `max`
