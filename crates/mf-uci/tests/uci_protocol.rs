@@ -1945,11 +1945,21 @@ fn a_clocked_ponder_that_reaches_the_analysis_ceiling_spends_the_converted_clock
 
     engine.send("ponderhit");
     let mut rebased_time = None;
+    let mut post_hit_info_lines = 0;
+    let mut post_hit_currmoves = 0;
+    let mut post_hit_ceiling_iterations = 0;
     let bestmove = engine.receive_until(watchdog(Duration::from_secs(5)), |line| {
+        if line.starts_with("info ") {
+            post_hit_info_lines += 1;
+        }
+        if line.contains(" currmove ") {
+            post_hit_currmoves += 1;
+        }
         if is_completed_iteration(line)
             && field(line, "depth") == 64
             && let Some(time) = optional_field(line, "time")
         {
+            post_hit_ceiling_iterations += 1;
             rebased_time = Some(time);
         }
         line.starts_with("bestmove ")
@@ -1962,6 +1972,52 @@ fn a_clocked_ponder_that_reaches_the_analysis_ceiling_spends_the_converted_clock
     assert!(
         rebased_time.is_some_and(|time| (40..1000).contains(&time)),
         "the post-hit ceiling iteration must spend the rebased budget, got {rebased_time:?}"
+    );
+    assert_eq!(
+        post_hit_ceiling_iterations, 1,
+        "the converted search must publish exactly one refreshed ceiling iteration"
+    );
+    assert_eq!(
+        post_hit_currmoves, 0,
+        "the converted maximum-depth repeats must suppress currmove output"
+    );
+    assert_eq!(
+        post_hit_info_lines, 1,
+        "the converted maximum-depth repeats must emit one bounded info line"
+    );
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+}
+
+#[test]
+fn a_finite_ponder_without_the_side_to_move_clock_cannot_busy_loop_after_ponderhit() {
+    let mut engine = InteractiveUci::spawn_exclusive();
+    engine.send("position fen 7k/8/6QK/8/8/8/8/8 w - - 0 1");
+    engine.send("go ponder btime 3000");
+
+    assert!(
+        engine
+            .receive_until(watchdog(Duration::from_secs(10)), |line| {
+                is_completed_iteration(line) && field(line, "depth") == 64
+            })
+            .is_some(),
+        "the finite ponder must reach the bounded analysis ceiling"
+    );
+    assert!(
+        engine
+            .receive_until(Duration::from_millis(200), |line| {
+                line.starts_with("bestmove ")
+            })
+            .is_none(),
+        "the parked result must wait for ponderhit or stop"
+    );
+
+    engine.send("ponderhit");
+    assert!(
+        engine
+            .receive_until(Duration::from_secs(1), |line| line.starts_with("bestmove "))
+            .is_some(),
+        "without a side-to-move clock, ponderhit must release the parked result instead of repeating forever"
     );
     engine.send("quit");
     assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));

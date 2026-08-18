@@ -1649,7 +1649,8 @@ where
         && limits.depth.is_none()
         && limits.nodes.is_none()
         && !limits.infinite
-        && context.is_pondering()
+        && limits.soft_time.is_some()
+        && limits.hard_time.is_some()
         && completed
             .as_ref()
             .is_some_and(|iteration| iteration.depth == maximum_depth);
@@ -1658,6 +1659,7 @@ where
         ponder.wait_until_released();
 
         if ponder.rebased_start().is_some() {
+            let root_move_reporter = context.root_move_reporter.take();
             loop {
                 low_ply_history.fill_prior();
                 context.begin_root_iteration();
@@ -1736,6 +1738,7 @@ where
                     break;
                 }
             }
+            context.root_move_reporter = root_move_reporter;
 
             context.publish_nodes();
             if let Some(info) = completed.as_mut() {
@@ -4933,6 +4936,7 @@ pub fn clamp_centipawn_score(score: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::path::PathBuf;
     use std::sync::OnceLock;
     use std::thread;
@@ -5054,6 +5058,69 @@ mod tests {
             assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
         });
         assert_eq!(ponder.rebased_start(), None);
+    }
+
+    #[test]
+    fn ponder_hit_from_the_ceiling_callback_runs_one_quiet_rebased_iteration() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let position =
+            Position::from_fen("7k/8/6QK/8/8/8/8/8 w - - 0 1", false).expect("valid test FEN");
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let ponder = PonderState::new();
+        let ceiling_iterations = Cell::new(0);
+        let post_hit_currmoves = Cell::new(0);
+        let parameters = WorkerParameters::new(0, 0, &counters, &shared_history, network)
+            .with_ponder(&ponder)
+            .with_root_move_reporter(|root_move| {
+                if !ponder.is_pondering() && root_move.depth == DEFAULT_MAX_DEPTH {
+                    post_hit_currmoves.set(post_hit_currmoves.get() + 1);
+                }
+            });
+
+        let result = search_worker_with_history_callback_options(
+            &position,
+            &history,
+            &table,
+            SearchLimits {
+                soft_time: Some(Duration::from_millis(100)),
+                hard_time: Some(Duration::from_millis(400)),
+                use_clock_management: true,
+                ..SearchLimits::default()
+            },
+            SearchOptions::default(),
+            &stop,
+            parameters,
+            |iteration| {
+                if iteration.depth == DEFAULT_MAX_DEPTH {
+                    ceiling_iterations.set(ceiling_iterations.get() + 1);
+                    if ponder.is_pondering() {
+                        ponder.ponderhit();
+                    }
+                }
+            },
+        );
+
+        assert_eq!(
+            ceiling_iterations.get(),
+            2,
+            "the pre-hit ceiling callback must be followed by one rebased callback"
+        );
+        assert_eq!(
+            post_hit_currmoves.get(),
+            0,
+            "repeated ceiling searches must not emit currmove progress"
+        );
+        assert!(
+            result.elapsed >= Duration::from_millis(40),
+            "the callback-seam ponderhit must spend the rebased budget, got {:?}",
+            result.elapsed
+        );
     }
 
     #[test]
