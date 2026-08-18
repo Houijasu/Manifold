@@ -1,0 +1,634 @@
+Indexing opening suite...
+Started game 2 of 300 (capture-lmr-on vs capture-lmr-off)
+Started game 4 of 300 (capture-lmr-on vs capture-lmr-off)
+Started game 5 of 300 (capture-lmr-off vs capture-lmr-on)
+Started game 3 of 300 (capture-lmr-off vs capture-lmr-on)
+Started game 1 of 300 (capture-lmr-off vs capture-lmr-on)
+Started game 6 of 300 (capture-lmr-on vs capture-lmr-off)
+Started game 8 of 300 (capture-lmr-on vs capture-lmr-off)
+Started game 7 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 6 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 9 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 3 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 10 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 8 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 11 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 5 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 12 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 7 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 13 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 1 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 14 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 2 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 15 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 4 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 16 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 10 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 17 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 9 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 18 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 12 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 19 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 13 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 20 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 16 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 21 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 14 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 22 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 11 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 23 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 17 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 24 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 15 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 25 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 19 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 26 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 24 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 27 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 18 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 28 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 23 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 29 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 22 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 30 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 25 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 31 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 20 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 32 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 21 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 33 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 26 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by stalemate}
+Started game 34 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 27 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 35 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 30 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 36 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 32 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 37 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 29 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 38 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 31 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 39 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 33 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 40 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 28 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by fifty moves rule}
+Started game 41 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 35 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 42 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 34 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by fifty moves rule}
+Started game 43 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 38 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 44 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 40 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 45 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 36 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 46 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 37 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 47 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 41 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 48 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 39 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 49 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 44 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 50 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 45 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 51 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 46 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 52 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 42 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 53 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 43 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 54 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 49 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 55 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 50 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 56 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 47 (capture-lmr-off vs capture-lmr-on): 0-1 {Black mates}
+Started game 57 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 48 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 58 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 51 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 59 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 54 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 60 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 53 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 61 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 58 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 62 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 52 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by fifty moves rule}
+Started game 63 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 59 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 64 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 56 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 65 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 55 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 66 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 57 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 67 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 60 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 68 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 61 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 69 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 65 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 70 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 64 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 71 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 66 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 72 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 67 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 73 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 62 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 74 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 63 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 75 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 69 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 76 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 70 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 77 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 72 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 78 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 68 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 79 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 71 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 80 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 73 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 81 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 74 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 82 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 75 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 83 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 77 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 84 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 78 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 85 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 80 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 86 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 79 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 87 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 82 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 88 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 76 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by fifty moves rule}
+Started game 89 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 83 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 90 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 81 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 91 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 84 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 92 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 86 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 93 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 85 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 94 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 87 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 95 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 89 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 96 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 90 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 97 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 88 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 98 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 91 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 99 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 94 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 100 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 92 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 101 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 95 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 102 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 96 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 103 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 93 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 104 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 97 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 105 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 99 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 106 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 98 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 107 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 101 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 108 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 100 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+--------------------------------------------------
+Results of capture-lmr-off vs capture-lmr-on (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 6.95 +/- 34.80, nElo: 13.65 +/- 68.10
+LOS: 65.28 %, DrawRatio: 48.00 %, PairsRatio: 1.17
+Games: 100, Wins: 25, Losses: 23, Draws: 52, Points: 51.0 (51.00 %)
+Ptnml(0-2): [0, 12, 24, 14, 0], WL/DD Ratio: 0.85
+--------------------------------------------------
+Started game 109 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 102 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 110 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 103 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 111 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 105 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 112 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 104 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 113 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 106 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 114 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 107 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 115 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 108 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 116 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 110 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 117 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 109 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 118 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 112 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 119 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 114 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 120 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 115 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 121 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 113 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 122 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 111 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 123 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 116 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 124 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 119 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 125 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 117 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 126 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 118 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 127 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 120 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 128 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 122 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 129 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 124 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 130 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 126 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 131 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 125 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 132 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 123 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 133 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 121 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 134 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 127 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 135 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 128 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 136 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 129 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 137 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 130 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 138 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 131 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 139 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 132 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 140 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 133 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 141 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 134 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 142 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 136 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 143 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 135 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 144 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 139 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 145 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 137 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 146 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 138 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 147 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 141 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 148 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 140 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 149 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 143 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 150 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 142 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 151 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 146 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 152 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 144 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 153 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 145 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 154 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 147 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 155 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 149 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 156 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 148 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 157 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 151 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 158 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 150 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 159 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 152 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 160 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 153 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 161 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 154 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 162 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 158 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 163 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 155 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 164 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 157 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 165 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 156 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 166 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 159 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 167 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 162 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 168 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 160 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by fifty moves rule}
+Started game 169 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 161 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 170 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 164 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 171 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 166 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 172 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 165 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 173 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 169 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 174 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 167 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 175 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 168 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 176 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 171 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 177 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 170 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 178 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 173 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 179 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 163 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 180 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 174 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 181 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 175 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 182 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 177 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 183 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 176 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 184 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 179 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 185 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 172 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 186 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 178 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by fifty moves rule}
+Started game 187 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 181 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 188 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 180 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 189 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 182 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 190 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 185 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 191 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 186 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 192 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 189 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 193 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 183 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 194 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 187 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 195 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 184 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 196 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 190 (capture-lmr-on vs capture-lmr-off): 0-1 {Black mates}
+Started game 197 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 191 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 198 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 188 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 199 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 192 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 200 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 194 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 201 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 196 (capture-lmr-on vs capture-lmr-off): 0-1 {Black mates}
+Started game 202 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 193 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 203 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 198 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 204 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 197 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 205 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 199 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 206 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 195 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 207 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 201 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 208 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 200 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+--------------------------------------------------
+Results of capture-lmr-off vs capture-lmr-on (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: -0.00 +/- 23.13, nElo: 0.00 +/- 48.15
+LOS: 50.00 %, DrawRatio: 54.00 %, PairsRatio: 1.00
+Games: 200, Wins: 50, Losses: 50, Draws: 100, Points: 100.0 (50.00 %)
+Ptnml(0-2): [0, 23, 54, 23, 0], WL/DD Ratio: 1.00
+--------------------------------------------------
+Started game 209 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 202 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 210 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 205 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 211 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 207 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 212 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 203 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 213 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 204 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 214 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 206 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 215 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 208 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 216 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 209 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 217 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 211 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 218 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 210 (capture-lmr-on vs capture-lmr-off): 0-1 {Black mates}
+Started game 219 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 214 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 220 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 212 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 221 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 213 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 222 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 215 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 223 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 216 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 224 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 219 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 225 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 217 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 226 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 218 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 227 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 220 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 228 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 222 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 229 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 221 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 230 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 223 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 231 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 224 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 232 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 226 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 233 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 225 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 234 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 227 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 235 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 229 (capture-lmr-off vs capture-lmr-on): 0-1 {Black mates}
+Started game 236 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 228 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 237 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 232 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 238 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 231 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 239 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 233 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 240 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 234 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 241 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 230 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 242 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 236 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 243 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 238 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 244 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 235 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 245 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 237 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 246 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 239 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 247 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 242 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 248 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 241 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 249 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 240 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 250 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 243 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 251 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 244 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 252 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 246 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 253 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 245 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 254 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 248 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 255 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 247 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 256 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 250 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 257 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 249 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 258 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 256 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 259 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 251 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 260 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 252 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 261 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 254 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 262 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 255 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 263 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 253 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 264 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 257 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 265 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 258 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 266 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 262 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 267 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 260 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 268 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 265 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 269 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 264 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 270 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 259 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 271 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 261 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 272 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 263 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 273 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 266 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 274 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 269 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Started game 275 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 268 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 276 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 270 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 277 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 267 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 278 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 272 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 279 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 273 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 280 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 275 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 281 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 276 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 282 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 277 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 283 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 278 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 284 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 280 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 285 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 274 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Started game 286 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 279 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 287 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 284 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 288 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 282 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 289 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 281 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 290 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 285 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 291 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 271 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by fifty moves rule}
+Started game 292 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 286 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 293 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 283 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 294 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 287 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 295 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 288 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Started game 296 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 289 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 297 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 290 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by stalemate}
+Started game 298 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 291 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Started game 299 of 300 (capture-lmr-off vs capture-lmr-on)
+Finished game 292 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+Started game 300 of 300 (capture-lmr-on vs capture-lmr-off)
+Finished game 293 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Finished game 294 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by 3-fold repetition}
+Finished game 295 (capture-lmr-off vs capture-lmr-on): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 297 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Finished game 299 (capture-lmr-off vs capture-lmr-on): 1-0 {White mates}
+Finished game 298 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by fifty moves rule}
+Finished game 296 (capture-lmr-on vs capture-lmr-off): 1/2-1/2 {Draw by insufficient mating material}
+Finished game 300 (capture-lmr-on vs capture-lmr-off): 1-0 {White mates}
+--------------------------------------------------
+Results of capture-lmr-off vs capture-lmr-on (8+0.08, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 4.63 +/- 19.00, nElo: 9.60 +/- 39.32
+LOS: 68.38 %, DrawRatio: 53.33 %, PairsRatio: 1.12
+Games: 300, Wins: 81, Losses: 77, Draws: 142, Points: 152.0 (50.67 %)
+Ptnml(0-2): [0, 33, 80, 37, 0], WL/DD Ratio: 1.22
+--------------------------------------------------
+Finished match
+Total Time: 00:17:16 (hours:minutes:seconds)
+
+fastchess exit code: 0
+
+================ HARNESS SELF-CHECK (AGENTS.md 4.451) ================
+affinity: enabled   concurrency: 8   threads: A=1 B=1
+  capture-lmr-off time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  capture-lmr-on time forfeits (PGN): 0    console Timeouts: 0    Crashed: 0    illegal MOVES played: 0    illegal PV reports: 0    'No output from': 0
+  adjudications: 0
+  NOTE: 'illegal PV reports' are fastchess complaining about a PV line, NOT an illegal move on the board. Recorded, never fatal.
+======================================================================
