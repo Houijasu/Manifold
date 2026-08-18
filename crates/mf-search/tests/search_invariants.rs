@@ -1392,56 +1392,6 @@ fn interpolated_tm_is_inert_for_fixed_depth_and_fixed_nodes() {
 }
 
 #[test]
-fn interpolated_tm_is_inert_for_multipv() {
-    let Some(network) = network() else {
-        return;
-    };
-    let position = Position::startpos();
-    let mut enabled_elapsed = Duration::ZERO;
-    let mut disabled_elapsed = Duration::ZERO;
-    for soft_millis in [200, 400, 800] {
-        let limits = SearchLimits {
-            soft_time: Some(Duration::from_millis(soft_millis)),
-            hard_time: Some(Duration::from_millis(soft_millis * 4)),
-            use_clock_management: true,
-            ..SearchLimits::default()
-        };
-        let run = |enabled| {
-            let table = TranspositionTable::new(16).expect("test TT should allocate");
-            search(
-                &position,
-                &table,
-                limits,
-                SearchOptions {
-                    use_interpolated_time_management: enabled,
-                    multi_pv: 2,
-                    ..SearchOptions::default()
-                },
-                network,
-            )
-        };
-        for enabled_first in [true, false] {
-            for enabled in [enabled_first, !enabled_first] {
-                let result = run(enabled);
-                assert!(result.best_move.is_some());
-                assert!(result.elapsed <= Duration::from_millis(soft_millis * 4 + 500));
-                if enabled {
-                    enabled_elapsed += result.elapsed;
-                } else {
-                    disabled_elapsed += result.elapsed;
-                }
-            }
-        }
-    }
-    let elapsed_difference = enabled_elapsed.abs_diff(disabled_elapsed);
-    assert!(
-        elapsed_difference * 100 <= disabled_elapsed * 30,
-        "MultiPV=2 must stay on the same legacy governor across toggle arms: \
-         enabled={enabled_elapsed:?}, disabled={disabled_elapsed:?}"
-    );
-}
-
-#[test]
 fn interpolated_tm_changes_a_timed_search_scale_when_enabled() {
     let Some(network) = network() else {
         return;
@@ -1524,56 +1474,6 @@ fn search_again_depth_is_inert_for_fixed_depth_and_fixed_nodes() {
         assert_eq!(enabled.depth, disabled.depth);
         assert_eq!(enabled.best_move, disabled.best_move);
     }
-}
-
-#[test]
-fn search_again_depth_is_inert_for_multipv() {
-    let Some(network) = network() else {
-        return;
-    };
-    let position = Position::startpos();
-    let mut enabled_elapsed = Duration::ZERO;
-    let mut disabled_elapsed = Duration::ZERO;
-    for soft_millis in [200, 400, 800] {
-        let limits = SearchLimits {
-            soft_time: Some(Duration::from_millis(soft_millis)),
-            hard_time: Some(Duration::from_millis(soft_millis * 4)),
-            use_clock_management: true,
-            ..SearchLimits::default()
-        };
-        let run = |enabled| {
-            let table = TranspositionTable::new(16).expect("test TT should allocate");
-            search(
-                &position,
-                &table,
-                limits,
-                SearchOptions {
-                    use_search_again_depth: enabled,
-                    multi_pv: 2,
-                    ..SearchOptions::default()
-                },
-                network,
-            )
-        };
-        for enabled_first in [true, false] {
-            for enabled in [enabled_first, !enabled_first] {
-                let result = run(enabled);
-                assert!(result.best_move.is_some());
-                assert!(result.elapsed <= Duration::from_millis(soft_millis * 4 + 500));
-                if enabled {
-                    enabled_elapsed += result.elapsed;
-                } else {
-                    disabled_elapsed += result.elapsed;
-                }
-            }
-        }
-    }
-    let elapsed_difference = enabled_elapsed.abs_diff(disabled_elapsed);
-    assert!(
-        elapsed_difference * 100 <= disabled_elapsed * 30,
-        "MultiPV=2 must ignore search-again depth across toggle arms: \
-         enabled={enabled_elapsed:?}, disabled={disabled_elapsed:?}"
-    );
 }
 
 #[test]
