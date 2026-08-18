@@ -42,7 +42,8 @@ Other top-level directories:
 
 - `Position` (mf-core) keeps both a mailbox array and bitboards, plus reversible `Undo` state; `make_move`/`unmake_move` must restore the position bit-for-bit, and tests assert this. Zobrist keys are incrementally updated by every mutator, including a non-pawn material-count key in `ZobristKeys`.
 - Chess960 is first-class: castling rights are stored as rook squares, and `Position::from_fen` (X-FEN rook-file rights), `format_uci_move`/`parse_uci_move` (king-takes-rook castling notation), and the UCI `UCI_Chess960` option all take a `chess960` flag. Always thread that flag through instead of assuming standard castling.
-- The engine command surface includes `uci`, `isready`, `ucinewgame`, `setoption`, `position`, `go` time/depth/nodes/mate/searchmoves/ponder/infinite/perft forms, `ponderhit`, `stop`, `d`, `eval`, `bench`, `mtbench`, and `quit`. On otherwise recognized `go` commands, unsupported or invalid arguments are diagnosed and ignored; wholly unrecognized argument lists are ignored as malformed.
+- Interactive UCI commands include `uci`, `isready`, `ucinewgame`, `setoption`, `position`, `go` time/depth/nodes/mate/searchmoves/ponder/infinite/perft forms, `ponderhit`, `stop`, `d`, `eval`, `bench`, and `quit`. On otherwise recognized `go` commands, unsupported or invalid arguments are diagnosed and ignored; wholly unrecognized argument lists are ignored as malformed.
+- `manifold mtbench` is a standalone CLI subcommand, not an interactive UCI command.
 - Key UCI handshake defaults are `Threads=1`, `Hash=16 MiB`, `MultiPV=1`, `Ponder=false`, `UCI_Chess960=false`, `EvalFile=<empty>`, and `SyzygyPath=<empty>`.
 
 ## Coding Style & Naming Conventions

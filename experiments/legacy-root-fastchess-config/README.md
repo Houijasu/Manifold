@@ -1,7 +1,8 @@
 # Legacy root fastchess config
 
-This directory preserves the exact tracked `config.json` snapshot that previously lived
-at the repository root.
+This directory preserves as historical evidence the exact root `config.json` snapshot
+from the user's main checkout. Branch drift showed that it was never tracked on this
+execution branch.
 
 The JSON is historical experiment evidence, not a reusable tournament template. It
 contains machine-specific paths and completed-run state from the environment that

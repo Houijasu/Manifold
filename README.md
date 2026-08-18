@@ -37,11 +37,14 @@ manifold mtbench   # the same benchmark at 1, 2, 4, and 8 threads
 manifold perft 5 [--fen <FEN>] [--chess960]
 ```
 
-Implemented commands: `uci`, `isready`, `ucinewgame`, `setoption`, `position`, `go`
-time/depth/nodes/mate/searchmoves/ponder/infinite/perft forms, `ponderhit`, `stop`, `d`,
-`eval`, `bench`, `mtbench`, and `quit`. On otherwise recognized `go` commands,
-unsupported or invalid arguments are diagnosed and ignored; wholly unrecognized argument
-lists are ignored as malformed.
+Implemented interactive UCI commands: `uci`, `isready`, `ucinewgame`, `setoption`,
+`position`, `go` time/depth/nodes/mate/searchmoves/ponder/infinite/perft forms,
+`ponderhit`, `stop`, `d`, `eval`, `bench`, and `quit`. On otherwise recognized `go`
+commands, unsupported or invalid arguments are diagnosed and ignored; wholly
+unrecognized argument lists are ignored as malformed.
+
+`manifold mtbench` is the standalone CLI subcommand shown above, not an interactive UCI
+command.
 
 Key options (the `uci` handshake lists everything, including the search-tunable spins):
 
