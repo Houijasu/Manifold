@@ -789,9 +789,9 @@ impl Default for SearchOptions {
             // against that shipped-ON default in two independent 300-game matches.
             // From the OFF arm's perspective: primary **+2.32 +/- 21.80 Elo**,
             // validation **+4.63 +/- 19.00 Elo**, pooled **+3.47 Elo**, with zero
-            // integrity guardrails. The decision policy requires positive primary and
-            // pooled point estimates plus a non-negative validation estimate, so all
-            // three conditions support flipping the default OFF. See
+            // integrity-guardrail failures. The decision policy requires positive
+            // primary and pooled point estimates plus a non-negative validation
+            // estimate, so all three conditions support flipping the default OFF. See
             // `experiments/2026-08-18-recommended-order/UseCaptureLMR/results.md`.
             //
             // Two designs were measured, and the first is recorded because the second

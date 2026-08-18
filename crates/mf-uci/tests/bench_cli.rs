@@ -72,8 +72,9 @@ use std::time::{Duration, Instant};
 ///   on              off               37_137      `capture_lmr_ships_disabled_...`
 ///   off             off               37_547      `post_lmr_depth_ships_enabled_...`
 ///
-/// So `44_737` and `45_036` are not lost, and neither feature can be blamed for the
-/// other's contribution: any drift identifies which corner moved.
+/// The historical `44_737` and `45_036` signatures belong to earlier search trees.
+/// These four current corners isolate the two live features, so any drift identifies
+/// which contribution moved.
 ///
 /// This constant NOT moving is otherwise still an assertion. A feature that ships
 /// disabled must leave the shipped signature bit-for-bit unchanged, so if adding one
@@ -146,7 +147,7 @@ const BENCH_NODE_COUNT_WITH_CAPTURE_LMR_WITHOUT_POST_LMR_DEPTH: u64 = 37_137;
 /// signature both features were measured against, bit-for-bit.
 const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 37_547;
 
-/// The all-on signature with `UseQSearchChecks=true`.
+/// The signature with `UseQSearchChecks=true` over the shipped option defaults.
 ///
 /// Pinned so the disabled technique stays measurable without a rebuild, and so a change
 /// to the quiet-check generator is still caught by the suite even though nothing in the
@@ -906,7 +907,7 @@ fn post_lmr_depth_ships_enabled_and_reproduces_the_both_off_build() {
 /// closes the attribution square: each corner is pinned, so a drift identifies WHICH
 /// feature's contribution moved rather than merely that something did.
 #[test]
-fn the_shipped_search_decomposes_to_its_two_predecessor_signatures() {
+fn the_shipped_search_reproduces_the_both_off_lmr_signature() {
     require_bench_network!();
     let output = run_uci_session(
         "setoption name UseCaptureLMR value false\n\
