@@ -66,7 +66,7 @@ param(
     [int]$Hash = 64,
     [int]$Rounds = 500,
     [int]$Seed = 0,
-    [string]$Book = 'C:\Users\Samaritan\Projects\Manifold\tools\books\UHO_4060_v4.epd',
+    [string]$Book = '',
     [string]$Sprt = '',
     [int]$RatingInterval = 50,
 
@@ -78,8 +78,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = 'C:\Users\Samaritan\Projects\Manifold'
-$fc   = Join-Path $root 'tools\fastchess\fastchess.exe'
+. (Join-Path $PSScriptRoot 'provenance.ps1')
+$root = Get-ManifoldRepositoryRoot
+$fc = Join-Path $root 'tools\fastchess\fastchess.exe'
+if ([string]::IsNullOrWhiteSpace($Book)) {
+    $Book = Join-Path $root 'tools\books\UHO_4060_v4.epd'
+}
 
 function Fail([string]$msg, [int]$code) {
     Write-Host ''
@@ -189,29 +193,35 @@ $cmdLine = "$fc " + ($args -join ' ')
 # ---------------------------------------------------------------------------
 # AGENTS.md 4.7 provenance -- written BEFORE the run so a killed run still has it.
 # ---------------------------------------------------------------------------
-$commit = (& git -C $root rev-parse HEAD).Trim()
-$shaA   = (Get-FileHash -Algorithm SHA256 $ACmd).Hash
-$shaB   = (Get-FileHash -Algorithm SHA256 $BCmd).Hash
-$load   = (1..5 | ForEach-Object { (Get-CimInstance Win32_Processor).LoadPercentage; Start-Sleep -Milliseconds 200 } |
+$driverCommit = (& git -C $root rev-parse HEAD).Trim()
+$sourceA = Get-BinarySourceAttestation $ACmd
+$sourceB = Get-BinarySourceAttestation $BCmd
+$shaA = (Get-FileHash -Algorithm SHA256 $ACmd).Hash
+$shaB = (Get-FileHash -Algorithm SHA256 $BCmd).Hash
+$load = (1..5 | ForEach-Object { (Get-CimInstance Win32_Processor).LoadPercentage; Start-Sleep -Milliseconds 200 } |
            Where-Object { $_ -ne $null } | Measure-Object -Maximum).Maximum
 
 @"
-Commit:      $commit
-Binary A:    $AName -> $ACmd
-SHA-256 A:   $shaA
-Binary B:    $BName -> $BCmd
-SHA-256 B:   $shaB
-TC:          tc=$TC$(if ($ANodes -or $BNodes) { "  (nodes A=$ANodes B=$BNodes)" })
-Seed:        $Seed
-Book:        $Book  -format epd -order random -repeat -games 2
-Affinity:    $(if ($useAffinity) { 'enabled' } else { 'disabled' })   Concurrency: $Concurrency   Threads: A=$AThreads B=$BThreads   Hash: $Hash
-SPRT:        $(if ($Sprt) { $Sprt } else { '(none -- fixed-length match)' })
-Rounds:      $Rounds (x2 games, paired openings)
-Guardrail:   $affinityReason
-Pre-run CPU: ${load}% (max of 5 samples, AGENTS.md 4.8)
-Purpose:     $Purpose
-Date:        $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
-Driver:      harness/run_match.ps1
+Driver commit: $driverCommit
+Binary A:      $AName -> $ACmd
+Source A:      $($sourceA.Commit)
+Source mode A: $($sourceA.Mode)
+SHA-256 A:     $shaA
+Binary B:      $BName -> $BCmd
+Source B:      $($sourceB.Commit)
+Source mode B: $($sourceB.Mode)
+SHA-256 B:     $shaB
+TC:            tc=$TC$(if ($ANodes -or $BNodes) { "  (nodes A=$ANodes B=$BNodes)" })
+Seed:          $Seed
+Book:          $Book  -format epd -order random -repeat -games 2
+Affinity:      $(if ($useAffinity) { 'enabled' } else { 'disabled' })   Concurrency: $Concurrency   Threads: A=$AThreads B=$BThreads   Hash: $Hash
+SPRT:          $(if ($Sprt) { $Sprt } else { '(none -- fixed-length match)' })
+Rounds:        $Rounds (x2 games, paired openings)
+Guardrail:     $affinityReason
+Pre-run CPU:   ${load}% (max of 5 samples, AGENTS.md 4.8)
+Purpose:       $Purpose
+Date:          $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
+Driver:        harness/run_match.ps1
 Command:
 $cmdLine
 "@ | Out-File -FilePath $metaPath -Encoding utf8

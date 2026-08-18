@@ -37,10 +37,13 @@ Enforces, mechanically, what mission `AGENTS.md` §4.451 says must not be left t
    engine defect. Conflating them invents findings.
 
 4. **Writes the mandatory §4.7 `run-metadata.txt` BEFORE the match starts**, so even a
-   killed run carries provenance: commit, both binaries with SHA-256, TC, seed, book,
-   affinity/concurrency/threads/hash, SPRT bounds, pre-run CPU load (max of 5 samples, since
-   `Win32_Processor` intermittently returns `null` on this machine), purpose, date, and the
-   full command line.
+   killed run carries provenance: the driver commit plus each binary's source commit,
+   attestation mode, and SHA-256; TC, seed, book, affinity/concurrency/threads/hash, SPRT
+   bounds, pre-run CPU load (max of 5 samples, since `Win32_Processor` intermittently
+   returns `null` on this machine), purpose, date, and the full command line. An exact
+   40-hex `<binary>.source-commit` sidecar is authoritative. Without one, only binaries
+   under this worktree's `target/` directory infer the current worktree HEAD; other binaries
+   remain `unknown`/`unattested`.
 
 5. `-ForfeitsAllowedFor <name>` is the only escape hatch, for third-party opponents whose
    failures the validation contract says to record separately rather than charge to Manifold
@@ -48,6 +51,9 @@ Enforces, mechanically, what mission `AGENTS.md` §4.451 says must not be left t
 
 Guardrail self-tests, including a verified forfeit abort whose PGN attribution matched the
 console counts exactly, are in `experiments/M4-F4-harness-selftest/`.
+
+The default fastchess executable and opening book are resolved relative to the checkout
+containing `harness/run_match.ps1`, so the driver works unchanged from linked worktrees.
 
 ### Examples
 
