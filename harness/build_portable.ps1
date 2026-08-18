@@ -55,7 +55,10 @@ function Invoke-WithRestoredBuildEnvironment {
     $savedCargoTargetDir = $env:CARGO_TARGET_DIR
     $hadRustFlags = Test-Path Env:RUSTFLAGS
     $savedRustFlags = $env:RUSTFLAGS
+    $hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
+    $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
     try {
+        Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
         & $Body
     } finally {
         if ($hadCargoTargetDir) {
@@ -67,6 +70,11 @@ function Invoke-WithRestoredBuildEnvironment {
             $env:RUSTFLAGS = $savedRustFlags
         } else {
             Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+        }
+        if ($hadEncodedRustFlags) {
+            $env:CARGO_ENCODED_RUSTFLAGS = $savedEncodedRustFlags
+        } else {
+            Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
         }
     }
 }
@@ -284,7 +292,11 @@ function Publish-PortableStaging {
         [string]$StagingDirectory,
         [string]$FinalDirectory,
         [string]$BackupDirectory,
-        [scriptblock]$ValidatePublished
+        [scriptblock]$ValidatePublished,
+        [scriptblock]$RemoveBackup = {
+            param([string]$LiteralPath)
+            Remove-Item -LiteralPath $LiteralPath -Recurse -Force
+        }
     )
     if (Test-Path -LiteralPath $BackupDirectory) {
         throw (New-PortableFailure "ABORT: stale portable publication backup requires inspection: $BackupDirectory." 8)
@@ -292,6 +304,7 @@ function Publish-PortableStaging {
     $hadFinalDirectory = Test-Path -LiteralPath $FinalDirectory
     $backupMoveSucceeded = $false
     $stagingInstallAttempted = $false
+    $publicationCommitted = $false
     try {
         if ($hadFinalDirectory) {
             Move-Item -LiteralPath $FinalDirectory -Destination $BackupDirectory
@@ -300,12 +313,20 @@ function Publish-PortableStaging {
         $stagingInstallAttempted = $true
         Move-Item -LiteralPath $StagingDirectory -Destination $FinalDirectory
         & $ValidatePublished
+        $publicationCommitted = $true
         if ($backupMoveSucceeded) {
-            Remove-Item -LiteralPath $BackupDirectory -Recurse -Force
+            try {
+                & $RemoveBackup $BackupDirectory
+            } catch {
+                throw (New-PortableFailure "ABORT: portable publication committed, but backup cleanup failed. The validated final was preserved; backup remainder requires inspection at $BackupDirectory. $($_.Exception.Message)" 8)
+            }
             $backupMoveSucceeded = $false
         }
     } catch {
         $publicationFailure = $_
+        if ($publicationCommitted) {
+            throw $publicationFailure
+        }
         try {
             if ($backupMoveSucceeded) {
                 Remove-Item -LiteralPath $FinalDirectory -Recurse -Force -ErrorAction SilentlyContinue
@@ -401,6 +422,7 @@ function Invoke-PortableBuild {
                 $rustcVersion
                 "native RUSTFLAGS: $nativeRustFlags"
                 "portable RUSTFLAGS: $portableRustFlags"
+                "CARGO_ENCODED_RUSTFLAGS: cleared during build and tests"
                 "portable CARGO_TARGET_DIR: $portableBuildTarget"
                 "network: nets\main.nnue"
                 "network sha256: $networkHash"
@@ -424,6 +446,7 @@ function Invoke-PortableBuild {
             Assert-StableFileHash $stagedBinary $binaryHash 'staged portable binary' | Out-Null
             Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore | Out-Null
             Publish-PortableStaging $stagingDirectory $portableDirectory $backupDirectory {
+                Assert-StableFileHash $networkPath $networkHash 'embedded network' | Out-Null
                 Assert-PortableArtifacts $portableDirectory $sourceCommit $binaryHash $networkHash
                 Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore | Out-Null
             }

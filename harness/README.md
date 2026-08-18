@@ -130,7 +130,11 @@ informational only. The portable build output is copied once into unique staging
 bench, perft, disassembly, and hashes all use those exact staged bytes. Publication
 includes an exact source-commit sidecar and metadata with toolchain, flags, stable
 network/binary hashes, signatures, and disassembler path; staging rollback prevents
-partial artifacts. The script restores caller `RUSTFLAGS`/`CARGO_TARGET_DIR`, rejects
-an embedded-network change during the run, and keeps `target\release\manifold.exe`
-byte-for-byte unchanged. The default embedded network means no adjacent `nets` copy is
-required.
+partial artifacts. Once the new final directory validates, publication is committed
+before backup cleanup; a cleanup failure preserves both the validated final and backup
+remainder for inspection. The script clears higher-precedence
+`CARGO_ENCODED_RUSTFLAGS` while building/testing, then restores caller
+`RUSTFLAGS`/`CARGO_ENCODED_RUSTFLAGS`/`CARGO_TARGET_DIR` exactly. It revalidates the
+embedded network inside final publication validation and keeps
+`target\release\manifold.exe` byte-for-byte unchanged. The default embedded network
+means no adjacent `nets` copy is required.

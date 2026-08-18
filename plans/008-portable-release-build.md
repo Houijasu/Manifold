@@ -19,7 +19,8 @@
 - **Completion**: DONE locally on 2026-08-19; native/portable bench 37,420,
   portable perft 4,865,609, force-magic green, controlled scanner fixture green,
   portable scan zero matches, staged binary stable through publication, embedded
-  network hash stable, ordinary release unchanged
+  network hash stable through final validation, encoded flags isolated/restored,
+  committed publication survives backup-cleanup failure, ordinary release unchanged
 
 ## Why this matters
 
@@ -74,7 +75,8 @@ rustflags = ["-C", "target-cpu=native"]
 
 ## Git workflow
 
-- One commit: `Add a verified portable x86-64 build`.
+- Keep each implementation or review follow-up focused, with a sentence-case imperative
+  subject.
 
 ## Steps
 
@@ -82,9 +84,10 @@ rustflags = ["-C", "target-cpu=native"]
 
 Model the script's structure on `harness/build_pgo.ps1` (read it first; match its parameter style, logging, and metadata stamping). The body:
 
-1. Override the native flag with `$env:RUSTFLAGS = '-C target-cpu=x86-64'` and set
-   `$env:CARGO_TARGET_DIR` to dedicated `target\portable-build`; restore both caller
-   values in `finally`.
+1. Clear higher-precedence `CARGO_ENCODED_RUSTFLAGS`, set
+   `$env:RUSTFLAGS = '-C target-cpu=x86-64'`, and set `$env:CARGO_TARGET_DIR` to
+   dedicated `target\portable-build`; restore or remove all three caller values in
+   `finally` according to their exact initial state.
 2. Build `cargo build --release -p mf-uci --bin manifold`, verify the executable in
    `target\portable-build\release`, and never write `target\release\manifold.exe`.
 3. Use the default embedded network, so no adjacent `nets` copy is required.
@@ -138,6 +141,9 @@ README Build section: two artifacts (native, tuned to the build machine, fastest
 - Deterministic instruction-scanner fixture plus the staged portable scan (step 3).
 - Staged-binary identity after mutating the original build output.
 - Embedded-network hash change rejection.
+- `CARGO_ENCODED_RUSTFLAGS` clearing/restoration for initially present and absent states.
+- Network revalidation inside the installed final directory's validation callback.
+- Backup-cleanup failure preserves the validated final and leaves the backup remainder.
 - Perft anchor through the portable binary (step 4).
 - Optional 10-game smoke for runtime sanity.
 
@@ -147,7 +153,9 @@ README Build section: two artifacts (native, tuned to the build machine, fastest
 - [x] Portable bench signature identical to native (37,420)
 - [x] Zero specified BMI2-family instruction tokens in the staged portable binary; controlled scanner fixture green
 - [x] Published binary is the exact staged file that passed every portable gate
-- [x] Embedded-network hash remains stable through metadata and publication
+- [x] Embedded-network hash remains stable through the publication callback
+- [x] Higher-precedence encoded flags are cleared and exactly restored/removed
+- [x] Validated publication commits before backup cleanup; cleanup failure does not roll back
 - [x] `cargo test -p mf-core --features force-magic` green; portable perft 5 = 4,865,609
 - [x] README documents both build paths
 

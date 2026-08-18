@@ -56,13 +56,20 @@ $hadCargoTargetDir = Test-Path Env:CARGO_TARGET_DIR
 $savedCargoTargetDir = $env:CARGO_TARGET_DIR
 $hadRustFlags = Test-Path Env:RUSTFLAGS
 $savedRustFlags = $env:RUSTFLAGS
+$hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
+$savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
 try {
     $env:CARGO_TARGET_DIR = 'caller-target'
     $env:RUSTFLAGS = 'caller-flags'
+    $env:CARGO_ENCODED_RUSTFLAGS = 'caller-encoded-flags'
     try {
         Invoke-WithRestoredBuildEnvironment {
+            if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
+                throw 'CARGO_ENCODED_RUSTFLAGS was not cleared inside the build environment'
+            }
             $env:CARGO_TARGET_DIR = 'inner-target'
             $env:RUSTFLAGS = 'inner-flags'
+            $env:CARGO_ENCODED_RUSTFLAGS = 'inner-encoded-flags'
             throw 'expected test failure'
         }
     } catch {
@@ -74,6 +81,20 @@ try {
     if ($env:RUSTFLAGS -ne 'caller-flags') {
         throw 'caller RUSTFLAGS was not restored'
     }
+    if ($env:CARGO_ENCODED_RUSTFLAGS -ne 'caller-encoded-flags') {
+        throw 'caller CARGO_ENCODED_RUSTFLAGS was not restored'
+    }
+
+    Remove-Item Env:CARGO_ENCODED_RUSTFLAGS
+    Invoke-WithRestoredBuildEnvironment {
+        if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
+            throw 'initially absent CARGO_ENCODED_RUSTFLAGS appeared inside the build environment'
+        }
+        $env:CARGO_ENCODED_RUSTFLAGS = 'inner-encoded-flags'
+    }
+    if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
+        throw 'initially absent CARGO_ENCODED_RUSTFLAGS was not removed after success'
+    }
 } finally {
     if ($hadCargoTargetDir) {
         $env:CARGO_TARGET_DIR = $savedCargoTargetDir
@@ -84,6 +105,11 @@ try {
         $env:RUSTFLAGS = $savedRustFlags
     } else {
         Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+    }
+    if ($hadEncodedRustFlags) {
+        $env:CARGO_ENCODED_RUSTFLAGS = $savedEncodedRustFlags
+    } else {
+        Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
     }
 }
 
@@ -140,6 +166,61 @@ try {
     }
     if (Test-Path -LiteralPath $backup) {
         throw 'failed publication left its backup directory'
+    }
+
+    Remove-Item -LiteralPath $testRoot -Recurse -Force
+    New-Item -ItemType Directory -Path $staging | Out-Null
+    New-Item -ItemType Directory -Path $final | Out-Null
+    Set-Content (Join-Path $staging 'new.txt') 'new'
+    Set-Content (Join-Path $final 'old.txt') 'old'
+    [System.IO.File]::WriteAllText($testNetwork, 'network before publication')
+    $networkHash = (Get-FileHash -LiteralPath $testNetwork -Algorithm SHA256).Hash
+    [System.IO.File]::WriteAllText($testNetwork, 'network changed at publication')
+    try {
+        Publish-PortableStaging -StagingDirectory $staging -FinalDirectory $final `
+            -BackupDirectory $backup -ValidatePublished {
+                Assert-StableFileHash $testNetwork $networkHash 'embedded network' | Out-Null
+            }
+        throw 'publication-time network change must throw'
+    } catch {
+        if ($_.Exception.Message -eq 'publication-time network change must throw') { throw }
+        if ($_.Exception.Message -notmatch 'embedded network changed') { throw }
+    }
+    if (-not (Test-Path (Join-Path $final 'old.txt'))) {
+        throw 'publication-time network change did not restore the previous final'
+    }
+    if (Test-Path -LiteralPath $backup) {
+        throw 'publication-time network change left its backup directory'
+    }
+
+    Remove-Item -LiteralPath $testRoot -Recurse -Force
+    New-Item -ItemType Directory -Path $staging | Out-Null
+    New-Item -ItemType Directory -Path $final | Out-Null
+    Set-Content (Join-Path $staging 'new.txt') 'new'
+    Set-Content (Join-Path $final 'old.txt') 'old'
+    try {
+        Publish-PortableStaging -StagingDirectory $staging -FinalDirectory $final `
+            -BackupDirectory $backup -ValidatePublished {} -RemoveBackup {
+                param([string]$LiteralPath)
+                throw "simulated backup cleanup failure at $LiteralPath"
+            }
+        throw 'backup cleanup failure must throw'
+    } catch {
+        if ($_.Exception.Message -eq 'backup cleanup failure must throw') { throw }
+        if ($_.Exception.Message -notmatch 'publication committed') { throw }
+        if ($_.Exception.Message -notmatch 'backup.*inspection') { throw }
+    }
+    if (-not (Test-Path (Join-Path $final 'new.txt'))) {
+        throw 'backup cleanup failure did not preserve the validated new final'
+    }
+    if (Test-Path (Join-Path $final 'old.txt')) {
+        throw 'backup cleanup failure rolled back to the old final'
+    }
+    if (-not (Test-Path (Join-Path $backup 'old.txt'))) {
+        throw 'backup cleanup failure did not leave the backup remainder for inspection'
+    }
+    if (Test-Path -LiteralPath $staging) {
+        throw 'backup cleanup failure left staging after it became final'
     }
 } finally {
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
