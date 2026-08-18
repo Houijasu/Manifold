@@ -147,11 +147,17 @@ impl FromRecordBytes for ChessBoard {
 #[test]
 fn a_generated_file_loads_through_bulletformats_data_loader_with_a_matching_count() {
     // Self-play evaluates with NNUE, so this round trip needs the (gitignored) network.
-    let network_path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+    let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+    let network_path = explicit_path.clone().map_or_else(
         || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
         std::path::PathBuf::from,
     );
     if !network_path.is_file() {
+        assert!(
+            explicit_path.is_none(),
+            "MF_NNUE_TEST_NET requires an existing network file: {}",
+            network_path.display()
+        );
         eprintln!(
             "SKIPPED: bulletformat round trip needs {}",
             network_path.display()

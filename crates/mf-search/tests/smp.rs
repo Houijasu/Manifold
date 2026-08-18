@@ -65,8 +65,17 @@ fn history(position: &Position) -> Vec<u64> {
 }
 
 fn local_network() -> Option<Arc<Network>> {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+    let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+    let path = explicit_path.clone().map_or_else(
+        || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+        std::path::PathBuf::from,
+    );
     if !path.is_file() {
+        assert!(
+            explicit_path.is_none(),
+            "MF_NNUE_TEST_NET requires an existing network file: {}",
+            path.display()
+        );
         eprintln!("SKIPPED: NNUE SMP tests are missing {}", path.display());
         return None;
     }

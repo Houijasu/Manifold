@@ -208,12 +208,16 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 fn bench_network_path() -> Option<std::path::PathBuf> {
-    std::env::var_os("MF_NNUE_TEST_NET")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            let path = workspace_root().join("nets/main.nnue");
-            path.is_file().then_some(path)
-        })
+    if let Some(path) = std::env::var_os("MF_NNUE_TEST_NET").map(std::path::PathBuf::from) {
+        assert!(
+            path.is_file(),
+            "MF_NNUE_TEST_NET requires an existing network file: {}",
+            path.display()
+        );
+        return Some(path);
+    }
+    let path = workspace_root().join("nets/main.nnue");
+    path.is_file().then_some(path)
 }
 
 macro_rules! require_bench_network {
