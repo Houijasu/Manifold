@@ -269,6 +269,10 @@ impl ActiveSearch {
 }
 
 /// Serves UCI commands until `quit` or end-of-file.
+///
+/// Startup resolves the NNUE network and allocates the default search worker and hash
+/// table before reading any commands. A failure in any of those steps is returned as an
+/// [`io::Error`], so callers can report it without entering the UCI command loop.
 pub fn run<R, W>(reader: R, writer: W) -> io::Result<()>
 where
     R: BufRead,
