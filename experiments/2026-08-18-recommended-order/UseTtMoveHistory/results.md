@@ -2,7 +2,12 @@
 
 ## Setup
 
-- Source commit: `5021efdfd73f8b69a003257150867260577c63c2`
+- Frozen-binary source commit:
+  `ba403d5e6c43793c636e73fa373761f3d1e49e51`
+- Raw harness metadata records commit
+  `5021efdfd73f8b69a003257150867260577c63c2` because
+  `run_match.ps1` uses a hard-coded separate main checkout for
+  `git rev-parse`; that value is not the frozen binary's source commit.
 - Binary A/B: `baselines/recommended-order/manifold.exe`
 - SHA-256 A/B: `D33F99DAC8BC9F538652BC092F62BD8C06EE6005231BFB6ADE2AF121EA324A7E`
 - A: `tt-move-history-on`, `UseTtMoveHistory=true`
