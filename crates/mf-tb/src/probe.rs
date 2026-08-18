@@ -455,7 +455,8 @@ impl Store {
         indices();
         let dirs: Vec<PathBuf> = paths
             .split(';')
-            .filter(|part| !part.trim().is_empty())
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
             .map(PathBuf::from)
             .collect();
         if dirs.is_empty() {
