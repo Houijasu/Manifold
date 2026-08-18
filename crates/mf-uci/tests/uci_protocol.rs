@@ -1921,6 +1921,53 @@ fn ponderhit_converts_the_ponder_search_into_a_timed_one() {
 }
 
 #[test]
+fn a_clocked_ponder_that_reaches_the_analysis_ceiling_spends_the_converted_clock() {
+    let mut engine = InteractiveUci::spawn_exclusive();
+    engine.send("position fen 7k/8/6QK/8/8/8/8/8 w - - 0 1");
+    engine.send("go ponder wtime 3000 btime 3000");
+
+    assert!(
+        engine
+            .receive_until(watchdog(Duration::from_secs(10)), |line| {
+                is_completed_iteration(line) && field(line, "depth") == 64
+            })
+            .is_some(),
+        "the forced-mate ponder must reach the bounded analysis ceiling"
+    );
+    assert!(
+        engine
+            .receive_until(Duration::from_millis(200), |line| {
+                line.starts_with("bestmove ")
+            })
+            .is_none(),
+        "reaching the ceiling must not answer before ponderhit or stop"
+    );
+
+    engine.send("ponderhit");
+    let mut rebased_time = None;
+    let bestmove = engine.receive_until(watchdog(Duration::from_secs(5)), |line| {
+        if is_completed_iteration(line)
+            && field(line, "depth") == 64
+            && let Some(time) = optional_field(line, "time")
+        {
+            rebased_time = Some(time);
+        }
+        line.starts_with("bestmove ")
+    });
+
+    assert!(
+        bestmove.is_some(),
+        "ponderhit must eventually release a bestmove"
+    );
+    assert!(
+        rebased_time.is_some_and(|time| (40..1000).contains(&time)),
+        "the post-hit ceiling iteration must spend the rebased budget, got {rebased_time:?}"
+    );
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+}
+
+#[test]
 fn a_stray_ponderhit_without_an_active_search_is_ignored() {
     let mut engine = InteractiveUci::spawn();
     engine.send("ponderhit");

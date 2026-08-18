@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(test)]
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use mf_core::{
@@ -523,6 +523,7 @@ pub struct SearchLimits {
 pub struct PonderState {
     pondering: AtomicBool,
     rebased_start: Mutex<Option<Instant>>,
+    released: Condvar,
 }
 
 impl PonderState {
@@ -531,6 +532,7 @@ impl PonderState {
         Self {
             pondering: AtomicBool::new(true),
             rebased_start: Mutex::new(None),
+            released: Condvar::new(),
         }
     }
 
@@ -555,6 +557,7 @@ impl PonderState {
         // Release-ordered after the clock base is written, so a worker that observes
         // the flip is guaranteed to see the instant it must measure from.
         self.pondering.store(false, Ordering::Release);
+        self.released.notify_all();
     }
 
     /// Ends the ponder wait without converting to a timed search.
@@ -565,7 +568,26 @@ impl PonderState {
     /// which happens while still pondering whenever the search exhausts its depth
     /// ceiling or the root is terminal, and answering then would violate the protocol.
     pub fn abort(&self) {
+        let rebased = self
+            .rebased_start
+            .lock()
+            .expect("ponder clock lock should not be poisoned");
         self.pondering.store(false, Ordering::Release);
+        drop(rebased);
+        self.released.notify_all();
+    }
+
+    fn wait_until_released(&self) {
+        let mut rebased = self
+            .rebased_start
+            .lock()
+            .expect("ponder clock lock should not be poisoned");
+        while self.is_pondering() {
+            rebased = self
+                .released
+                .wait(rebased)
+                .expect("ponder clock lock should not be poisoned");
+        }
     }
 
     /// The instant `ponderhit` arrived, once it has.
@@ -1620,6 +1642,111 @@ where
                 && score.abs() >= MATE_SCORE - depth as i32)
         {
             break;
+        }
+    }
+
+    let saturated_clocked_ponder = ponder.is_some()
+        && limits.depth.is_none()
+        && limits.nodes.is_none()
+        && !limits.infinite
+        && context.is_pondering()
+        && completed
+            .as_ref()
+            .is_some_and(|iteration| iteration.depth == maximum_depth);
+    if saturated_clocked_ponder {
+        let ponder = ponder.expect("a pondering context should retain its latch");
+        ponder.wait_until_released();
+
+        if ponder.rebased_start().is_some() {
+            loop {
+                low_ply_history.fill_prior();
+                context.begin_root_iteration();
+                context.seldepth = maximum_depth;
+                let attempt =
+                    aspiration_search(position, maximum_depth, previous_score, &mut context);
+                let Some((score, pv)) = attempt else {
+                    break;
+                };
+
+                let best_move = pv.first().copied();
+                if context.uses_interpolated_time_management() {
+                    if best_move.is_some() && best_move != previous_best_move {
+                        last_best_move_change_depth = maximum_depth;
+                    }
+                    previous_best_move = best_move;
+                    let previous_average = if has_score_history {
+                        previous_average_score
+                    } else {
+                        score
+                    };
+                    let older_score = if has_score_history {
+                        score_history[score_history_index]
+                    } else {
+                        score
+                    };
+                    context.set_time_scale(interpolated_time_scale_percent(
+                        previous_average,
+                        older_score,
+                        score,
+                        maximum_depth.saturating_sub(last_best_move_change_depth),
+                        context.root_time_statistics.best_move_changes,
+                        context.node_counters.len(),
+                        context.root_time_statistics.nodes_effort(best_move),
+                    ));
+
+                    if has_score_history {
+                        previous_average_score = (previous_average_score + score) / 2;
+                    } else {
+                        previous_average_score = score;
+                        score_history.fill(score);
+                        has_score_history = true;
+                    }
+                    score_history[score_history_index] = score;
+                    score_history_index = (score_history_index + 1) % score_history.len();
+                } else {
+                    if best_move.is_some() && best_move == previous_best_move {
+                        stability = (stability + 1).min(TIME_STABILITY_CAP);
+                    } else {
+                        stability = 0;
+                    }
+                    previous_best_move = best_move;
+                    let effort_percent = context.best_move_effort_percent(best_move);
+                    context.set_time_scale(scaled_time_percent(
+                        time_scale_percent(stability, score - previous_score),
+                        effort_percent,
+                    ));
+                }
+                previous_score = score;
+                context.recompute_soft_time_reached();
+                context.publish_nodes();
+                completed = Some(IterationInfo {
+                    depth: maximum_depth,
+                    seldepth: context.seldepth.max(maximum_depth),
+                    multipv_index: 1,
+                    score,
+                    nodes: context.reported_nodes(),
+                    hashfull: context.transposition_table.hashfull_per_mille(),
+                    tbhits: context.reported_tb_hits(),
+                    elapsed: context.elapsed(),
+                    time_scale_percent: context.time_scale_percent,
+                    pv,
+                });
+
+                if context.should_stop_after_iteration() {
+                    break;
+                }
+            }
+
+            context.publish_nodes();
+            if let Some(info) = completed.as_mut() {
+                info.nodes = context.reported_nodes();
+                info.hashfull = context.transposition_table.hashfull_per_mille();
+                info.tbhits = context.reported_tb_hits();
+                info.elapsed = context.elapsed();
+                info.time_scale_percent = context.time_scale_percent;
+                on_iteration(info);
+                context.iterations.push(info.clone());
+            }
         }
     }
 
@@ -4808,6 +4935,7 @@ pub fn clamp_centipawn_score(score: i32) -> i32 {
 mod tests {
     use std::path::PathBuf;
     use std::sync::OnceLock;
+    use std::thread;
 
     use super::*;
 
@@ -4890,6 +5018,42 @@ mod tests {
             Duration::from_secs(10),
             Some(Duration::from_millis(100))
         ));
+    }
+
+    #[test]
+    fn ponder_wait_wakes_on_ponderhit_and_records_one_clock_base() {
+        let ponder = PonderState::new();
+        thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let ponder = &ponder;
+            scope.spawn(move || {
+                ponder.wait_until_released();
+                tx.send(()).expect("wake should be observable");
+            });
+            assert!(rx.recv_timeout(Duration::from_millis(20)).is_err());
+            ponder.ponderhit();
+            assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        });
+        let first = ponder.rebased_start().expect("ponderhit records a base");
+        ponder.ponderhit();
+        assert_eq!(ponder.rebased_start(), Some(first));
+    }
+
+    #[test]
+    fn ponder_wait_wakes_on_abort_without_recording_a_clock_base() {
+        let ponder = PonderState::new();
+        thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let ponder = &ponder;
+            scope.spawn(move || {
+                ponder.wait_until_released();
+                tx.send(()).expect("wake should be observable");
+            });
+            assert!(rx.recv_timeout(Duration::from_millis(20)).is_err());
+            ponder.abort();
+            assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        });
+        assert_eq!(ponder.rebased_start(), None);
     }
 
     #[test]
