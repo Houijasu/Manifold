@@ -7,7 +7,9 @@ Manifold is a Rust 2024 chess-engine workspace. Production code lives under `cra
 - `mf-core`: board representation, move generation, notation, hashing, and perft. Its public API is re-exported flat from `src/lib.rs`.
 - `mf-uci`: the `manifold` executable and UCI protocol handling.
 - `mf-search`, `mf-nnue`, `mf-datagen`: implemented search, NNUE evaluation, and data-generation layers.
-- `mf-tune`, `mf-lab`: planned tuning and experiment layers. These are currently stubs containing only a crate-level doc comment stating each crate's intended responsibility.
+- `mf-tb`: Syzygy WDL/DTZ discovery and probing used by UCI, search, and datagen.
+- `mf-tune`: SPSA tuning with checkpoint/resume and process-driven matches.
+- `mf-lab`: corrhist-regression and experiment tooling.
 
 Keep unit tests beside small implementation details and integration tests in each crate's `tests/` directory. Shared perft-suite helpers live in `crates/mf-core/tests/common/mod.rs` and load EPD suites from `tools/testdata/` via a path relative to `CARGO_MANIFEST_DIR`; moving crates or testdata breaks that coupling.
 
@@ -15,8 +17,8 @@ Other top-level directories:
 
 - `research/`: design notes (`infra-readiness.md` and `search-and-eval-sota.md` carry roadmap context) and `research/_src/`, read-only Stockfish-derived C++ used as a reference for NNUE/search work. Do not modify it.
 - `tools/testdata/`: perft EPD suites (ChessProgramming wiki, Ethereal, Fischer random). `tools/books/`: opening books for gauntlets. `tools/fastchess/` and `tools/lc0/` hold third-party artifacts only.
-- `baselines/`, `experiments/`, `nets/reference/`: intentionally empty placeholders. Do not commit generated `target/` output or local `nets/*.nnue` files (both gitignored).
-- Root `config.json` is a fastchess tournament config, not a Rust or engine config.
+- `experiments/`: match and mission evidence. New match run state belongs in an explicit `experiments/<run-name>/` output directory created by `harness/run_match.ps1`; there is no live root `config.json` contract.
+- `baselines/`, `nets/reference/`: intentionally empty placeholders. Do not commit generated `target/` output or local `nets/*.nnue` files (both gitignored).
 
 ## Build, Test, and Development Commands
 
@@ -40,7 +42,8 @@ Other top-level directories:
 
 - `Position` (mf-core) keeps both a mailbox array and bitboards, plus reversible `Undo` state; `make_move`/`unmake_move` must restore the position bit-for-bit, and tests assert this. Zobrist keys are incrementally updated by every mutator, including a non-pawn material-count key in `ZobristKeys`.
 - Chess960 is first-class: castling rights are stored as rook squares, and `Position::from_fen` (X-FEN rook-file rights), `format_uci_move`/`parse_uci_move` (king-takes-rook castling notation), and the UCI `UCI_Chess960` option all take a `chess960` flag. Always thread that flag through instead of assuming standard castling.
-- `mf-uci` currently implements `uci`, `isready`, `quit`, `setoption`, `position`, and `go perft`; unsupported commands are silently ignored.
+- The engine command surface includes `uci`, `isready`, `ucinewgame`, `setoption`, `position`, `go` time/depth/nodes/mate/searchmoves/ponder/infinite/perft forms, `ponderhit`, `stop`, `d`, `eval`, `bench`, `mtbench`, and `quit`. On otherwise recognized `go` commands, unsupported or invalid arguments are diagnosed and ignored; wholly unrecognized argument lists are ignored as malformed.
+- Key UCI handshake defaults are `Threads=1`, `Hash=16 MiB`, `MultiPV=1`, `Ponder=false`, `UCI_Chess960=false`, `EvalFile=<empty>`, and `SyzygyPath=<empty>`.
 
 ## Coding Style & Naming Conventions
 

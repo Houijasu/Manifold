@@ -1,3 +1,5 @@
 /target/
 /nets/*.nnue
 /.aidex/
+/config.json
+/experiments/**/games.pgn
