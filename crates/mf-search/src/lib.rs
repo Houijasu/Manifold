@@ -1,6 +1,8 @@
 //! Alpha-beta search, transposition tables, and time management.
 
 mod history;
+#[cfg(feature = "instrumentation")]
+mod instrumentation;
 mod move_ordering;
 mod repetition;
 mod search;
@@ -12,6 +14,8 @@ pub use history::{
     CORRECTION_MAJOR, CORRECTION_MATERIAL, CORRECTION_MINOR, CORRECTION_PAWN, CORRECTION_SOURCES,
     SharedHistory,
 };
+#[cfg(feature = "instrumentation")]
+pub use instrumentation::{SearchCounters, reset_search_counters, search_counters};
 #[cfg(feature = "corrhist-regression")]
 pub use search::{CorrectionFeatures, CorrectionSample, search_with_correction_samples};
 pub use search::{
