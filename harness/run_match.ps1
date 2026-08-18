@@ -193,24 +193,20 @@ $cmdLine = "$fc " + ($args -join ' ')
 # ---------------------------------------------------------------------------
 # AGENTS.md 4.7 provenance -- written BEFORE the run so a killed run still has it.
 # ---------------------------------------------------------------------------
-$driverCommit = (& git -C $root rev-parse HEAD).Trim()
+$driverCommit = Get-ManifoldHeadCommit
 $sourceA = Get-BinarySourceAttestation $ACmd
 $sourceB = Get-BinarySourceAttestation $BCmd
 $shaA = (Get-FileHash -Algorithm SHA256 $ACmd).Hash
 $shaB = (Get-FileHash -Algorithm SHA256 $BCmd).Hash
+$provenanceMetadata = Format-ManifoldMatchProvenanceMetadata `
+    -DriverCommit $driverCommit `
+    -AName $AName -ACmd $ACmd -SourceA $sourceA -ShaA $shaA `
+    -BName $BName -BCmd $BCmd -SourceB $sourceB -ShaB $shaB
 $load = (1..5 | ForEach-Object { (Get-CimInstance Win32_Processor).LoadPercentage; Start-Sleep -Milliseconds 200 } |
            Where-Object { $_ -ne $null } | Measure-Object -Maximum).Maximum
 
 @"
-Driver commit: $driverCommit
-Binary A:      $AName -> $ACmd
-Source A:      $($sourceA.Commit)
-Source mode A: $($sourceA.Mode)
-SHA-256 A:     $shaA
-Binary B:      $BName -> $BCmd
-Source B:      $($sourceB.Commit)
-Source mode B: $($sourceB.Mode)
-SHA-256 B:     $shaB
+$provenanceMetadata
 TC:            tc=$TC$(if ($ANodes -or $BNodes) { "  (nodes A=$ANodes B=$BNodes)" })
 Seed:          $Seed
 Book:          $Book  -format epd -order random -repeat -games 2
