@@ -5207,6 +5207,10 @@ mod tests {
             .as_ref()
     }
 
+    fn tablebase_test_network() -> &'static mf_nnue::Network {
+        local_network().expect("tablebase search tests require copied nets/main.nnue")
+    }
+
     struct FakeTablebase {
         root_moves: Option<(u64, Vec<Move>)>,
         wdl: Option<(u64, Wdl)>,
@@ -5244,8 +5248,8 @@ mod tests {
         alpha: i32,
         beta: i32,
         pv_node: bool,
-    ) -> Option<DirectTablebaseResult> {
-        let network = local_network()?;
+    ) -> DirectTablebaseResult {
+        let network = tablebase_test_network();
         let mut position = Position::from_fen(fen, false).expect("test FEN should parse");
         let probe = FakeTablebase {
             root_moves: None,
@@ -5292,34 +5296,30 @@ mod tests {
         let entry = table
             .probe(position.repetition_key())
             .expect("tablebase cutoff should write a TT entry");
-        Some(DirectTablebaseResult {
+        DirectTablebaseResult {
             score,
             entry,
             tb_hits: context.tb_hits,
-        })
+        }
     }
 
-    #[test]
-    fn tablebase_root_probe_restricts_the_searched_moves() {
-        let Some(network) = local_network() else {
-            return;
-        };
-        let position =
-            Position::from_fen("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", false).expect("valid test FEN");
-        let legal_moves = generate_legal_moves(&position);
-        let allowed = legal_moves[legal_moves.len() - 1];
-        let probe = FakeTablebase {
-            root_moves: Some((position.repetition_key(), vec![allowed])),
-            wdl: None,
-        };
+    fn fixed_depth_tablebase_search(
+        position: &Position,
+        tablebases: Option<&dyn TablebaseProbe>,
+    ) -> SearchResult {
         let table = TranspositionTable::new(1).expect("test TT should allocate");
         let stop = AtomicBool::new(false);
         let counters = [NodeCounter::new(0)];
         let tb_hit_counters = [NodeCounter::new(0)];
         let history = [position.repetition_key()];
         let shared_history = SharedHistory::new();
-        let result = search_worker_with_history_callback_options(
-            &position,
+        let mut worker =
+            WorkerParameters::new(0, 0, &counters, &shared_history, tablebase_test_network());
+        if let Some(tablebases) = tablebases {
+            worker = worker.with_tablebase_probe(tablebases, &tb_hit_counters);
+        }
+        search_worker_with_history_callback_options(
+            position,
             &history,
             &table,
             SearchLimits {
@@ -5328,21 +5328,38 @@ mod tests {
             },
             SearchOptions::default(),
             &stop,
-            WorkerParameters::new(0, 0, &counters, &shared_history, network)
-                .with_tablebase_probe(&probe, &tb_hit_counters),
+            worker,
             |_| {},
-        );
+        )
+    }
 
-        assert_eq!(result.best_move, Some(allowed));
+    #[test]
+    fn tablebase_root_probe_restricts_the_searched_moves() {
+        let position =
+            Position::from_fen("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", false).expect("valid test FEN");
+        let unrestricted = fixed_depth_tablebase_search(&position, None)
+            .best_move
+            .expect("unrestricted search should select a move");
+        let legal_moves = generate_legal_moves(&position);
+        let allowed = legal_moves
+            .iter()
+            .copied()
+            .find(|mv| *mv != unrestricted)
+            .expect("test position should have an alternative legal move");
+        let probe = FakeTablebase {
+            root_moves: Some((position.repetition_key(), vec![allowed])),
+            wdl: None,
+        };
+        let restricted = fixed_depth_tablebase_search(&position, Some(&probe));
+
+        assert_ne!(Some(unrestricted), restricted.best_move);
+        assert_eq!(restricted.best_move, Some(allowed));
     }
 
     #[test]
     fn tablebase_wdl_cutoff_records_hit_and_six_ply_tt_depth_bonus() {
-        let Some(probe) =
-            direct_tablebase_pvs("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", Wdl::Win, 4, -1, 0, false)
-        else {
-            return;
-        };
+        let probe =
+            direct_tablebase_pvs("8/8/8/8/8/2k5/8/KQ6 w - - 0 1", Wdl::Win, 4, -1, 0, false);
 
         assert_eq!(probe.score, TABLEBASE_SCORE - 1);
         assert_eq!(probe.entry.bound, Bound::Lower);
@@ -5352,16 +5369,14 @@ mod tests {
 
     #[test]
     fn noncutting_tablebase_win_sets_a_search_floor() {
-        let Some(probe) = direct_tablebase_pvs(
+        let probe = direct_tablebase_pvs(
             "8/8/8/8/8/2k5/8/KQ6 w - - 0 1",
             Wdl::Win,
             4,
             -INFINITY,
             INFINITY,
             true,
-        ) else {
-            return;
-        };
+        );
 
         assert!(probe.score >= TABLEBASE_SCORE - 1);
         assert_eq!(probe.tb_hits, 1);
@@ -5369,16 +5384,14 @@ mod tests {
 
     #[test]
     fn noncutting_tablebase_loss_sets_a_search_ceiling() {
-        let Some(probe) = direct_tablebase_pvs(
+        let probe = direct_tablebase_pvs(
             "8/8/8/8/8/2k5/8/K2Q4 b - - 0 1",
             Wdl::Loss,
             4,
             -INFINITY,
             INFINITY,
             true,
-        ) else {
-            return;
-        };
+        );
 
         assert!(probe.score <= -(TABLEBASE_SCORE - 1));
         assert_eq!(probe.tb_hits, 1);
