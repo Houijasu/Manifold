@@ -98,7 +98,10 @@ toolchain; and provenance in `target\pgo\pgo-metadata.txt`.
 The verified copies are published as experimental artifacts at
 `target\pgo\manifold-nopgo.exe` and `target\pgo\manifold-pgo.exe`, each with an exact 40-hex
 `.source-commit` sidecar. The script never replaces `target\release\manifold.exe`; these PGO
-outputs are not shipping/release artifacts.
+outputs are not shipping/release artifacts. Publication is fixed to `target\pgo`: the script
+validates both binaries, sidecars, hashes, profile, and metadata in a staging directory before
+replacing the prior output, and restores the prior output if final validation fails. It also
+restores the caller's `CARGO_TARGET_DIR` and `RUSTFLAGS` values on every exit path.
 
 Two things it enforces mechanically:
 
