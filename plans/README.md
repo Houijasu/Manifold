@@ -9,13 +9,14 @@ Note: the repo's earlier feature plans live in `docs/plans/` (multipv, syzygy, p
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 001  | Stage the quiescence move loop | P1 | M | — | DONE (bench 40705 unchanged; 4 ablation anchors re-pinned 3_473_717→3_473_752, 2_848_247→2_848_237, 62_586→62_573, 181_148→180_934; mtbench NPS 446009→447579) |
-| 002  | SEE threshold early-exit + invariant hoists | P1 | M | 001 | BLOCKED at step 2 STOP: king-only legality trial diverges from the oracle on off-target-ray pins (repro `2B2br1/.../1N6 w` `d5e6` = 100 vs 0); step 1 hoists landed value-neutrally, steps 3-5 need a re-plan without step 2 |
+| 002  | SEE threshold early-exit + invariant hoists | P1 | M | 001 | BLOCKED at step 2 STOP: king-only legality trial diverges from the oracle on off-target-ray pins (repro `2B2br1/.../1N6 w` `d5e6` = 100 vs 0); step 1 hoists landed value-neutrally, steps 3-5 superseded by plan 009 (which drops step 2 entirely) |
 | 003  | UCI time safety + option diagnostics | P1 | S | — | DONE (bench 40705 unchanged; 2 defect-pinning tests re-pinned to the new contract) |
 | 004  | Syzygy parser hardening | P1 | S | — | DONE (bench 40705 unchanged; depth cap 256 justified in-code; real-table tests green) |
 | 005  | NNUE hash validation + king-move prefetches | P2 | S | — | DONE (bench 40705 unchanged; all mf-nnue tests green) |
 | 006  | Targeted TT-move legality predicate | P2 | S-M | after 001/002 (bench re-pin collisions only) | DONE (bench 40705 unchanged; equivalence + fuzz differential green) |
 | 007  | CI + stale repo map | P2 | M | — | DONE (PR #2 green: Windows and Ubuntu jobs pass on the checksum-pinned workflow; fresh-clone provisioning documented) |
 | 008  | Portable release build | P2 | S-M | — | DONE locally (bench native/portable 37420; perft 4865609; force-magic + scanner fixture green; staged bytes and network hash stable; portable scan clean) |
+| 009  | SEE predicate + lazy qsearch SEE | P1 | M | 001 | TODO (steps 0-2 value-neutral, step 3 strength-sensitive: bench re-pin + match; supersedes 002 steps 3-5) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 
