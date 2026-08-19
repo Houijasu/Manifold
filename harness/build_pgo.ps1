@@ -106,9 +106,12 @@ function Invoke-WithRestoredBuildEnvironment {
     $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
     $hadRustupToolchain = Test-Path Env:RUSTUP_TOOLCHAIN
     $savedRustupToolchain = $env:RUSTUP_TOOLCHAIN
+    $hadNnueTestNet = Test-Path Env:MF_NNUE_TEST_NET
+    $savedNnueTestNet = $env:MF_NNUE_TEST_NET
     try {
         Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
         Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+        Remove-Item Env:MF_NNUE_TEST_NET -ErrorAction SilentlyContinue
         & $Body
     } finally {
         if ($hadCargoTargetDir) {
@@ -130,6 +133,11 @@ function Invoke-WithRestoredBuildEnvironment {
             $env:RUSTUP_TOOLCHAIN = $savedRustupToolchain
         } else {
             Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+        }
+        if ($hadNnueTestNet) {
+            $env:MF_NNUE_TEST_NET = $savedNnueTestNet
+        } else {
+            Remove-Item Env:MF_NNUE_TEST_NET -ErrorAction SilentlyContinue
         }
     }
 }
@@ -634,6 +642,7 @@ function Invoke-PgoBuild {
                 "llvm-profdata: $profdata"
                 'RUSTUP_TOOLCHAIN: cleared; rust-toolchain.toml authoritative'
                 'CARGO_ENCODED_RUSTFLAGS: cleared during all Cargo stages'
+                'MF_NNUE_TEST_NET: cleared; nets\main.nnue authoritative'
                 "baseline:     target\pgo\manifold-nopgo.exe (sha256 $baselineHash)"
                 "optimized:    target\pgo\manifold-pgo.exe (sha256 $optimizedHash)"
                 "profile:      target\pgo\merged.profdata (sha256 $profileHash)"

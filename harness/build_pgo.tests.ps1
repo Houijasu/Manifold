@@ -136,11 +136,14 @@ $hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
 $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
 $hadRustupToolchain = Test-Path Env:RUSTUP_TOOLCHAIN
 $savedRustupToolchain = $env:RUSTUP_TOOLCHAIN
+$hadNnueTestNet = Test-Path Env:MF_NNUE_TEST_NET
+$savedNnueTestNet = $env:MF_NNUE_TEST_NET
 try {
     $env:CARGO_TARGET_DIR = 'caller-target'
     $env:RUSTFLAGS = 'caller-flags'
     $env:CARGO_ENCODED_RUSTFLAGS = 'caller-encoded-flags'
     $env:RUSTUP_TOOLCHAIN = 'caller-toolchain'
+    $env:MF_NNUE_TEST_NET = 'caller-network'
     try {
         Invoke-WithRestoredBuildEnvironment {
             if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
@@ -149,10 +152,14 @@ try {
             if (Test-Path Env:RUSTUP_TOOLCHAIN) {
                 throw 'RUSTUP_TOOLCHAIN was not cleared inside the build environment'
             }
+            if (Test-Path Env:MF_NNUE_TEST_NET) {
+                throw 'MF_NNUE_TEST_NET was not cleared inside the build environment'
+            }
             $env:CARGO_TARGET_DIR = 'inner-target'
             $env:RUSTFLAGS = 'inner-flags'
             $env:CARGO_ENCODED_RUSTFLAGS = 'inner-encoded-flags'
             $env:RUSTUP_TOOLCHAIN = 'inner-toolchain'
+            $env:MF_NNUE_TEST_NET = 'inner-network'
             throw 'expected test failure'
         }
     } catch {
@@ -170,11 +177,15 @@ try {
     if ($env:RUSTUP_TOOLCHAIN -ne 'caller-toolchain') {
         throw 'caller RUSTUP_TOOLCHAIN was not restored after failure'
     }
+    if ($env:MF_NNUE_TEST_NET -ne 'caller-network') {
+        throw 'caller MF_NNUE_TEST_NET was not restored after failure'
+    }
 
     Remove-Item Env:CARGO_TARGET_DIR
     Remove-Item Env:RUSTFLAGS
     Remove-Item Env:CARGO_ENCODED_RUSTFLAGS
     Remove-Item Env:RUSTUP_TOOLCHAIN
+    Remove-Item Env:MF_NNUE_TEST_NET
     Invoke-WithRestoredBuildEnvironment {
         if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
             throw 'initially absent CARGO_ENCODED_RUSTFLAGS appeared inside the build environment'
@@ -182,10 +193,14 @@ try {
         if (Test-Path Env:RUSTUP_TOOLCHAIN) {
             throw 'initially absent RUSTUP_TOOLCHAIN appeared inside the build environment'
         }
+        if (Test-Path Env:MF_NNUE_TEST_NET) {
+            throw 'initially absent MF_NNUE_TEST_NET appeared inside the build environment'
+        }
         $env:CARGO_TARGET_DIR = 'inner-target'
         $env:RUSTFLAGS = 'inner-flags'
         $env:CARGO_ENCODED_RUSTFLAGS = 'inner-encoded-flags'
         $env:RUSTUP_TOOLCHAIN = 'inner-toolchain'
+        $env:MF_NNUE_TEST_NET = 'inner-network'
     }
     if (Test-Path Env:CARGO_TARGET_DIR) {
         throw 'previously absent CARGO_TARGET_DIR was not removed after success'
@@ -198,6 +213,24 @@ try {
     }
     if (Test-Path Env:RUSTUP_TOOLCHAIN) {
         throw 'previously absent RUSTUP_TOOLCHAIN was not removed after success'
+    }
+    if (Test-Path Env:MF_NNUE_TEST_NET) {
+        throw 'previously absent MF_NNUE_TEST_NET was not removed after success'
+    }
+
+    try {
+        Invoke-WithRestoredBuildEnvironment {
+            if (Test-Path Env:MF_NNUE_TEST_NET) {
+                throw 'initially absent MF_NNUE_TEST_NET appeared inside the failing build environment'
+            }
+            $env:MF_NNUE_TEST_NET = 'inner-network'
+            throw 'expected absent-variable test failure'
+        }
+    } catch {
+        if ($_.Exception.Message -ne 'expected absent-variable test failure') { throw }
+    }
+    if (Test-Path Env:MF_NNUE_TEST_NET) {
+        throw 'previously absent MF_NNUE_TEST_NET was not removed after failure'
     }
 } finally {
     if ($hadCargoTargetDir) {
@@ -219,6 +252,11 @@ try {
         $env:RUSTUP_TOOLCHAIN = $savedRustupToolchain
     } else {
         Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+    }
+    if ($hadNnueTestNet) {
+        $env:MF_NNUE_TEST_NET = $savedNnueTestNet
+    } else {
+        Remove-Item Env:MF_NNUE_TEST_NET -ErrorAction SilentlyContinue
     }
 }
 

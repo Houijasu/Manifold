@@ -104,10 +104,11 @@ outputs are not shipping/release artifacts. Publication is fixed to `target\pgo`
 validates both binaries, sidecars, hashes, profile, and metadata in a staging directory before
 replacing the prior output, and restores the prior output if final validation fails. It also
 requires tracked Rust/Cargo inputs to match HEAD before building and publication, clears
-`CARGO_ENCODED_RUSTFLAGS` and inherited `RUSTUP_TOOLCHAIN` during every stage, and restores the
-caller's `CARGO_TARGET_DIR`, `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, and `RUSTUP_TOOLCHAIN`
-values on every exit path. `llvm-profdata` must exist under the exact sysroot/host reported by
-the pinned `rustc`; the script never falls back to another installed toolchain.
+`CARGO_ENCODED_RUSTFLAGS`, inherited `RUSTUP_TOOLCHAIN`, and `MF_NNUE_TEST_NET` during every
+stage, and restores the caller's `CARGO_TARGET_DIR`, `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
+`RUSTUP_TOOLCHAIN`, and `MF_NNUE_TEST_NET` values on every exit path. `llvm-profdata` must exist
+under the exact sysroot/host reported by the pinned `rustc`; the script never falls back to
+another installed toolchain.
 The ignored embedded network `nets\main.nnue` is also required and must retain its captured
 size and SHA-256 across every build and publication boundary.
 
