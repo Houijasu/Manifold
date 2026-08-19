@@ -365,6 +365,56 @@ pub(crate) fn fused_accumulator_update(
     }
 }
 
+/// Rebase dispatch: `child = parent - previous_entry + child_entry` for both the value
+/// and PSQT halves of an accumulator.
+///
+/// Used on the king-move path, where the two Finny-cached HalfKA halves are swapped out
+/// from under a still-valid threat contribution. The op is a pure element-wise stream
+/// over fixed-size arrays, so the scalar fallback is the plain loop; rustc's loop
+/// vectorizer does not fire for it, which is why the AVX2 kernel exists at all.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rebase_accumulator(
+    backend: SimdBackend,
+    parent_values: &[i16; L1],
+    child_values: &mut [i16; L1],
+    parent_psqt: &[i32; PSQT_BUCKETS],
+    child_psqt: &mut [i32; PSQT_BUCKETS],
+    previous_entry_values: &[i16; L1],
+    child_entry_values: &[i16; L1],
+    previous_entry_psqt: &[i32; PSQT_BUCKETS],
+    child_entry_psqt: &[i32; PSQT_BUCKETS],
+) {
+    match backend {
+        SimdBackend::Scalar => rebase_accumulator_scalar(
+            parent_values,
+            child_values,
+            parent_psqt,
+            child_psqt,
+            previous_entry_values,
+            child_entry_values,
+            previous_entry_psqt,
+            child_entry_psqt,
+        ),
+        SimdBackend::Avx2 | SimdBackend::Avx2Vnni => {
+            assert_supported(backend);
+            // SAFETY: support was checked immediately above. All fixed-size
+            // accumulators cover the complete AVX2 loads and stores.
+            unsafe {
+                rebase_accumulator_avx2(
+                    parent_values,
+                    child_values,
+                    parent_psqt,
+                    child_psqt,
+                    previous_entry_values,
+                    child_entry_values,
+                    previous_entry_psqt,
+                    child_entry_psqt,
+                );
+            }
+        }
+    }
+}
+
 #[inline]
 fn assert_supported(backend: SimdBackend) {
     assert!(
@@ -1005,6 +1055,31 @@ unsafe fn affine_dense_avx2_vnni<const INPUTS: usize, const OUTPUTS: usize>(
     unreachable!("AVX-VNNI dispatch is unavailable on non-x86 targets")
 }
 
+/// Scalar fallback of [`rebase_accumulator`]. Wrapping arithmetic throughout, matching
+/// the AVX2 kernel lane-for-lane so backend parity holds even past i16/i32 range.
+#[allow(clippy::too_many_arguments)]
+fn rebase_accumulator_scalar(
+    parent_values: &[i16; L1],
+    child_values: &mut [i16; L1],
+    parent_psqt: &[i32; PSQT_BUCKETS],
+    child_psqt: &mut [i32; PSQT_BUCKETS],
+    previous_entry_values: &[i16; L1],
+    child_entry_values: &[i16; L1],
+    previous_entry_psqt: &[i32; PSQT_BUCKETS],
+    child_entry_psqt: &[i32; PSQT_BUCKETS],
+) {
+    for (index, value) in child_values.iter_mut().enumerate() {
+        *value = parent_values[index]
+            .wrapping_sub(previous_entry_values[index])
+            .wrapping_add(child_entry_values[index]);
+    }
+    for (index, value) in child_psqt.iter_mut().enumerate() {
+        *value = parent_psqt[index]
+            .wrapping_sub(previous_entry_psqt[index])
+            .wrapping_add(child_entry_psqt[index]);
+    }
+}
+
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 #[allow(clippy::too_many_arguments)]
@@ -1154,6 +1229,64 @@ unsafe fn fused_accumulator_update_avx2(
     _: &[usize],
     _: &[u32],
     _: &[u32],
+) {
+    unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+/// # Safety
+///
+/// The caller must verify that AVX2 is available in the current process.
+unsafe fn rebase_accumulator_avx2(
+    parent_values: &[i16; L1],
+    child_values: &mut [i16; L1],
+    parent_psqt: &[i32; PSQT_BUCKETS],
+    child_psqt: &mut [i32; PSQT_BUCKETS],
+    previous_entry_values: &[i16; L1],
+    child_entry_values: &[i16; L1],
+    previous_entry_psqt: &[i32; PSQT_BUCKETS],
+    child_entry_psqt: &[i32; PSQT_BUCKETS],
+) {
+    for offset in (0..L1).step_by(16) {
+        // SAFETY: the fixed-size arrays contain 16 lanes from every offset, and
+        // unaligned loads/stores impose no stronger alignment requirement.
+        unsafe {
+            let parent = _mm256_loadu_si256(parent_values.as_ptr().add(offset).cast::<__m256i>());
+            let previous =
+                _mm256_loadu_si256(previous_entry_values.as_ptr().add(offset).cast::<__m256i>());
+            let child_entry =
+                _mm256_loadu_si256(child_entry_values.as_ptr().add(offset).cast::<__m256i>());
+            let rebased = _mm256_add_epi16(_mm256_sub_epi16(parent, previous), child_entry);
+            _mm256_storeu_si256(
+                child_values.as_mut_ptr().add(offset).cast::<__m256i>(),
+                rebased,
+            );
+        }
+    }
+
+    // SAFETY: each PSQT array contains exactly one complete AVX2 register.
+    unsafe {
+        let parent = _mm256_loadu_si256(parent_psqt.as_ptr().cast::<__m256i>());
+        let previous = _mm256_loadu_si256(previous_entry_psqt.as_ptr().cast::<__m256i>());
+        let child_entry = _mm256_loadu_si256(child_entry_psqt.as_ptr().cast::<__m256i>());
+        let rebased = _mm256_add_epi32(_mm256_sub_epi32(parent, previous), child_entry);
+        _mm256_storeu_si256(child_psqt.as_mut_ptr().cast::<__m256i>(), rebased);
+    }
+}
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+#[allow(clippy::too_many_arguments)]
+unsafe fn rebase_accumulator_avx2(
+    _: &[i16; L1],
+    _: &mut [i16; L1],
+    _: &[i32; PSQT_BUCKETS],
+    _: &mut [i32; PSQT_BUCKETS],
+    _: &[i16; L1],
+    _: &[i16; L1],
+    _: &[i32; PSQT_BUCKETS],
+    _: &[i32; PSQT_BUCKETS],
 ) {
     unreachable!("AVX2 dispatch is unavailable on non-x86 targets")
 }

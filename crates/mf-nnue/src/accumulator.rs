@@ -13,7 +13,8 @@ use crate::instrumentation;
 use crate::network::{L1, Network, PSQT_BUCKETS};
 use crate::simd::{
     ForwardMode, SimdBackend, UnsupportedBackend, add_i8_row, add_i16_row, add_psqt_row,
-    fused_accumulator_update, production_forward_mode, subtract_i8_row, subtract_psqt_row,
+    fused_accumulator_update, production_forward_mode, rebase_accumulator, subtract_i8_row,
+    subtract_psqt_row,
 };
 use crate::threats;
 use crate::threats::{
@@ -917,14 +918,17 @@ fn rebase_halfka(
     threat_removals: &[u32],
     threat_additions: &[u32],
 ) {
-    for (index, value) in child.values.iter_mut().enumerate() {
-        *value = parent.values[index]
-            .wrapping_sub(previous_entry.values[index])
-            .wrapping_add(child_entry.values[index]);
-    }
-    for (index, value) in child.psqt.iter_mut().enumerate() {
-        *value = parent.psqt[index] - previous_entry.psqt[index] + child_entry.psqt[index];
-    }
+    rebase_accumulator(
+        backend,
+        &parent.values,
+        &mut child.values,
+        &parent.psqt,
+        &mut child.psqt,
+        &previous_entry.values,
+        &child_entry.values,
+        &previous_entry.psqt,
+        &child_entry.psqt,
+    );
 
     for &feature in threat_removals {
         let feature = feature as usize;
