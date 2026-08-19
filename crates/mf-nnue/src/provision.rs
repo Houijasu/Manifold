@@ -270,7 +270,21 @@ mod tests {
         }
 
         fn link_main_network(&self, destination: &Path) {
-            let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+            let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+            let source = explicit_path.clone().map_or_else(
+                || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+                PathBuf::from,
+            );
+            assert!(
+                source.is_file(),
+                "{} requires an existing network file: {}",
+                if explicit_path.is_some() {
+                    "MF_NNUE_TEST_NET"
+                } else {
+                    "NNUE provisioning tests"
+                },
+                source.display()
+            );
             fs::hard_link(source, destination).expect("test network hard link should be created");
         }
     }

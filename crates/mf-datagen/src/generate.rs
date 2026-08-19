@@ -804,11 +804,17 @@ mod tests {
         static NETWORK: OnceLock<Option<Network>> = OnceLock::new();
         NETWORK
             .get_or_init(|| {
-                let path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+                let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+                let path = explicit_path.clone().map_or_else(
                     || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
                     PathBuf::from,
                 );
                 if !path.is_file() {
+                    assert!(
+                        explicit_path.is_none(),
+                        "MF_NNUE_TEST_NET requires an existing network file: {}",
+                        path.display()
+                    );
                     eprintln!("SKIPPED: datagen tests need {}", path.display());
                     return None;
                 }

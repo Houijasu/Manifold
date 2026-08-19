@@ -1005,8 +1005,17 @@ fn syzygy_path_reports_discovered_tables() {
 /// assertion is now unconditional.
 #[test]
 fn every_search_reports_an_nnue_evaluator_and_its_source() {
-    let network = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+    let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+    let network = explicit_path.clone().map_or_else(
+        || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+        std::path::PathBuf::from,
+    );
     if !network.is_file() {
+        assert!(
+            explicit_path.is_none(),
+            "MF_NNUE_TEST_NET requires an existing network file: {}",
+            network.display()
+        );
         eprintln!(
             "SKIPPED: evaluator protocol test is missing {}",
             network.display()
