@@ -650,6 +650,45 @@ fn malformed_finite_go_returns_one_legal_bestmove_and_exits_cleanly() {
 }
 
 #[test]
+fn wrong_side_only_clock_returns_one_legal_bestmove_and_exits_cleanly() {
+    let position = Position::startpos();
+    let legal_moves: Vec<_> = generate_legal_moves(&position)
+        .into_iter()
+        .map(|mv| format_uci_move(&position, *mv, false))
+        .collect();
+    let mut engine = InteractiveUci::spawn();
+
+    engine.send("position startpos");
+    engine.send("go btime 1000");
+    let bestmove = engine
+        .receive_until(watchdog(Duration::from_secs(2)), |line| {
+            line.starts_with("bestmove ")
+        })
+        .expect("the emergency node budget should return a bestmove");
+    let mv = bestmove
+        .strip_prefix("bestmove ")
+        .expect("bestmove prefix")
+        .split_whitespace()
+        .next()
+        .expect("bestmove carries a move");
+    assert!(
+        legal_moves.iter().any(|legal| legal == mv),
+        "emergency search returned illegal move {mv}"
+    );
+
+    engine.send("quit");
+    assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));
+    assert!(
+        engine
+            .child
+            .try_wait()
+            .expect("process status should be readable")
+            .expect("process should have exited")
+            .success()
+    );
+}
+
+#[test]
 fn malformed_no_argument_commands_are_ignored() {
     let output = run_uci(&[
         "uci trailing",
@@ -1979,19 +2018,11 @@ fn a_finite_ponder_without_the_side_to_move_clock_cannot_busy_loop_after_ponderh
 
     assert!(
         engine
-            .receive_until(watchdog(Duration::from_secs(10)), |line| {
-                is_completed_iteration(line) && field(line, "depth") == 128
-            })
-            .is_some(),
-        "the finite ponder must reach the bounded analysis ceiling"
-    );
-    assert!(
-        engine
             .receive_until(Duration::from_millis(200), |line| {
                 line.starts_with("bestmove ")
             })
             .is_none(),
-        "the parked result must wait for ponderhit or stop"
+        "the emergency result must remain parked until ponderhit or stop"
     );
 
     engine.send("ponderhit");
@@ -1999,7 +2030,7 @@ fn a_finite_ponder_without_the_side_to_move_clock_cannot_busy_loop_after_ponderh
         engine
             .receive_until(Duration::from_secs(1), |line| line.starts_with("bestmove "))
             .is_some(),
-        "without a side-to-move clock, ponderhit must release the parked result instead of repeating forever"
+        "without a side-to-move clock, ponderhit must release the emergency result"
     );
     engine.send("quit");
     assert!(engine.wait_for_exit(watchdog(Duration::from_secs(2))));

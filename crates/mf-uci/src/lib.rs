@@ -1558,6 +1558,8 @@ struct GoParameters {
     infinite: bool,
     /// A recognized finite keyword had no parseable value.
     malformed_finite_value: bool,
+    /// At least one side clock (`wtime` or `btime`) was supplied.
+    clock_keyword_seen: bool,
 }
 
 /// Reads a non-negative millisecond or count value, clamping a negative one to zero.
@@ -1634,11 +1636,13 @@ impl GoParameters {
                 continue;
             }
 
+            let clock_keyword =
+                key.eq_ignore_ascii_case("wtime") || key.eq_ignore_ascii_case("btime");
+            parameters.clock_keyword_seen |= clock_keyword;
             let finite_keyword = key.eq_ignore_ascii_case("depth")
                 || key.eq_ignore_ascii_case("nodes")
                 || key.eq_ignore_ascii_case("movetime")
-                || key.eq_ignore_ascii_case("wtime")
-                || key.eq_ignore_ascii_case("btime");
+                || clock_keyword;
             if finite_keyword {
                 finite_keyword_seen = true;
                 recognized = true;
@@ -1773,7 +1777,7 @@ impl GoParameters {
             let (soft_time, hard_time) = self.clock_limits(position, move_overhead_millis);
             (soft_time, hard_time, soft_time.is_some())
         };
-        let emergency_nodes = self.malformed_finite_value
+        let emergency_nodes = (self.malformed_finite_value || self.clock_keyword_seen)
             && !self.infinite
             && self.depth.is_none()
             && self.nodes.is_none()
@@ -3073,6 +3077,79 @@ mod tests {
             assert_eq!(limits.soft_time, None, "{arguments:?}");
             assert_eq!(limits.hard_time, None, "{arguments:?}");
             assert!(!limits.infinite, "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn wrong_side_only_clock_uses_an_emergency_node_budget_for_either_color() {
+        let white_to_move = Position::startpos();
+        let mut black_to_move = white_to_move.clone();
+        let e2e4 = parse_uci_move(&black_to_move, "e2e4", false).expect("e2e4 is legal");
+        black_to_move.make_move(e2e4);
+
+        for (arguments, position) in [
+            (&["btime", "1000"][..], &white_to_move),
+            (&["wtime", "1000"][..], &black_to_move),
+        ] {
+            let (parameters, ignored) =
+                GoParameters::parse(arguments).expect("clock arguments should parse");
+            assert!(parameters.clock_keyword_seen, "{arguments:?}");
+            assert!(ignored.is_empty(), "{arguments:?}");
+
+            let limits = parameters.search_limits(position, TIME_OVERHEAD_MILLIS);
+            assert_eq!(limits.nodes, Some(1), "{arguments:?}");
+            assert_eq!(limits.depth, None, "{arguments:?}");
+            assert_eq!(limits.soft_time, None, "{arguments:?}");
+            assert_eq!(limits.hard_time, None, "{arguments:?}");
+            assert!(!limits.infinite, "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn usable_finite_sibling_wins_over_a_wrong_side_clock() {
+        let white_to_move = Position::startpos();
+
+        let (nodes, _) = GoParameters::parse(&["btime", "1000", "nodes", "20"]).unwrap();
+        let limits = nodes.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, Some(20));
+
+        let (depth, _) = GoParameters::parse(&["btime", "1000", "depth", "5"]).unwrap();
+        let limits = depth.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.depth, Some(5));
+        assert_eq!(limits.nodes, None);
+
+        let (movetime, _) = GoParameters::parse(&["btime", "1000", "movetime", "100"]).unwrap();
+        let limits = movetime.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+        assert!(limits.hard_time.is_some());
+
+        let (mate, _) = GoParameters::parse(&["btime", "1000", "mate", "3"]).unwrap();
+        let limits = mate.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+
+        let (clock, _) = GoParameters::parse(&["btime", "1000", "wtime", "1000"]).unwrap();
+        let limits = clock.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+    }
+
+    #[test]
+    fn wrong_side_clock_preserves_explicit_and_implicit_infinite_requests() {
+        let white_to_move = Position::startpos();
+        let (explicit, _) = GoParameters::parse(&["infinite", "btime", "1000"]).unwrap();
+        let limits = explicit.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert!(limits.infinite);
+        assert_eq!(limits.nodes, None);
+        assert_eq!(limits.soft_time, None);
+        assert_eq!(limits.hard_time, None);
+
+        for arguments in [&[][..], &["ponder"][..], &["searchmoves", "e2e4"][..]] {
+            let (parameters, _) = GoParameters::parse(arguments).unwrap();
+            assert!(parameters.infinite, "{arguments:?}");
+            let limits = parameters.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+            assert!(limits.infinite, "{arguments:?}");
+            assert_eq!(limits.nodes, None, "{arguments:?}");
         }
     }
 
