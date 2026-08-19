@@ -67,7 +67,11 @@ pub struct SearchCounters {
     pub reduced_fail_highs: u64,
     /// Searches of an LMR-reduced move launched at its original child depth.
     pub full_depth_researches: u64,
-    /// SEE calls issued from `load_captures` capture staging, one per generated capture.
+    /// SEE calls issued from `load_captures` capture staging: one per generated
+    /// capture in the eager variants (full and ProbCut), and one per capture in the
+    /// lazy qsearch variant only when the gate threshold cannot classify the
+    /// good/bad split by itself (a below-zero threshold, i.e. the
+    /// `UseSEEPruning=false` ablation).
     pub see_calls_load_captures: u64,
     /// SEE calls issued from TT-move validation of a capture-family move.
     pub see_calls_tt_validation: u64,
@@ -76,6 +80,10 @@ pub struct SearchCounters {
     pub see_calls_interior_quiets_fallback: u64,
     /// SEE calls issued from the qsearch quiet-checks gate.
     pub see_calls_quiet_checks: u64,
+    /// SEE calls issued from the lazy qsearch picker's yield-time capture gate, one
+    /// per candidate the picker actually reaches before the stage exhausts or the
+    /// search cuts off.
+    pub see_calls_qsearch_yield_gate: u64,
 }
 
 thread_local! {
@@ -111,6 +119,7 @@ thread_local! {
         see_calls_tt_validation: 0,
         see_calls_interior_quiets_fallback: 0,
         see_calls_quiet_checks: 0,
+        see_calls_qsearch_yield_gate: 0,
     }) };
 }
 

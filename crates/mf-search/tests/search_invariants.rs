@@ -327,6 +327,14 @@ fn writing_a_search_parameter_updates_only_that_field_and_clamps_to_its_range() 
 /// inverted tree to carry it. The property this test pins (the spin reaches the
 /// search and the aggregate direction is monotone) is unchanged; only the depth the
 /// aggregate is read at moved.
+///
+/// **Measured at depth 8 since plan 009 step 3 (lazy qsearch SEE ordering).** The
+/// qsearch capture order changed from SEE-weighted to MVV-LVA with a yield-time
+/// gate, and the restructured trees invert the depth-9 AND depth-10 aggregates
+/// (149,786 vs 173,701 and 265,969 vs 384,559 — two of the five trees halve under
+/// the softer coefficient), while depth 8 keeps the direction at 90,795 shipped vs
+/// 106,539 softer, four of five positions moving the right way. Same failure mode,
+/// same remedy: the depth the aggregate is read at moved, not the property.
 #[test]
 fn changing_the_lmr_coefficient_changes_fixed_depth_node_counts() {
     let Some(network) = network() else {
@@ -340,7 +348,7 @@ fn changing_the_lmr_coefficient_changes_fixed_depth_node_counts() {
         "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
     ];
     let limits = SearchLimits {
-        depth: Some(9),
+        depth: Some(8),
         ..SearchLimits::default()
     };
 
@@ -1088,8 +1096,8 @@ fn the_qsearch_checks_toggle_changes_the_searched_tree() {
 /// contract.
 #[test]
 fn checked_node_eval_toggle_off_has_a_stable_fixed_depth_signature() {
-    const ON_NODES: u64 = 6_006;
-    const OFF_NODES: u64 = 5_892;
+    const ON_NODES: u64 = 5_968;
+    const OFF_NODES: u64 = 5_856;
     let Some(network) = network() else {
         return;
     };

@@ -98,14 +98,15 @@ struct Row {
 }
 
 /// Per-call-site SEE counts, so the profile can show where the aggregate SEE cost is
-/// issued from. The four sites are every non-test `static_exchange_evaluation` call in
-/// mf-search, so their sum must equal the mf-core `see_calls` total.
+/// issued from. The five sites are every non-test `static_exchange_evaluation` and
+/// `see_ge` call in mf-search, so their sum must equal the mf-core `see_calls` total.
 #[derive(Clone, Copy, Default)]
 struct SeeSites {
     load_captures: u64,
     tt_validation: u64,
     interior_quiets_fallback: u64,
     quiet_checks: u64,
+    qsearch_yield_gate: u64,
 }
 
 impl SeeSites {
@@ -115,6 +116,7 @@ impl SeeSites {
             tt_validation: counters.see_calls_tt_validation,
             interior_quiets_fallback: counters.see_calls_interior_quiets_fallback,
             quiet_checks: counters.see_calls_quiet_checks,
+            qsearch_yield_gate: counters.see_calls_qsearch_yield_gate,
         }
     }
 
@@ -123,6 +125,7 @@ impl SeeSites {
         self.tt_validation += other.tt_validation;
         self.interior_quiets_fallback += other.interior_quiets_fallback;
         self.quiet_checks += other.quiet_checks;
+        self.qsearch_yield_gate += other.qsearch_yield_gate;
     }
 }
 
@@ -273,16 +276,18 @@ impl Totals {
         let per_kilonode = |count: u64| count as f64 * 1000.0 / self.nodes as f64;
         println!(
             "per site (calls/1000 nodes): load_captures={:.2} tt_validation={:.2} \
-             interior_quiets_fallback={:.2} quiet_checks={:.2}",
+             interior_quiets_fallback={:.2} quiet_checks={:.2} qsearch_yield_gate={:.2}",
             per_kilonode(self.sites.load_captures),
             per_kilonode(self.sites.tt_validation),
             per_kilonode(self.sites.interior_quiets_fallback),
             per_kilonode(self.sites.quiet_checks),
+            per_kilonode(self.sites.qsearch_yield_gate),
         );
         let site_sum = self.sites.load_captures
             + self.sites.tt_validation
             + self.sites.interior_quiets_fallback
-            + self.sites.quiet_checks;
+            + self.sites.quiet_checks
+            + self.sites.qsearch_yield_gate;
         println!(
             "site sum {site_sum} vs see_calls total {} (must match)",
             self.calls

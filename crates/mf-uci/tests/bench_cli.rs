@@ -113,8 +113,14 @@ use std::time::{Duration, Instant};
 /// validation, +3.47 Elo pooled from the OFF arm. Flipping that one default moved the
 /// shipped signature from `35_859` to `37_420`; explicitly enabling capture LMR still
 /// reproduces the pre-flip signature exactly.
-const BENCH_NODE_COUNT: u64 = 37_420;
-const BENCH_NODES: &str = "Nodes searched: 37420";
+///
+/// Plan 009 step 3 (lazy qsearch SEE: captures rank by MVV-LVA with the SEE gate
+/// applied at yield time instead of SEE-weighted at load) moved it from `37_420` to
+/// `37_557`, and moved every anchor in this file with it — the qsearch ordering change
+/// restructures every option vector's tree. Recorded old → new per anchor at the
+/// re-pin; the old→new chain above is preserved in git history.
+const BENCH_NODE_COUNT: u64 = 37_557;
+const BENCH_NODES: &str = "Nodes searched: 37557";
 
 /// The signature with `UseCheckedNodeEval=false`: the checked-node-eval experiment's
 /// own bench anchor.
@@ -124,54 +130,54 @@ const BENCH_NODES: &str = "Nodes searched: 37420";
 /// `improving = false` / `corrplexity = 0`. On this suite only the fourth position's
 /// tree moves (6_006 -> 5_892): the pinned `improving` changes an LMR reduction on a
 /// quiet check evasion. Recorded from this implementation.
-const BENCH_NODE_COUNT_WITHOUT_CHECKED_NODE_EVAL: u64 = 37_306;
+const BENCH_NODE_COUNT_WITHOUT_CHECKED_NODE_EVAL: u64 = 37_445;
 
 /// The signature with `UseCorrplexity=true`: the low-ply-plus-proxy tree. The toggle
 /// gates the three consumption reads only, so an exact anchor proves the feature adds
 /// no computation and no side effect beyond them. Pinned from the OFF side since the
 /// default flipped; the pre-flip all-on tree is the `39_051` both-reads-on arm of
 /// `per_worker_history_toggles_reproduce_the_pre_change_signature`.
-const BENCH_NODE_COUNT_WITH_CORRPLEXITY: u64 = 38_578;
+const BENCH_NODE_COUNT_WITH_CORRPLEXITY: u64 = 38_814;
 
 /// The signature with `UsePostLMRDepth=false` under the shipped capture-LMR-off default.
 ///
 /// Both LMR extensions are off in this arm, so it matches
 /// `BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE`.
-const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 37_547;
+const BENCH_NODE_COUNT_WITHOUT_POST_LMR_DEPTH: u64 = 37_688;
 
 /// The signature with `UsePostLMRContHist=true`.
 ///
 /// Pinned so the disabled half of the M3-F4 package stays measurable without a rebuild.
-const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 46_552;
+const BENCH_NODE_COUNT_WITH_POST_LMR_CONTHIST: u64 = 46_694;
 
 /// The signature with `UseCaptureLMR=true`: the pre-flip shipped signature, bit-for-bit.
 ///
 /// This is the attribution proof that the evidence-backed default flip changed only
 /// the default option vector, not the heuristic implementation.
-const BENCH_NODE_COUNT_WITH_CAPTURE_LMR: u64 = 35_859;
+const BENCH_NODE_COUNT_WITH_CAPTURE_LMR: u64 = 36_132;
 
 /// The signature with `UseCaptureLMR=true` and `UsePostLMRDepth=false`.
-const BENCH_NODE_COUNT_WITH_CAPTURE_LMR_WITHOUT_POST_LMR_DEPTH: u64 = 37_137;
+const BENCH_NODE_COUNT_WITH_CAPTURE_LMR_WITHOUT_POST_LMR_DEPTH: u64 = 37_396;
 
 /// The signature with `UseCaptureLMR=false` AND `UsePostLMRDepth=false`: the M7/M2
 /// signature both features were measured against, bit-for-bit.
-const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 37_547;
+const BENCH_NODE_COUNT_WITHOUT_EITHER_LMR_FEATURE: u64 = 37_688;
 
 /// The signature with `UseQSearchChecks=true` over the shipped option defaults.
 ///
 /// Pinned so the disabled technique stays measurable without a rebuild, and so a change
 /// to the quiet-check generator is still caught by the suite even though nothing in the
 /// shipped search reaches it.
-const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 41_383;
+const BENCH_NODE_COUNT_WITH_QSEARCH_CHECKS: u64 = 41_595;
 
 /// The NNUE signature reproduced exactly by `UseCorrHistory=false`.
-const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 40_369;
+const BENCH_NODE_COUNT_WITHOUT_CORRECTION: u64 = 40_620;
 
 /// The NNUE signature reproduced exactly by `UseContHistory=false`.
 ///
 /// This is measured with correction history off so the anchor isolates continuation
 /// history rather than folding correction-history changes into the same number.
-const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 46_231;
+const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 46_372;
 
 /// The signature with both per-worker history reads off.
 ///
@@ -181,7 +187,7 @@ const BENCH_NODE_COUNT_WITHOUT_CONTINUATION: u64 = 46_231;
 /// `Use*` control in this file makes. The capture-LMR default flip moved this exact
 /// arm from `35_886` to `37_450`; explicitly enabling capture LMR still reaches the
 /// historical tree.
-const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 37_450;
+const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 37_587;
 
 /// The default-context `UseLMR=false` arm.
 ///
@@ -211,7 +217,7 @@ const BENCH_NODE_COUNT_WITHOUT_PER_WORKER_HISTORY: u64 = 37_450;
 /// all-on-cheaper/LMR-off-dearer divergence continuation history produced, and for the
 /// same reason: low-ply ordering feeds the tree LMR then prunes, so removing LMR
 /// removes more search than before.
-const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 76_797;
+const BENCH_NODE_COUNT_WITHOUT_LMR: u64 = 77_360;
 
 fn workspace_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -566,7 +572,7 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     assert_eq!(nodes.len(), 14);
     let baseline = nodes[0];
     assert_eq!(
-        baseline, 3_473_752,
+        baseline, 3_477_682,
         "the NNUE all-selectivity-off signature must leave check extensions enabled"
     );
     for (name, enabled) in [
@@ -610,7 +616,7 @@ fn each_selectivity_toggle_changes_the_isolated_bench_node_count_by_two_percent(
     );
 
     assert_eq!(
-        nodes[13], 2_848_237,
+        nodes[13], 2_851_861,
         "UseCheckExt=false must reproduce the NNUE all-selectivity-off signature"
     );
 }
@@ -664,7 +670,7 @@ fn history_toggles_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 4);
 
-    assert_eq!(nodes, [40_369, 45_146, 40_948, 46_231]);
+    assert_eq!(nodes, [40_620, 45_289, 41_815, 46_372]);
 }
 
 /// `UseContHistory=false` must reproduce its NNUE signature bit-for-bit.
@@ -765,7 +771,7 @@ fn correction_variants_are_off_and_have_pinned_nnue_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
     assert_eq!(nodes.len(), 3);
 
-    assert_eq!(nodes, [BENCH_NODE_COUNT, 39_313, 45_176]);
+    assert_eq!(nodes, [BENCH_NODE_COUNT, 40_000, 45_373]);
 }
 
 /// `UseQSearchChecks` ships OFF, and this test records WHY in an executable form.
@@ -1017,7 +1023,7 @@ fn post_lmr_handling_cannot_reach_the_tree_without_lmr() {
     // default-context LMR-off tree rather than at some third thing.
     assert_eq!(
         nodes,
-        vec![68_221; 3],
+        vec![68_688; 3],
         "post-LMR handling must be completely inert while UseLMR is off"
     );
 }
@@ -1169,11 +1175,11 @@ fn disabling_history_reproduces_nnue_all_selectivity_off_signatures() {
     let nodes = metrics(stdout, "Nodes searched: ");
 
     assert_eq!(
-        nodes[0], 3_473_752,
+        nodes[0], 3_477_682,
         "ten selectivity toggles off with history off must match the NNUE anchor exactly"
     );
     assert_eq!(
-        nodes[13], 2_848_237,
+        nodes[13], 2_851_861,
         "all selectivity off with history off must match the NNUE anchor exactly"
     );
 }
@@ -1333,7 +1339,7 @@ fn per_worker_history_toggles_reproduce_the_pre_change_signature() {
          proving the unconditional maintenance has no side effect on the tree"
     );
     assert_eq!(
-        nodes[2], 38_862,
+        nodes[2], 39_105,
         "both reads ON must reproduce its pinned signature exactly, proving \
          UseTtMoveHistory still reaches the search from its OFF default"
     );
@@ -1524,11 +1530,11 @@ fn disabling_lmr_does_not_also_weaken_futility_and_see_pruning() {
         "UseLMR=false must reduce exactly the LMR reduction and nothing else"
     );
     assert_eq!(
-        nodes[2], 59_960,
+        nodes[2], 60_286,
         "the Futility+SEE-off arm is independent of the split"
     );
     assert_eq!(
-        nodes[3], 136_225,
+        nodes[3], 136_970,
         "with futility and SEE already off, UseLMR=false is unchanged by the split"
     );
 

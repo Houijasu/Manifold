@@ -3274,9 +3274,10 @@ fn quiescence(
     // the child-search loop, exactly as the interior loop does — sound mid-loop
     // because `make_move`/`unmake_move` restore the position bit-for-bit before the
     // loop asks for the next move (the `MovePicker` doc comment pins this), so each
-    // `next` call sees the node's own position. The picker's gate drops below-
-    // threshold captures at load, keeps promotions unconditionally, and yields the
-    // quiet-check widening only after every capture.
+    // `next` call sees the node's own position. The picker ranks captures without
+    // walking any exchange at load, drops below-threshold captures at yield time,
+    // keeps promotions unconditionally, and yields the quiet-check widening only
+    // after every capture.
     let mut evasions = MoveList::new();
     let mut qsearch_picker = if in_check {
         let mut picker = MovePicker::new(tt_move, [None, None], ordering);

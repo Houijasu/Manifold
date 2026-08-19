@@ -23,7 +23,7 @@ $ordinaryRelease = Join-Path $targetRoot 'release\manifold.exe'
 $networkPath = Join-Path $repositoryRoot 'nets\main.nnue'
 $nativeRustFlags = '-C target-cpu=native'
 $portableRustFlags = '-C target-cpu=x86-64'
-$expectedBenchSignature = 37420
+$expectedBenchSignature = 37557
 $expectedPerftSignature = 4865609
 $forbiddenInstructions = @('pext', 'pdep', 'bzhi', 'mulx', 'sarx', 'shlx', 'shrx', 'rorx')
 $buildInputPaths = @('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo', 'crates')

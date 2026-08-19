@@ -300,20 +300,26 @@ pub(crate) struct MovePicker<'a> {
     quiets: MoveList,
     quiet_scores: ScoreBuffer,
     quiet_yielded: MoveMask,
-    /// SEE gate for the qsearch variant: `Some(threshold)` drops every non-promotion
-    /// capture whose exchange stands below `threshold` while the capture stage loads;
-    /// `None` in the full and ProbCut variants, which gate nothing.
+    /// SEE gate for the qsearch variant: `Some(threshold)` gates every non-promotion
+    /// capture at YIELD time with `see_ge`, dropping below-threshold exchanges exactly
+    /// as the eager load-time gate did; `None` in the full and ProbCut variants, which
+    /// score eagerly and gate nothing. A threshold below zero admits losing captures
+    /// that must still yield after the winning ones, so those thresholds fall back to
+    /// a load-time threshold-0 predicate for the good/bad split.
     qsearch_see_threshold: Option<i32>,
     /// Whether the qsearch variant appends its quiet-checks stage after the bad
     /// captures. Only `MovePicker::qsearch` ever sets this.
     quiet_checks_after_captures: bool,
     quiet_check_moves: MoveList,
     quiet_check_index: usize,
-    /// Exact SEE of the most recently yielded move when it came from the captures
-    /// family (captures and promotions), `None` after a quiet. `load_captures` already
-    /// walks the full exchange once per capture; exposing the value lets search call
-    /// sites compare it against their own thresholds instead of re-walking it. A TT
-    /// capture's SEE is computed at yield time, before any generation.
+    /// Exact SEE of the most recently yielded move when the eager variants yielded it
+    /// from the captures family (captures and promotions), `None` after a quiet. The
+    /// lazy qsearch variant walks no exchange for its captures, so there its
+    /// capture-family yields expose `None` too — only the TT capture, validated
+    /// before any generation, keeps its exact value. `load_captures` already walks the
+    /// full exchange once per capture in the eager variants; exposing the value lets
+    /// search call sites compare it against their own thresholds instead of
+    /// re-walking it.
     current_capture_see: Option<i32>,
 }
 
@@ -348,14 +354,13 @@ impl<'a> MovePicker<'a> {
 
     /// Staged iteration for the non-check quiescence loop, replacing the old eager
     /// generate-score-sort-gate qsearch path. The TT move — when it is a capture or
-    /// promotion —
-    /// yields with no generation at all; the capture stages then load with the qsearch
-    /// SEE gate applied at load time; the quiet-check widening generates only if the
-    /// captures did not satisfy the loop. A node that cuts off on its TT capture or
-    /// the first good capture never pays for the widening, exactly as the interior
-    /// search never pays for quiet generation on a TT-move cutoff.
+    /// promotion — yields with no generation at all; the capture stages then load
+    /// WITHOUT any exchange walk (captures rank by MVV-LVA plus capture history) and
+    /// the SEE gate runs at yield time, so a node that cuts off early never pays for
+    /// the captures it never reaches; the quiet-check widening generates only if the
+    /// captures did not satisfy the loop.
     ///
-    /// Gate contract, carried over verbatim from the eager path this replaces:
+    /// Gate contract, carried over from the eager path this replaces:
     /// - the TT move is searched first and is exempt from the gate: the entry that
     ///   named it was produced by a search, which is strictly better evidence than a
     ///   static exchange estimate;
@@ -363,6 +368,13 @@ impl<'a> MovePicker<'a> {
     ///   which are always kept (dropping one because the pawn is recaptured loses the
     ///   tactic the qsearch exists to find);
     /// - quiet checks, when enabled, yield after every capture — never interleaved.
+    ///
+    /// Two thresholds get special handling: zero (the shipped gate) admits exactly
+    /// the winning captures, so it doubles as the good/bad split and no load-time
+    /// classification is needed; `i32::MIN` (the `UseSEEPruning=false` ablation)
+    /// admits every capture, so it can never reject one and the gate is skipped —
+    /// but the good-before-bad staging survives through a load-time threshold-0
+    /// predicate per capture.
     pub(crate) fn qsearch(
         tt_move: Option<Move>,
         see_threshold: i32,
@@ -421,7 +433,7 @@ impl<'a> MovePicker<'a> {
                     self.stage = Stage::GoodCaptures;
                 }
                 Stage::GoodCaptures => {
-                    if let Some(mv) = self.next_good_capture() {
+                    if let Some(mv) = self.next_good_capture(position) {
                         return Some(mv);
                     }
                     self.stage = if self.captures_only {
@@ -441,7 +453,7 @@ impl<'a> MovePicker<'a> {
                     self.stage = Stage::BadCaptures;
                 }
                 Stage::BadCaptures => {
-                    if let Some(mv) = self.next_bad_capture() {
+                    if let Some(mv) = self.next_bad_capture(position) {
                         return Some(mv);
                     }
                     self.stage = if self.quiet_checks_after_captures {
@@ -481,34 +493,51 @@ impl<'a> MovePicker<'a> {
                 self.capture_yielded.set(index);
                 continue;
             }
-            // One SEE per capture: the score, the good/bad split, the qsearch gate,
-            // and the value the search reads back through `current_capture_see` all
-            // share it.
-            #[cfg(feature = "instrumentation")]
-            crate::instrumentation::record(|counters| counters.see_calls_load_captures += 1);
-            let see = static_exchange_evaluation(position, mv);
-            // The qsearch gate drops below-threshold captures outright — they are
-            // never deferred to a later stage. Promotions are exempt: a promotion
-            // changes the material on the board by more than the exchange it
-            // initiates, and dropping one because the pawn is recaptured loses the
-            // tactic the qsearch exists to find. The TT move is exempt by construction:
-            // its slot is masked out above, before this gate runs.
-            if let Some(threshold) = self.qsearch_see_threshold
-                && mv.flag().promotion().is_none()
-                && see < threshold
-            {
-                self.capture_yielded.set(index);
-                continue;
-            }
-            self.capture_scores[index].write(capture_score_with_see(
-                position,
-                mv,
-                see,
-                self.ordering,
-            ));
-            self.capture_sees[index].write(see);
-            if see >= 0 {
-                self.capture_good.set(index);
+            match self.qsearch_see_threshold {
+                // Lazy qsearch variant: no exchange walk here. Captures are ranked by
+                // MVV-LVA plus capture history, and the SEE gate runs at yield time
+                // (see `pick_best_capture`), so a qsearch node that cuts off early
+                // never pays for the captures it never reaches. The good/bad split
+                // survives only when the gate cannot supply it itself — a
+                // below-threshold-zero gate admits losing captures that must still
+                // yield after the winning ones — and then one threshold-0 predicate
+                // per capture classifies it, exactly as the eager `see >= 0` did.
+                Some(threshold) => {
+                    self.capture_scores[index].write(mvv_lva_capture_score(
+                        position,
+                        mv,
+                        self.ordering,
+                    ));
+                    if threshold < 0 {
+                        #[cfg(feature = "instrumentation")]
+                        crate::instrumentation::record(|counters| {
+                            counters.see_calls_load_captures += 1;
+                        });
+                        if see_ge(position, mv, 0) {
+                            self.capture_good.set(index);
+                        }
+                    }
+                }
+                // Full and ProbCut variants: one exact SEE per capture — the score,
+                // the good/bad split, and the value the search reads back through
+                // `current_capture_see` all share it.
+                None => {
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record(|counters| {
+                        counters.see_calls_load_captures += 1;
+                    });
+                    let see = static_exchange_evaluation(position, mv);
+                    self.capture_scores[index].write(capture_score_with_see(
+                        position,
+                        mv,
+                        see,
+                        self.ordering,
+                    ));
+                    self.capture_sees[index].write(see);
+                    if see >= 0 {
+                        self.capture_good.set(index);
+                    }
+                }
             }
         }
     }
@@ -557,30 +586,65 @@ impl<'a> MovePicker<'a> {
 
     /// Yields the highest-scored un-yielded good capture. First-max-wins on ties, which
     /// reproduces the eager stable sort's generation-order tie-break exactly.
-    fn next_good_capture(&mut self) -> Option<Move> {
-        self.pick_best_capture(true)
+    fn next_good_capture(&mut self, position: &Position) -> Option<Move> {
+        self.pick_best_capture(true, position)
     }
 
-    fn next_bad_capture(&mut self) -> Option<Move> {
-        self.pick_best_capture(false)
+    fn next_bad_capture(&mut self, position: &Position) -> Option<Move> {
+        self.pick_best_capture(false, position)
     }
 
-    fn pick_best_capture(&mut self, good: bool) -> Option<Move> {
-        let mut best: Option<usize> = None;
-        for index in 0..self.captures.len() {
-            if self.capture_yielded.get(index) || self.capture_good.get(index) != good {
+    /// Yields the highest-scored un-yielded capture in the `good` half of the split
+    /// (first-max-wins on ties, reproducing the eager stable sort's generation-order
+    /// tie-break exactly).
+    ///
+    /// In the lazy qsearch variant this is also where the SEE gate runs: a picked
+    /// candidate must prove `see_ge(threshold)` before it is yielded, and a failure is
+    /// masked out exactly as the old load-time gate dropped it — never deferred, never
+    /// re-yielded. Promotions are exempt (dropping one because the pawn is recaptured
+    /// loses the tactic the qsearch exists to find), and so is the ablation's
+    /// admit-everything threshold, where the answer cannot be `false`.
+    fn pick_best_capture(&mut self, good: bool, position: &Position) -> Option<Move> {
+        loop {
+            let mut best: Option<usize> = None;
+            for index in 0..self.captures.len() {
+                if self.capture_yielded.get(index) || self.capture_good.get(index) != good {
+                    continue;
+                }
+                if best.is_none_or(|chosen| {
+                    read_score(&self.capture_scores, index)
+                        > read_score(&self.capture_scores, chosen)
+                }) {
+                    best = Some(index);
+                }
+            }
+            let index = best?;
+            let threshold = self.qsearch_see_threshold;
+            if threshold.is_some_and(|threshold| {
+                threshold != i32::MIN && self.captures[index].flag().promotion().is_none() && {
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record(|counters| {
+                        counters.see_calls_qsearch_yield_gate += 1;
+                    });
+                    !see_ge(position, self.captures[index], threshold)
+                }
+            }) {
+                // Dropped, not deferred: the load-time gate this replaces never gave
+                // the move a later stage either.
+                self.capture_yielded.set(index);
                 continue;
             }
-            if best.is_none_or(|chosen| {
-                read_score(&self.capture_scores, index) > read_score(&self.capture_scores, chosen)
-            }) {
-                best = Some(index);
-            }
+            self.capture_yielded.set(index);
+            // Only the eager variants memoize an exact SEE per capture; the lazy
+            // qsearch variant computes none, so its capture-family yields (other than
+            // the TT capture, which validates its own) expose `None`.
+            self.current_capture_see = if self.qsearch_see_threshold.is_none() {
+                Some(read_score(&self.capture_sees, index))
+            } else {
+                None
+            };
+            return Some(self.captures[index]);
         }
-        let index = best?;
-        self.capture_yielded.set(index);
-        self.current_capture_see = Some(read_score(&self.capture_sees, index));
-        Some(self.captures[index])
     }
 
     /// Yields the quiet with the highest score, breaking ties on the lower raw move
@@ -606,9 +670,11 @@ impl<'a> MovePicker<'a> {
         Some(self.quiets[index])
     }
 
-    /// Exact SEE of the move most recently yielded by `next`, when that move belongs
-    /// to the captures family; `None` after a quiet. The value is the one
-    /// `load_captures` computed, identical to calling
+    /// Exact SEE of the move most recently yielded by `next`, when the eager variants
+    /// yielded it from the captures family; `None` after a quiet, and `None` for
+    /// every non-TT capture the lazy qsearch variant yields (it computes no exchange
+    /// for them). Where a value is exposed, it is the one `load_captures` (or the
+    /// TT validation) computed — identical to calling
     /// `static_exchange_evaluation(position, mv)` at the node's root position.
     #[inline]
     pub(crate) fn current_capture_see(&self) -> Option<i32> {
@@ -722,6 +788,26 @@ fn capture_score_with_see(
     see: i32,
     ordering: OrderingContext<'_>,
 ) -> i32 {
+    let (victim, attacker, promotion) = capture_score_terms(position, mv);
+    see * 32 + material_value(victim) * 16 - material_value(attacker)
+        + promotion
+        + ordering.capture_history(position, mv)
+}
+
+/// Capture score for the lazy qsearch variant: the eager formula with the SEE term
+/// dropped, so ranking captures needs no exchange walk at all. The yield-time gate
+/// supplies the losing-capture filtering the SEE term used to contribute.
+fn mvv_lva_capture_score(position: &Position, mv: Move, ordering: OrderingContext<'_>) -> i32 {
+    let (victim, attacker, promotion) = capture_score_terms(position, mv);
+    material_value(victim) * 16 - material_value(attacker)
+        + promotion
+        + ordering.capture_history(position, mv)
+}
+
+/// (victim kind, attacker kind, promotion material bonus) shared by both capture
+/// scoring formulas. En-passant captures name a pawn as the victim; promotions add
+/// the created piece minus the consumed pawn.
+fn capture_score_terms(position: &Position, mv: Move) -> (PieceKind, PieceKind, i32) {
     let victim = if mv.flag().is_en_passant() {
         PieceKind::Pawn
     } else {
@@ -736,9 +822,7 @@ fn capture_score_with_see(
     let promotion = mv.flag().promotion().map_or(0, |kind| {
         material_value(kind) - material_value(PieceKind::Pawn)
     });
-    see * 32 + material_value(victim) * 16 - material_value(attacker)
-        + promotion
-        + ordering.capture_history(position, mv)
+    (victim, attacker, promotion)
 }
 
 fn quiet_score(
@@ -971,13 +1055,19 @@ mod tests {
     /// 2. TT FIRST: a capture-family TT move is yielded before anything else and is
     ///    exempt from the gate, so it is present even when its own SEE sits below the
     ///    threshold.
-    /// 3. STAGE order: good captures (SEE >= 0) before bad captures, every capture
-    ///    before every quiet check, no interleaving.
-    /// 4. WITHIN-stage order: each capture stage descends by `capture_score`.
+    /// 3. STAGE order: when the threshold classifies the split (any below-zero
+    ///    threshold, including the `UseSEEPruning=false` ablation's admit-everything
+    ///    `i32::MIN`), good captures (SEE >= 0) still precede bad ones. At the
+    ///    shipped zero threshold the gate IS the split — it drops exactly the losing
+    ///    non-promotions — so captures yield in a single pass with no split.
+    ///    Either way, every capture precedes every quiet check, no interleaving.
+    /// 4. WITHIN-pass order: captures descend by `mvv_lva_capture_score` (the eager
+    ///    formula without the SEE term — the lazy variant ranks no exchange).
     /// 5. GATE: no non-promotion capture below the threshold is ever yielded, while
     ///    every promotion is yielded regardless of its SEE.
-    /// 6. SEE contract: every capture-family yield exposes its exact SEE through
-    ///    `current_capture_see`, every quiet exposes `None`.
+    /// 6. SEE contract: only the TT capture (validated before any generation)
+    ///    exposes its exact SEE through `current_capture_see`; every other yield
+    ///    exposes `None`, because the lazy variant walks no exchange for it.
     #[test]
     fn qsearch_picker_honors_the_gate_exemptions_and_stage_order() {
         let history = SharedHistory::new();
@@ -986,7 +1076,7 @@ mod tests {
                 continue;
             }
             let ordering = empty_ordering(&history, &position);
-            for threshold in [-50, 0, 50] {
+            for threshold in [i32::MIN, -50, 0, 50] {
                 for include_quiet_checks in [false, true] {
                     for tt_move in tt_scenarios(&position) {
                         let mut picker =
@@ -1042,8 +1132,11 @@ mod tests {
                             assert_eq!(yielded[0].0, tt, "{position:?}");
                         }
 
-                        // 3. Stage order: good captures, then bad captures, then
-                        // (optionally) quiet checks — never interleaved.
+                        // 3. Stage order. A below-zero threshold classifies the
+                        // good/bad split at load, so good captures must precede bad
+                        // ones; the zero and positive thresholds let the gate supply
+                        // the split itself, so captures yield in one pass. Either
+                        // way every capture precedes every quiet check.
                         let stages: Vec<_> = yielded
                             .iter()
                             .map(|(mv, _)| {
@@ -1058,32 +1151,53 @@ mod tests {
                                 }
                             })
                             .collect();
-                        assert!(
-                            stages.windows(2).all(|pair| pair[0] <= pair[1]),
-                            "stages interleave: {position:?} tt={tt_move:?} \
-                             t={threshold} q={include_quiet_checks} stages={stages:?}"
-                        );
+                        if threshold < 0 {
+                            assert!(
+                                stages.windows(2).all(|pair| pair[0] <= pair[1]),
+                                "stages interleave: {position:?} tt={tt_move:?} \
+                                 t={threshold} q={include_quiet_checks} stages={stages:?}"
+                            );
+                        } else {
+                            let last_capture =
+                                yielded.iter().rposition(|(mv, _)| is_capture_family(*mv));
+                            let first_check =
+                                yielded.iter().position(|(mv, _)| !is_capture_family(*mv));
+                            if let (Some(last_capture), Some(first_check)) =
+                                (last_capture, first_check)
+                            {
+                                assert!(
+                                    last_capture < first_check,
+                                    "quiet check interleaved with captures: {position:?} \
+                                     tt={tt_move:?} t={threshold} q={include_quiet_checks}"
+                                );
+                            }
+                        }
 
-                        // 4. Within-stage order descends by capture score. The TT
-                        // capture is exempt: it is yielded first on search evidence,
-                        // not on score, so the pair straddling it is skipped just as
-                        // the full-picker invariant test slices it off.
+                        // 4. Within-pass order descends by the lazy variant's score
+                        // (the eager formula minus the SEE term). The TT capture is
+                        // exempt: it is yielded first on search evidence, not on
+                        // score, so the pair straddling it is skipped just as the
+                        // full-picker invariant test slices it off. Below-zero
+                        // thresholds keep the good/bad split, so only same-half
+                        // pairs are comparable; at zero and above the pass is
+                        // unified and every adjacent capture pair is.
                         for pair in yielded.windows(2) {
                             let (a, _) = pair[0];
                             let (b, _) = pair[1];
                             if Some(a) == tt_capture || Some(b) == tt_capture {
                                 continue;
                             }
-                            if is_capture_family(a)
-                                && is_capture_family(b)
-                                && (static_exchange_evaluation(&position, a) >= 0)
-                                    == (static_exchange_evaluation(&position, b) >= 0)
-                            {
-                                assert!(
-                                    capture_score(&position, a, ordering)
-                                        >= capture_score(&position, b, ordering),
-                                    "capture order violated: {position:?} {a:?} {b:?}"
-                                );
+                            if is_capture_family(a) && is_capture_family(b) {
+                                let comparable = threshold >= 0
+                                    || (static_exchange_evaluation(&position, a) >= 0)
+                                        == (static_exchange_evaluation(&position, b) >= 0);
+                                if comparable {
+                                    assert!(
+                                        mvv_lva_capture_score(&position, a, ordering)
+                                            >= mvv_lva_capture_score(&position, b, ordering),
+                                        "capture order violated: {position:?} {a:?} {b:?}"
+                                    );
+                                }
                             }
                         }
 
@@ -1109,9 +1223,12 @@ mod tests {
                             }
                         }
 
-                        // 6. The SEE contract on every yield, including the TT move.
+                        // 6. The SEE contract on every yield: the TT capture —
+                        // validated before any generation — still exposes its exact
+                        // SEE; every other yield exposes `None`, because the lazy
+                        // variant walks no exchange for the moves it yields.
                         for &(mv, see) in &yielded {
-                            let expected_see = is_capture_family(mv)
+                            let expected_see = (Some(mv) == tt_capture && is_capture_family(mv))
                                 .then(|| static_exchange_evaluation(&position, mv));
                             assert_eq!(see, expected_see, "{position:?} {mv:?}");
                         }
