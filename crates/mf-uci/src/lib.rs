@@ -1556,6 +1556,8 @@ struct GoParameters {
     /// `ponderhit` (convert to a normal timed search) or `stop` (ponder miss).
     ponder: bool,
     infinite: bool,
+    /// A recognized finite keyword had no parseable value.
+    malformed_finite_value: bool,
 }
 
 /// Reads a non-negative millisecond or count value, clamping a negative one to zero.
@@ -1623,7 +1625,10 @@ impl GoParameters {
                         parameters.mate = Some(parsed.min(u64::from(u32::MAX)) as u32);
                         finite_value_parsed = true;
                     }
-                    None => ignored.push(key.to_string()),
+                    None => {
+                        ignored.push(key.to_string());
+                        parameters.malformed_finite_value = true;
+                    }
                 }
                 recognized = true;
                 continue;
@@ -1640,6 +1645,7 @@ impl GoParameters {
             }
             let Some(value) = tokens.get(index).copied() else {
                 ignored.push(key.to_string());
+                parameters.malformed_finite_value |= finite_keyword;
                 break;
             };
 
@@ -1669,7 +1675,10 @@ impl GoParameters {
                         *slot = Some(parsed);
                         finite_value_parsed |= finite_keyword;
                     }
-                    None => ignored.push(format!("{key} {value}")),
+                    None => {
+                        ignored.push(format!("{key} {value}"));
+                        parameters.malformed_finite_value |= finite_keyword;
+                    }
                 }
             } else if key.eq_ignore_ascii_case("depth") {
                 index += 1;
@@ -1679,7 +1688,10 @@ impl GoParameters {
                         parameters.depth = Some(parsed.min(u64::from(u32::MAX)) as u32);
                         finite_value_parsed = true;
                     }
-                    None => ignored.push(format!("{key} {value}")),
+                    None => {
+                        ignored.push(format!("{key} {value}"));
+                        parameters.malformed_finite_value = true;
+                    }
                 }
             } else {
                 // An unrecognized key. Skip a numeric follower too, on the assumption it
@@ -1761,9 +1773,23 @@ impl GoParameters {
             let (soft_time, hard_time) = self.clock_limits(position, move_overhead_millis);
             (soft_time, hard_time, soft_time.is_some())
         };
+        let emergency_nodes = self.malformed_finite_value
+            && !self.infinite
+            && self.depth.is_none()
+            && self.nodes.is_none()
+            && self.movetime.is_none()
+            && self.mate.is_none()
+            && soft_time.is_none()
+            && hard_time.is_none();
         SearchLimits {
             depth: if self.infinite { None } else { self.depth },
-            nodes: if self.infinite { None } else { self.nodes },
+            nodes: if self.infinite {
+                None
+            } else if emergency_nodes {
+                Some(1)
+            } else {
+                self.nodes
+            },
             soft_time,
             hard_time,
             infinite: self.infinite,
@@ -3017,6 +3043,80 @@ mod tests {
         let (parameters, _) = GoParameters::parse(&["depth", "banana", "nodes", "20"]).unwrap();
         assert_eq!(parameters.nodes, Some(20));
         assert!(!parameters.infinite);
+    }
+
+    #[test]
+    fn malformed_side_to_move_clock_uses_an_emergency_node_budget_for_either_color() {
+        let white_to_move = Position::startpos();
+        let mut black_to_move = white_to_move.clone();
+        let e2e4 = parse_uci_move(&black_to_move, "e2e4", false).expect("e2e4 is legal");
+        black_to_move.make_move(e2e4);
+
+        for (arguments, position) in [
+            (&["wtime", "banana", "btime", "1000"][..], &white_to_move),
+            (&["btime", "banana", "wtime", "1000"][..], &black_to_move),
+        ] {
+            let (parameters, ignored) =
+                GoParameters::parse(arguments).expect("clock arguments should parse");
+            assert!(parameters.malformed_finite_value, "{arguments:?}");
+            assert!(!ignored.is_empty(), "{arguments:?}");
+
+            let limits = parameters.search_limits(position, TIME_OVERHEAD_MILLIS);
+            assert_eq!(limits.nodes, Some(1), "{arguments:?}");
+            assert_eq!(limits.depth, None, "{arguments:?}");
+            assert_eq!(limits.soft_time, None, "{arguments:?}");
+            assert_eq!(limits.hard_time, None, "{arguments:?}");
+            assert!(!limits.infinite, "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn usable_finite_sibling_wins_over_a_malformed_clock() {
+        let white_to_move = Position::startpos();
+        let mut black_to_move = white_to_move.clone();
+        let e2e4 = parse_uci_move(&black_to_move, "e2e4", false).expect("e2e4 is legal");
+        black_to_move.make_move(e2e4);
+
+        let (nodes, _) =
+            GoParameters::parse(&["wtime", "banana", "btime", "1000", "nodes", "20"]).unwrap();
+        let limits = nodes.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, Some(20));
+
+        let (depth, _) =
+            GoParameters::parse(&["wtime", "banana", "btime", "1000", "depth", "5"]).unwrap();
+        let limits = depth.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.depth, Some(5));
+        assert_eq!(limits.nodes, None);
+
+        let (movetime, _) =
+            GoParameters::parse(&["wtime", "banana", "btime", "1000", "movetime", "100"]).unwrap();
+        let limits = movetime.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+        assert!(limits.hard_time.is_some());
+
+        let (white_clock, _) = GoParameters::parse(&["btime", "banana", "wtime", "1000"]).unwrap();
+        let limits = white_clock.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+
+        let (black_clock, _) = GoParameters::parse(&["wtime", "banana", "btime", "1000"]).unwrap();
+        let limits = black_clock.search_limits(&black_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+
+        let (mate, _) =
+            GoParameters::parse(&["wtime", "banana", "btime", "1000", "mate", "3"]).unwrap();
+        let limits = mate.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+
+        let (infinite, _) =
+            GoParameters::parse(&["infinite", "wtime", "banana", "btime", "1000"]).unwrap();
+        let limits = infinite.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert!(limits.infinite);
+        assert_eq!(limits.nodes, None);
+        assert_eq!(limits.soft_time, None);
+        assert_eq!(limits.hard_time, None);
     }
 
     #[test]

@@ -614,12 +614,12 @@ fn malformed_finite_go_returns_one_legal_bestmove_and_exits_cleanly() {
     let mut engine = InteractiveUci::spawn();
 
     engine.send("position startpos");
-    engine.send("go depth banana");
+    engine.send("go wtime banana btime 1000");
     assert_eq!(
         engine.receive_until(watchdog(Duration::from_secs(2)), |line| {
-            line == "info string ignoring unrecognized go arguments: depth banana"
+            line == "info string ignoring unrecognized go arguments: wtime banana"
         }),
-        Some("info string ignoring unrecognized go arguments: depth banana".to_string())
+        Some("info string ignoring unrecognized go arguments: wtime banana".to_string())
     );
     let bestmove = engine
         .receive_until(watchdog(Duration::from_secs(2)), |line| {
