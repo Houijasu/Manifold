@@ -76,6 +76,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseTimeEffort type check default false",
     "option name UseInterpolatedTimeManagement type check default false",
     "option name UseSearchAgainDepth type check default false",
+    "option name UseCheckedNodeEval type check default true",
     "option name EvalFile type string default <empty>",
     "option name SyzygyPath type string default <empty>",
 ];
@@ -1084,6 +1085,10 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UseSearchAgainDepth") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_search_again_depth = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseCheckedNodeEval") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_checked_node_eval = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseSingularExt") {
         if let Some(enabled) = parse_check_option(&value) {
@@ -2514,6 +2519,46 @@ mod tests {
         )
         .expect("false check write should be accepted");
         assert!(!state.search_options.use_search_again_depth);
+    }
+
+    #[test]
+    fn checked_node_eval_check_option_persists_and_rejects_malformed_values() {
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
+        assert!(state.search_options.use_checked_node_eval);
+
+        handle_setoption(
+            "SeToPtIoN NaMe UsEcHeCkEdNoDeEvAl VaLuE fAlSe",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("mixed-case check write should be accepted");
+        assert!(!state.search_options.use_checked_node_eval);
+
+        state
+            .new_game()
+            .expect("new game should clear search state without resetting options");
+        assert!(!state.search_options.use_checked_node_eval);
+
+        let mut output = Vec::new();
+        handle_setoption(
+            "setoption name UseCheckedNodeEval value banana",
+            &mut state,
+            &mut output,
+        )
+        .expect("malformed check write should be writable");
+        assert!(!state.search_options.use_checked_node_eval);
+        assert_eq!(
+            String::from_utf8(output).expect("protocol output should be UTF-8"),
+            "info string invalid UseCheckedNodeEval value 'banana' (expected true|false)\n"
+        );
+
+        handle_setoption(
+            "setoption name UseCheckedNodeEval value TRUE",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("true check write should be accepted");
+        assert!(state.search_options.use_checked_node_eval);
     }
 
     /// An oversize request resizes to the advertised maximum and says so.

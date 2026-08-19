@@ -116,6 +116,16 @@ use std::time::{Duration, Instant};
 const BENCH_NODE_COUNT: u64 = 37_420;
 const BENCH_NODES: &str = "Nodes searched: 37420";
 
+/// The signature with `UseCheckedNodeEval=false`: the checked-node-eval experiment's
+/// own bench anchor.
+///
+/// In-check interior nodes then skip the fresh NNUE forward and the TT static-eval
+/// read, store the `UNEVALUATED_STATIC_EVAL` sentinel like qsearch does, and pin
+/// `improving = false` / `corrplexity = 0`. On this suite only the fourth position's
+/// tree moves (6_006 -> 5_892): the pinned `improving` changes an LMR reduction on a
+/// quiet check evasion. Recorded from this implementation.
+const BENCH_NODE_COUNT_WITHOUT_CHECKED_NODE_EVAL: u64 = 37_306;
+
 /// The signature with `UseCorrplexity=true`: the low-ply-plus-proxy tree. The toggle
 /// gates the three consumption reads only, so an exact anchor proves the feature adds
 /// no computation and no side effect beyond them. Pinned from the OFF side since the
@@ -1103,6 +1113,47 @@ fn search_again_depth_preserves_the_control_bench_signature() {
     );
 }
 
+/// `UseCheckedNodeEval` ships ON: the default and explicit-on arms must reproduce the
+/// shipped signature bit-for-bit, and the off arm is pinned at its own signature.
+///
+/// The off arm is the checked-node-eval experiment: in-check interior nodes skip the
+/// fresh NNUE forward and the TT static-eval read, store the `UNEVALUATED_STATIC_EVAL`
+/// sentinel like qsearch does, and pin `improving = false` / `corrplexity = 0`. That
+/// changes the tree -- which is the point of the experiment -- so the off arm gets its
+/// own exact anchor, recorded from this implementation. A change that moves the OFF
+/// number has changed what the experiment measures; a change that moves either ON
+/// number has broken the bit-identical-default contract.
+#[test]
+fn checked_node_eval_ships_on_and_the_off_arm_has_its_own_signature() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseCheckedNodeEval value true\n\
+         bench\n\
+         setoption name UseCheckedNodeEval value false\n\
+         bench\n\
+         quit\n",
+        "UCI checked-node eval session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 3);
+
+    assert_eq!(
+        nodes,
+        [
+            BENCH_NODE_COUNT,
+            BENCH_NODE_COUNT,
+            BENCH_NODE_COUNT_WITHOUT_CHECKED_NODE_EVAL,
+        ],
+        "checked-node evaluation must be ON in the shipped default, and the off arm \
+         must reproduce its own pinned signature"
+    );
+}
+
 /// Turning history off must reproduce the pinned NNUE all-off signatures bit-for-bit.
 ///
 /// This is the proof that M4-F1 moved the shipped bench signature by adding history
@@ -1415,6 +1466,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseContHistory",
         "UseLowPlyHistory",
         "UsePostLMRDepth",
+        "UseCheckedNodeEval",
     ] {
         assert!(
             stdout

@@ -44,7 +44,7 @@ Other top-level directories:
 - Chess960 is first-class: castling rights are stored as rook squares, and `Position::from_fen` (X-FEN rook-file rights), `format_uci_move`/`parse_uci_move` (king-takes-rook castling notation), and the UCI `UCI_Chess960` option all take a `chess960` flag. Always thread that flag through instead of assuming standard castling.
 - Interactive UCI commands include `uci`, `isready`, `ucinewgame`, `setoption`, `position`, `go` time/depth/nodes/mate/searchmoves/ponder/infinite/perft forms, `ponderhit`, `stop`, `d`, `eval`, `bench`, and `quit`. On otherwise recognized `go` commands, unsupported or invalid arguments are diagnosed and ignored; wholly unrecognized argument lists are ignored as malformed. A recognized finite `go` left with no usable stop (malformed values, or a clock only for the non-moving side) receives a one-node emergency budget so the engine always answers promptly; explicit `go infinite` stays infinite.
 - `manifold mtbench` is a standalone CLI subcommand, not an interactive UCI command.
-- Key UCI handshake defaults are `Threads=1`, `Hash=16 MiB`, `MultiPV=1`, `Ponder=false`, `UCI_Chess960=false`, `EvalFile=<empty>`, and `SyzygyPath=<empty>`.
+- Key UCI handshake defaults are `Threads=1`, `Hash=16 MiB`, `MultiPV=1`, `Ponder=false`, `UCI_Chess960=false`, `UseCheckedNodeEval=true`, `EvalFile=<empty>`, and `SyzygyPath=<empty>`.
 
 ## Coding Style & Naming Conventions
 

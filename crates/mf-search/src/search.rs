@@ -696,6 +696,14 @@ pub struct SearchOptions {
     pub use_interpolated_time_management: bool,
     /// Slow nominal depth growth after half of the effective soft budget is spent.
     pub use_search_again_depth: bool,
+    /// Evaluate interior nodes statically even when the side to move is in check.
+    ///
+    /// Gates only the checked-node fresh forward and TT static-eval read in `pvs`:
+    /// with it OFF an in-check node takes the qsearch sentinel path instead (no fresh
+    /// forward, no TT static-eval read, `improving`/`corrplexity` pinned). The ON
+    /// default keeps the shipped tree bit-identical while the OFF arm is measured --
+    /// see `docs/superpowers/specs/2026-08-19-checked-node-eval-design.md`.
+    pub use_checked_node_eval: bool,
     /// Number of principal variations worker 0 reports at each completed depth.
     pub multi_pv: u32,
     /// The tunable margins, slopes, and divisors the enabled techniques are shaped by.
@@ -949,6 +957,10 @@ impl Default for SearchOptions {
             use_time_effort: false,
             use_interpolated_time_management: false,
             use_search_again_depth: false,
+            // The checked-node eval experiment ships ON: the default keeps the shipped
+            // tree bit-identical (bench 37_420) while the OFF arm's SPRT measurement
+            // is pending. See the field's doc comment and the design doc.
+            use_checked_node_eval: true,
             multi_pv: 1,
             parameters: SearchParameters::default(),
         }
@@ -2289,41 +2301,13 @@ fn pvs(
     if in_check {
         crate::instrumentation::record(|counters| counters.checked_interior_nodes += 1);
     }
-    // The RAW static eval is what goes to the TT, deliberately. Storing the corrected
-    // value would fold a residual that was learned at one point in the search into an
-    // entry read at another, and the correction would then be applied a second time on
-    // top of itself on every re-probe. The reference is explicit about this.
-    let raw_static_eval = tt_entry
-        .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
-        .map_or_else(
-            || {
-                #[cfg(feature = "instrumentation")]
-                crate::instrumentation::record(|counters| counters.interior_static_evals += 1);
-                context.static_eval(position)
-            },
-            |entry| i32::from(entry.static_eval),
-        );
+    let eval = node_eval(position, tt_entry, in_check, ply, context);
     #[cfg(feature = "corrhist-regression")]
     let correction_features = correction_features(position, context, ply);
-    let correction = correction_value(position, context, ply);
-    let static_eval = to_corrected_static_eval(raw_static_eval, correction);
-    // The blend's magnitude doubles as the engine's complexity proxy: LMR, RFP, and
-    // the singular double margin all consume it below. `use_corrplexity` gates those
-    // three READS only; the correction applied to the eval above is untouched.
-    let corrplexity = if context.options.use_corrplexity {
-        correction.abs()
-    } else {
-        0
-    };
-    // `improving` is a shared derived value: it feeds the LMR reduction, which feeds
-    // `effective_depth`, which futility and SEE pruning read. Gating it on a set of
-    // toggles is the AGENTS.md 4.4 defect class, so it is always computed.
-    context.static_evals[ply] = (!in_check).then_some(static_eval);
-    let mut improving = is_improving(
-        static_eval,
-        ply.checked_sub(2)
-            .and_then(|previous_ply| context.static_evals[previous_ply]),
-    );
+    let raw_static_eval = eval.raw_static_eval;
+    let static_eval = eval.static_eval;
+    let corrplexity = eval.corrplexity;
+    let mut improving = eval.improving;
     let tt_pv = tt_entry.is_some_and(|entry| entry.pv);
     if !in_check && !pv_node && excluded_move.is_none() {
         if context.options.use_razoring
@@ -4385,6 +4369,101 @@ fn to_corrected_static_eval(static_eval: i32, correction: i32) -> i32 {
         .clamp(-TABLEBASE_WIN_IN_MAX_PLY + 1, TABLEBASE_WIN_IN_MAX_PLY - 1)
 }
 
+/// The static-eval bundle one `pvs` node derives before any pruning consumer reads it.
+///
+/// Factored out of `pvs` so the `use_checked_node_eval` toggle's pinned semantics are
+/// testable directly instead of only through whole-search signatures.
+struct NodeEval {
+    /// The raw value, which is exactly what this node's TT stores carry. The
+    /// `UNEVALUATED_STATIC_EVAL` sentinel at a checked node whose evaluation was
+    /// skipped, matching the qsearch in-check convention.
+    raw_static_eval: i32,
+    /// The corrected value the pruning consumers threshold against.
+    static_eval: i32,
+    /// The corrhist blend's magnitude, doubling as the engine's complexity proxy.
+    corrplexity: i32,
+    /// Whether this side's corrected eval beat the one from two plies ago.
+    improving: bool,
+}
+
+/// Derives one interior node's static eval, correction, complexity proxy, and
+/// improving flag, and records the corrected eval in the per-ply history.
+///
+/// With `use_checked_node_eval` OFF an in-check node mirrors the qsearch convention:
+/// no fresh forward, no TT static-eval read, the sentinel flows to this node's TT
+/// store so later probes cannot reuse a value that was never computed, and the
+/// behavioral consumers are pinned (`improving = false`, `corrplexity = 0`, no
+/// correction). Every pruning consumer of these values is already gated on
+/// `!in_check`; the two that are not (the LMR reduction and the singular double
+/// margin) receive the pinned values. With the toggle ON this is the historical path,
+/// bit-identical.
+fn node_eval(
+    position: &Position,
+    tt_entry: Option<EntryData>,
+    in_check: bool,
+    ply: usize,
+    context: &mut SearchContext<'_>,
+) -> NodeEval {
+    if in_check && !context.options.use_checked_node_eval {
+        #[cfg(feature = "instrumentation")]
+        crate::instrumentation::record(|counters| counters.checked_node_evals_skipped += 1);
+        // The eval history is written at EVERY node rather than skipped in check,
+        // because the slot outlives the node: a stale value from an earlier branch at
+        // the same ply would otherwise be misread as this line's two-plies-ago eval.
+        context.static_evals[ply] = None;
+        return NodeEval {
+            raw_static_eval: i32::from(UNEVALUATED_STATIC_EVAL),
+            static_eval: i32::from(UNEVALUATED_STATIC_EVAL),
+            corrplexity: 0,
+            improving: false,
+        };
+    }
+    // The RAW static eval is what goes to the TT, deliberately. Storing the corrected
+    // value would fold a residual that was learned at one point in the search into an
+    // entry read at another, and the correction would then be applied a second time on
+    // top of itself on every re-probe. The reference is explicit about this.
+    let raw_static_eval = tt_entry
+        .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
+        .map_or_else(
+            || {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| {
+                    counters.interior_static_evals += 1;
+                    if in_check {
+                        counters.checked_node_static_evals += 1;
+                    }
+                });
+                context.static_eval(position)
+            },
+            |entry| i32::from(entry.static_eval),
+        );
+    let correction = correction_value(position, context, ply);
+    let static_eval = to_corrected_static_eval(raw_static_eval, correction);
+    // The blend's magnitude doubles as the engine's complexity proxy: LMR, RFP, and
+    // the singular double margin all consume it below. `use_corrplexity` gates those
+    // three READS only; the correction applied to the eval above is untouched.
+    let corrplexity = if context.options.use_corrplexity {
+        correction.abs()
+    } else {
+        0
+    };
+    // `improving` is a shared derived value: it feeds the LMR reduction, which feeds
+    // `effective_depth`, which futility and SEE pruning read. Gating it on a set of
+    // toggles is the AGENTS.md 4.4 defect class, so it is always computed.
+    context.static_evals[ply] = (!in_check).then_some(static_eval);
+    let improving = is_improving(
+        static_eval,
+        ply.checked_sub(2)
+            .and_then(|previous_ply| context.static_evals[previous_ply]),
+    );
+    NodeEval {
+        raw_static_eval,
+        static_eval,
+        corrplexity,
+        improving,
+    }
+}
+
 /// Records the residual between the search result and the static evaluation.
 ///
 /// The guard is the reference's verbatim, and each clause earns its place:
@@ -5570,6 +5649,137 @@ mod tests {
         assert_eq!(
             result.iterations.last().map(|iteration| iteration.tbhits),
             Some(result.tbhits)
+        );
+    }
+
+    /// Black to move is in check from the rook on b1; the mate in one (`Qxb1#` from
+    /// d1, defended by the knight on c3) is the mate corpus's in-check case.
+    const IN_CHECK_FEN: &str = "8/8/8/8/1k6/2n5/8/KR1q4 b - - 0 1";
+
+    /// The pinned values themselves: a skipped checked node carries the sentinel, no
+    /// correction, a zero complexity proxy, and no improving evidence.
+    #[test]
+    fn node_eval_pins_the_bundle_at_a_skipped_checked_node() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let run = |use_checked_node_eval: bool| {
+            let position =
+                Position::from_fen(IN_CHECK_FEN, false).expect("in-check FEN should parse");
+            assert!(is_in_check(&position, position.side_to_move()));
+            let table = TranspositionTable::new(1).expect("test TT should allocate");
+            let stop = AtomicBool::new(false);
+            let counters = [NodeCounter::new(0)];
+            let history = [position.repetition_key()];
+            let shared_history = SharedHistory::new();
+            let low_ply_history = LowPlyHistory::new();
+            let mut context = SearchContext::new(
+                &table,
+                SearchLimits::default(),
+                None,
+                &stop,
+                &position,
+                &history,
+                &shared_history,
+                &low_ply_history,
+                SearchOptions {
+                    use_checked_node_eval,
+                    ..SearchOptions::default()
+                },
+                0,
+                0,
+                &counters,
+                network,
+            );
+            let eval = node_eval(&position, None, true, 1, &mut context);
+            (eval, context.static_evals[1])
+        };
+
+        let (skipped, history_slot) = run(false);
+        assert_eq!(
+            skipped.raw_static_eval,
+            i32::from(UNEVALUATED_STATIC_EVAL),
+            "a skipped checked node carries the sentinel, matching qsearch"
+        );
+        assert_eq!(skipped.corrplexity, 0, "no eval means a zero proxy");
+        assert!(!skipped.improving, "no eval means no improving evidence");
+        assert_eq!(
+            history_slot, None,
+            "a skipped checked node must leave the eval history unpopulated"
+        );
+
+        let (evaluated, history_slot) = run(true);
+        assert_ne!(
+            evaluated.raw_static_eval,
+            i32::from(UNEVALUATED_STATIC_EVAL),
+            "the default arm evaluates checked nodes"
+        );
+        assert!(
+            history_slot.is_none(),
+            "static_evals stays unpopulated in check either way"
+        );
+    }
+
+    /// At the `pvs` boundary: with the toggle off an in-check node stores the sentinel
+    /// in the TT, so later probes can never reuse a static eval that was not computed.
+    #[test]
+    fn skipped_checked_node_stores_the_sentinel_in_the_tt() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let mut position =
+            Position::from_fen(IN_CHECK_FEN, false).expect("in-check FEN should parse");
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits::default(),
+            None,
+            &stop,
+            &position,
+            &history,
+            &shared_history,
+            &low_ply_history,
+            SearchOptions {
+                use_checked_node_eval: false,
+                ..SearchOptions::default()
+            },
+            0,
+            0,
+            &counters,
+            network,
+        );
+        let mut pv = PvLine::new();
+        pvs(
+            &mut position,
+            4,
+            -INFINITY,
+            INFINITY,
+            1,
+            true,
+            false,
+            true,
+            false,
+            None,
+            &mut context,
+            &mut pv,
+        )
+        .expect("unbounded test search should complete");
+
+        assert!(
+            context.static_evals[1].is_none(),
+            "a skipped checked node must leave the eval history unpopulated"
+        );
+        let entry = table
+            .probe(position.repetition_key())
+            .expect("pvs should store a TT entry");
+        assert_eq!(
+            entry.static_eval, UNEVALUATED_STATIC_EVAL,
+            "a skipped checked node must store the sentinel, matching qsearch"
         );
     }
 
