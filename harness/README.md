@@ -106,8 +106,14 @@ replacing the prior output, and restores the prior output if final validation fa
 requires tracked Rust/Cargo inputs to match HEAD before building and publication, clears
 `CARGO_ENCODED_RUSTFLAGS` during every stage, and restores the caller's
 `CARGO_TARGET_DIR`, `RUSTFLAGS`, and `CARGO_ENCODED_RUSTFLAGS` values on every exit path.
-With `-MeasureNps`, `target\pgo\nps-verdict.txt` records the command, output, and exit code,
-and metadata records its verdict and hash; without it, both files explicitly say not measured.
+The ignored embedded network `nets\main.nnue` is also required and must retain its captured
+size and SHA-256 across every build and publication boundary.
+
+With `-MeasureNps`, artifacts are committed first with a pending verdict, then the two published
+`target\pgo` copies are compared. `target\pgo\nps-verdict.txt` records the command, output, and
+exit code, and metadata records its verdict and hash. A failed comparison preserves the newly
+published artifacts and failed evidence but exits non-zero without printing success. Without
+measurement, both files explicitly say not measured.
 
 Two things it enforces mechanically:
 

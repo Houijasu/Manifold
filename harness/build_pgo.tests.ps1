@@ -27,11 +27,20 @@ try {
     if ($_.Exception.Data['ExitCode'] -ne 6) { throw 'native failure used the wrong exit code' }
 }
 
+$observedBuildInputPaths = $null
 Assert-BuildInputsMatchHead -GetStatus {
+    param([string[]]$Paths)
+    $script:observedBuildInputPaths = $Paths
     [pscustomobject]@{ ExitCode = 0; Lines = @() }
+}
+foreach ($requiredPath in @('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo', 'crates')) {
+    if ($observedBuildInputPaths -notcontains $requiredPath) {
+        throw "build input status omitted $requiredPath"
+    }
 }
 try {
     Assert-BuildInputsMatchHead -GetStatus {
+        param([string[]]$Paths)
         [pscustomobject]@{
             ExitCode = 0
             Lines = @(' M crates/mf-search/src/lib.rs', '?? crates/new.rs')
@@ -42,6 +51,45 @@ try {
     if ($_.Exception.Message -eq 'dirty build inputs must be rejected') { throw }
     if ($_.Exception.Message -notmatch 'build inputs differ from HEAD') { throw }
     if ($_.Exception.Data['ExitCode'] -ne 5) { throw 'dirty build inputs used the wrong exit code' }
+}
+
+$stableFileTestDirectory = Join-Path $root 'target\pgo-stable-file-tests'
+$stableFile = Join-Path $stableFileTestDirectory 'main.nnue'
+Remove-Item $stableFileTestDirectory -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $stableFileTestDirectory | Out-Null
+try {
+    [System.IO.File]::WriteAllText($stableFile, 'network-before')
+    $identity = Get-RequiredFileIdentity $stableFile 'embedded network'
+    Assert-StableFileIdentity $stableFile $identity.Size $identity.Hash 'embedded network'
+
+    [System.IO.File]::WriteAllText($stableFile, 'network-after!')
+    try {
+        Assert-StableFileIdentity $stableFile $identity.Size $identity.Hash 'embedded network'
+        throw 'same-size network mutation must be rejected'
+    } catch {
+        if ($_.Exception.Message -eq 'same-size network mutation must be rejected') { throw }
+        if ($_.Exception.Message -notmatch 'embedded network changed') { throw }
+    }
+
+    [System.IO.File]::WriteAllText($stableFile, 'short')
+    try {
+        Assert-StableFileIdentity $stableFile $identity.Size $identity.Hash 'embedded network'
+        throw 'network size mutation must be rejected'
+    } catch {
+        if ($_.Exception.Message -eq 'network size mutation must be rejected') { throw }
+        if ($_.Exception.Message -notmatch 'embedded network changed') { throw }
+    }
+
+    Remove-Item $stableFile
+    try {
+        Get-RequiredFileIdentity $stableFile 'embedded network'
+        throw 'missing network must be rejected'
+    } catch {
+        if ($_.Exception.Message -eq 'missing network must be rejected') { throw }
+        if ($_.Exception.Message -notmatch 'required embedded network is missing') { throw }
+    }
+} finally {
+    Remove-Item $stableFileTestDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 $hadCargoTargetDir = Test-Path Env:CARGO_TARGET_DIR
@@ -326,6 +374,58 @@ try {
     }
     if (-not (Get-Content $npsMetadata -Raw).Contains('nps verdict: not measured')) {
         throw 'not-measured NPS metadata verdict was missing'
+    }
+
+    $transactionStaging = Join-Path $npsTestDirectory 'transaction-staging'
+    $transactionFinal = Join-Path $npsTestDirectory 'transaction-final'
+    $transactionBackup = Join-Path $npsTestDirectory 'transaction-backup'
+    New-Item -ItemType Directory -Path $transactionStaging | Out-Null
+    New-Item -ItemType Directory -Path $transactionFinal | Out-Null
+    Set-Content (Join-Path $transactionStaging 'new.txt') 'new'
+    Set-Content (Join-Path $transactionStaging 'manifold-nopgo.exe') 'baseline'
+    Set-Content (Join-Path $transactionStaging 'manifold-pgo.exe') 'optimized'
+    Set-Content (Join-Path $transactionStaging 'pgo-metadata.txt') @(
+        'nps verdict: pending publication'
+        'nps evidence: pending'
+    )
+    Set-Content (Join-Path $transactionStaging 'nps-verdict.txt') 'status: pending'
+    Set-Content (Join-Path $transactionFinal 'old.txt') 'old'
+    try {
+        Publish-AndMeasurePgo -StagingDirectory $transactionStaging `
+            -FinalDirectory $transactionFinal -BackupDirectory $transactionBackup `
+            -ValidatePublished {
+                if (-not (Test-Path (Join-Path $transactionFinal 'new.txt'))) {
+                    throw 'new publication was not installed'
+                }
+            } -MeasureNps -RunComparison {
+                [pscustomobject]@{
+                    Command = 'fake published-copy comparison'
+                    Output = @('published comparison failed')
+                    ExitCode = 23
+                }
+            }
+        throw 'published NPS failure must throw'
+    } catch {
+        if ($_.Exception.Message -eq 'published NPS failure must throw') { throw }
+        if ($_.Exception.Data['ExitCode'] -ne 6) { throw 'published NPS failure used the wrong exit code' }
+    }
+    if (-not (Test-Path (Join-Path $transactionFinal 'new.txt'))) {
+        throw 'published NPS failure deleted the new publication'
+    }
+    if (Test-Path (Join-Path $transactionFinal 'old.txt')) {
+        throw 'published NPS failure restored the old publication'
+    }
+    if (-not (Get-Content (Join-Path $transactionFinal 'nps-verdict.txt') -Raw).Contains('status: failed')) {
+        throw 'published NPS failure did not persist failed evidence'
+    }
+    if (-not (Get-Content (Join-Path $transactionFinal 'pgo-metadata.txt') -Raw).Contains('nps verdict: failed')) {
+        throw 'published NPS failure did not persist failed metadata'
+    }
+    if (Test-Path $transactionBackup) {
+        throw 'published NPS failure left the old backup'
+    }
+    if (Test-Path $transactionStaging) {
+        throw 'published NPS failure leaked staging'
     }
 } finally {
     Remove-Item $npsTestDirectory -Recurse -Force -ErrorAction SilentlyContinue

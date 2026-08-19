@@ -59,6 +59,7 @@ $pgoDirectory = Join-Path $targetRoot 'pgo'
 $stagingDirectory = Join-Path $targetRoot 'pgo-staging'
 $backupDirectory = Join-Path $targetRoot 'pgo-backup'
 $ordinaryRelease = Join-Path $targetRoot 'release\manifold.exe'
+$networkPath = Join-Path $repositoryRoot 'nets\main.nnue'
 
 function New-PgoFailure {
     param(
@@ -180,15 +181,51 @@ function Get-ValidatedHeadCommit {
 function Assert-BuildInputsMatchHead {
     param(
         [scriptblock]$GetStatus = {
-            $lines = @(& git status --porcelain --untracked-files=normal -- Cargo.toml Cargo.lock .cargo crates 2>&1)
+            param([string[]]$Paths)
+            $lines = @(& git status --porcelain --untracked-files=normal -- $Paths 2>&1)
             [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = $lines }
         }
     )
 
-    $status = & $GetStatus
+    $paths = @('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo', 'crates')
+    $status = & $GetStatus $paths
     Assert-NativeSuccess $status.ExitCode 'git status for build inputs' 5
     if ($status.Lines.Count -ne 0) {
         throw (New-PgoFailure "ABORT: build inputs differ from HEAD: $($status.Lines -join '; ')." 5)
+    }
+}
+
+function Get-RequiredFileIdentity {
+    param(
+        [string]$Path,
+        [string]$Description
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw (New-PgoFailure "ABORT: required $Description is missing: $Path." 3)
+    }
+    $item = Get-Item -LiteralPath $Path
+    [pscustomobject]@{
+        Size = $item.Length
+        Hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    }
+}
+
+function Assert-StableFileIdentity {
+    param(
+        [string]$Path,
+        [int64]$ExpectedSize,
+        [string]$ExpectedHash,
+        [string]$Description
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw (New-PgoFailure "ABORT: $Description changed or disappeared during the PGO run: $Path." 5)
+    }
+    $item = Get-Item -LiteralPath $Path
+    $actualHash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    if ($item.Length -ne $ExpectedSize -or $actualHash -ne $ExpectedHash) {
+        throw (New-PgoFailure "ABORT: $Description changed during the PGO run (size $ExpectedSize -> $($item.Length), sha256 $ExpectedHash -> $actualHash)." 5)
     }
 }
 
@@ -308,9 +345,13 @@ function Assert-PgoArtifacts {
         [string]$SourceCommit,
         [string]$BaselineHash,
         [string]$OptimizedHash,
-        [string]$ProfileHash
+        [string]$ProfileHash,
+        [string]$NetworkPath,
+        [int64]$NetworkSize,
+        [string]$NetworkHash
     )
 
+    Assert-StableFileIdentity $NetworkPath $NetworkSize $NetworkHash 'embedded network'
     $baseline = Join-Path $Directory 'manifold-nopgo.exe'
     $optimized = Join-Path $Directory 'manifold-pgo.exe'
     $metadataPath = Join-Path $Directory 'pgo-metadata.txt'
@@ -335,7 +376,7 @@ function Assert-PgoArtifacts {
         throw (New-PgoFailure 'ABORT: profile hash changed during publication.' 5)
     }
     $metadata = Get-Content -LiteralPath $metadataPath -Raw
-    foreach ($required in @($SourceCommit, $BaselineHash, $OptimizedHash, $ProfileHash)) {
+    foreach ($required in @($SourceCommit, $BaselineHash, $OptimizedHash, $ProfileHash, 'network:      nets\main.nnue', "network size: $NetworkSize", "network sha256: $NetworkHash")) {
         if (-not $metadata.Contains($required)) {
             throw (New-PgoFailure "ABORT: PGO metadata is missing $required." 5)
         }
@@ -344,6 +385,7 @@ function Assert-PgoArtifacts {
     if (-not $metadata.Contains('nps verdict:') -or -not $metadata.Contains($npsEvidenceHash)) {
         throw (New-PgoFailure 'ABORT: PGO metadata has no truthful NPS verdict evidence.' 5)
     }
+    Assert-StableFileIdentity $NetworkPath $NetworkSize $NetworkHash 'embedded network'
 }
 
 function Publish-PgoStaging {
@@ -408,6 +450,32 @@ function Publish-PgoStaging {
     }
 }
 
+function Publish-AndMeasurePgo {
+    param(
+        [string]$StagingDirectory,
+        [string]$FinalDirectory,
+        [string]$BackupDirectory,
+        [scriptblock]$ValidatePublished,
+        [switch]$MeasureNps,
+        [scriptblock]$RunComparison
+    )
+
+    Publish-PgoStaging $StagingDirectory $FinalDirectory $BackupDirectory $ValidatePublished
+    if ($MeasureNps) {
+        Write-Host '== NPS comparison (baseline vs PGO) =='
+        $arguments = @{
+            BaselineBinary = Join-Path $FinalDirectory 'manifold-nopgo.exe'
+            OptimizedBinary = Join-Path $FinalDirectory 'manifold-pgo.exe'
+            MetadataPath = Join-Path $FinalDirectory 'pgo-metadata.txt'
+            EvidencePath = Join-Path $FinalDirectory 'nps-verdict.txt'
+        }
+        if ($RunComparison) {
+            $arguments.RunComparison = $RunComparison
+        }
+        Invoke-NpsComparison @arguments
+    }
+}
+
 function Confirm-OrdinaryReleasePreserved {
     param(
         [bool]$ExistedBefore,
@@ -434,6 +502,7 @@ function Invoke-PgoBuild {
         Assert-ExactPath $pgoDirectory (Join-Path $repositoryRoot 'target\pgo') 'PGO publication directory'
         $sourceCommit = Get-ValidatedHeadCommit
         Assert-BuildInputsMatchHead
+        $networkIdentity = Get-RequiredFileIdentity $networkPath 'embedded network'
         $workingTreeAtStart = Get-WorkingTreeState
         $releaseExistedBefore = Test-Path -LiteralPath $ordinaryRelease
         $releaseHashBefore = if ($releaseExistedBefore) {
@@ -453,6 +522,7 @@ function Invoke-PgoBuild {
             $baselineExe = Invoke-CargoBuild '' $baselineTarget
             $nodesBefore = Get-BenchSignature $baselineExe
             Write-Host "reference signature: $nodesBefore nodes"
+            Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
 
             Write-Host '== Stage 2/5: instrumented build and profiling runs =='
             $instrumentedExe = Invoke-CargoBuild "-C target-cpu=native -Cprofile-generate=$stagingDirectory" $instrumentedTarget
@@ -466,6 +536,7 @@ function Invoke-PgoBuild {
                 throw (New-PgoFailure "ABORT: no .profraw produced in $stagingDirectory." 5)
             }
             Write-Host "collected $($profraws.Count) profraw file(s)"
+            Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
 
             Write-Host '== Stage 3/5: merge profiles =='
             $profdata = Find-LlvmProfdata
@@ -473,10 +544,12 @@ function Invoke-PgoBuild {
             & $profdata merge -o $mergedProfile ($profraws.FullName)
             $mergeExitCode = $LASTEXITCODE
             Assert-NativeSuccess $mergeExitCode 'llvm-profdata merge' 3
+            Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
 
             Write-Host '== Stage 4/5: PGO-optimised build =='
             Remove-Item -LiteralPath $optimizedTarget -Recurse -Force -ErrorAction SilentlyContinue
             $optimizedExe = Invoke-CargoBuild "-C target-cpu=native -Cprofile-use=$mergedProfile" $optimizedTarget
+            Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
 
             Write-Host '== Stage 5/5: node-signature verification =='
             $nodesAfter = Get-BenchSignature $optimizedExe
@@ -504,6 +577,7 @@ function Invoke-PgoBuild {
             $rustcExitCode = $LASTEXITCODE
             Assert-NativeSuccess $rustcExitCode 'rustc --version' 5
             Assert-BuildInputsMatchHead
+            Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
             if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
                 throw (New-PgoFailure 'ABORT: HEAD changed before PGO metadata generation.' 5)
             }
@@ -523,6 +597,9 @@ function Invoke-PgoBuild {
                 "baseline:     target\pgo\manifold-nopgo.exe (sha256 $baselineHash)"
                 "optimized:    target\pgo\manifold-pgo.exe (sha256 $optimizedHash)"
                 "profile:      target\pgo\merged.profdata (sha256 $profileHash)"
+                'network:      nets\main.nnue'
+                "network size: $($networkIdentity.Size)"
+                "network sha256: $($networkIdentity.Hash)"
                 "runs:         $BenchRuns x manifold bench"
                 "signature:    $nodesAfter nodes (verified unchanged)"
                 'nps verdict: pending'
@@ -534,30 +611,29 @@ function Invoke-PgoBuild {
                 Write-NpsNotMeasured $metadataPath $npsEvidencePath
             }
 
-            Assert-PgoArtifacts $stagingDirectory $sourceCommit $baselineHash $optimizedHash $profileHash
+            Assert-PgoArtifacts $stagingDirectory $sourceCommit $baselineHash $optimizedHash $profileHash `
+                $networkPath $networkIdentity.Size $networkIdentity.Hash
             Assert-BuildInputsMatchHead
+            Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
             if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
                 throw (New-PgoFailure 'ABORT: HEAD changed immediately before PGO publication.' 5)
             }
             Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore | Out-Null
             $publishedBaseline = Join-Path $pgoDirectory 'manifold-nopgo.exe'
             $publishedOptimized = Join-Path $pgoDirectory 'manifold-pgo.exe'
-            Publish-PgoStaging $stagingDirectory $pgoDirectory $backupDirectory {
-                Assert-PgoArtifacts $pgoDirectory $sourceCommit $baselineHash $optimizedHash $profileHash
-                if ($MeasureNps) {
-                    Write-Host '== NPS comparison (baseline vs PGO) =='
-                    Invoke-NpsComparison $publishedBaseline $publishedOptimized `
-                        (Join-Path $pgoDirectory 'pgo-metadata.txt') `
-                        (Join-Path $pgoDirectory 'nps-verdict.txt')
-                }
-                Assert-PgoArtifacts $pgoDirectory $sourceCommit $baselineHash $optimizedHash $profileHash
+            Publish-AndMeasurePgo $stagingDirectory $pgoDirectory $backupDirectory {
+                Assert-PgoArtifacts $pgoDirectory $sourceCommit $baselineHash $optimizedHash $profileHash `
+                    $networkPath $networkIdentity.Size $networkIdentity.Hash
                 Assert-BuildInputsMatchHead
+                Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
                 if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
                     throw (New-PgoFailure 'ABORT: HEAD changed during PGO publication validation.' 5)
                 }
                 Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore | Out-Null
-            }
+            } -MeasureNps:$MeasureNps
 
+            Assert-PgoArtifacts $pgoDirectory $sourceCommit $baselineHash $optimizedHash $profileHash `
+                $networkPath $networkIdentity.Size $networkIdentity.Hash
             $releaseStatus = Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore
             Write-Host "Experimental PGO outputs complete: $publishedOptimized (baseline at $publishedBaseline)."
             Write-Host 'These are experiment artifacts, not shipping/release artifacts.'
