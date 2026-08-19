@@ -69,6 +69,56 @@ try {
     Remove-Item -LiteralPath $testDirectory -ErrorAction SilentlyContinue
 }
 
+$repositoryTestRoot = Join-Path $env:TEMP "manifold-provenance-$([guid]::NewGuid())"
+$outerRepository = Join-Path $repositoryTestRoot 'outer'
+$nestedRepository = Join-Path $outerRepository 'nested'
+$linkedWorktree = Join-Path $repositoryTestRoot 'linked'
+New-Item -ItemType Directory -Path $outerRepository, $nestedRepository | Out-Null
+try {
+    & git -C $outerRepository init --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'failed to initialize outer test repository' }
+    & git -C $outerRepository -c user.name=ProvenanceTest -c user.email=provenance@example.invalid commit --allow-empty --quiet -m outer
+    if ($LASTEXITCODE -ne 0) { throw 'failed to commit outer test repository' }
+    $outerHead = (& git -C $outerRepository rev-parse HEAD).Trim()
+
+    & git -C $outerRepository worktree add --quiet -b provenance-test-linked $linkedWorktree
+    if ($LASTEXITCODE -ne 0) { throw 'failed to create linked test worktree' }
+    if (-not (Test-Path -LiteralPath (Join-Path $linkedWorktree '.git') -PathType Leaf)) {
+        throw 'linked test worktree must use a .git file'
+    }
+    & git -C $linkedWorktree -c user.name=ProvenanceTest -c user.email=provenance@example.invalid commit --allow-empty --quiet -m linked
+    if ($LASTEXITCODE -ne 0) { throw 'failed to commit linked test worktree' }
+    $linkedHead = (& git -C $linkedWorktree rev-parse HEAD).Trim()
+
+    & git -C $nestedRepository init --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'failed to initialize nested test repository' }
+    & git -C $nestedRepository -c user.name=ProvenanceTest -c user.email=provenance@example.invalid commit --allow-empty --quiet -m nested
+    if ($LASTEXITCODE -ne 0) { throw 'failed to commit nested test repository' }
+    $nestedHead = (& git -C $nestedRepository rev-parse HEAD).Trim()
+
+    $outerSource = Get-BinarySourceAttestation (Join-Path $outerRepository 'bin\engine.exe')
+    if ($outerSource.Mode -ne 'inferred-containing-worktree' -or $outerSource.Commit -ne $outerHead) {
+        throw 'independent repository binary not inferred'
+    }
+
+    $linkedSource = Get-BinarySourceAttestation (Join-Path $linkedWorktree 'bin\engine.exe')
+    if ($linkedSource.Mode -ne 'inferred-containing-worktree' -or $linkedSource.Commit -ne $linkedHead) {
+        throw 'linked worktree binary not inferred'
+    }
+
+    $nestedSource = Get-BinarySourceAttestation (Join-Path $nestedRepository 'bin\engine.exe')
+    if ($nestedSource.Mode -ne 'inferred-containing-worktree' -or $nestedSource.Commit -ne $nestedHead) {
+        throw 'nearest nested repository not selected'
+    }
+
+    $noRepositorySource = Get-BinarySourceAttestation (Join-Path $repositoryTestRoot 'outside\engine.exe')
+    if ($noRepositorySource.Mode -ne 'unattested' -or $noRepositorySource.Commit -ne 'unknown') {
+        throw 'path outside every repository must stay unattested'
+    }
+} finally {
+    Remove-Item -LiteralPath $repositoryTestRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $metadata = Format-ManifoldMatchProvenanceMetadata `
     -DriverCommit '1111111111111111111111111111111111111111' `
     -AName 'engine-a' -ACmd 'a.exe' `

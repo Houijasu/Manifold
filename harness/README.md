@@ -42,9 +42,10 @@ Enforces, mechanically, what mission `AGENTS.md` §4.451 says must not be left t
    attestation mode, and SHA-256; TC, seed, book, affinity/concurrency/threads/hash, SPRT
    bounds, pre-run CPU load (max of 5 samples, since `Win32_Processor` intermittently
    returns `null` on this machine), purpose, date, and the full command line. An exact
-   40-hex `<binary>.source-commit` sidecar is authoritative. Without one, only binaries
-   under this worktree's `target/` directory infer the current worktree HEAD; other binaries
-   remain `unknown`/`unattested`.
+   40-hex `<binary>.source-commit` sidecar is authoritative. Without one, a binary under a
+   Git worktree infers that containing worktree's validated HEAD, including linked
+   worktrees and independent repositories. Paths outside every worktree remain
+   `unknown`/`unattested`.
 
 5. `-ForfeitsAllowedFor <name>` is the only escape hatch, for third-party opponents whose
    failures the validation contract says to record separately rather than charge to Manifold
