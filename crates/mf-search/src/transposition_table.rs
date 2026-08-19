@@ -575,12 +575,42 @@ impl TranspositionTable {
             self.has_stored.store(true, Ordering::Relaxed);
         }
 
-        if let Some((entry, stored)) = cluster.entries.iter().find_map(|entry| {
-            entry
-                .load()
-                .filter(|stored| stored.key == key)
-                .map(|stored| (entry, stored))
-        }) {
+        // One pass over the cluster collects every placement decision -- the same-key
+        // refresh target, the first empty slot, and the replacement candidate -- because
+        // three separate scans would re-read the same four entries each time.
+        let mut same_key: Option<(usize, PackedEntry)> = None;
+        let mut first_empty: Option<usize> = None;
+        let mut replacement: Option<usize> = None;
+        let mut replacement_score = i16::MAX;
+        for (index, entry) in cluster.entries.iter().enumerate() {
+            match entry.load() {
+                Some(stored) if stored.key == key => {
+                    // A same-key entry is neither the empty slot nor a replacement
+                    // candidate: the refresh path below owns it, exactly as the
+                    // dedicated same-key scan did.
+                    if same_key.is_none() {
+                        same_key = Some((index, stored));
+                    }
+                }
+                Some(stored) => {
+                    let relative_age = data.age.wrapping_sub(stored.age()) & AGE_MASK;
+                    let score = i16::from(stored.depth()) - 8 * i16::from(relative_age);
+                    // Strict comparison keeps the first minimum, matching
+                    // `min_by_key`'s first-wins tie-break.
+                    if replacement.is_none() || score < replacement_score {
+                        replacement = Some(index);
+                        replacement_score = score;
+                    }
+                }
+                None => {
+                    if first_empty.is_none() {
+                        first_empty = Some(index);
+                    }
+                }
+            }
+        }
+
+        if let Some((index, stored)) = same_key {
             // A same-key hit is refreshed rather than blindly overwritten. Qsearch
             // stores its nodes under negative depth domains, so without this guard a
             // horizon node would evict the deep interior entry for the very same
@@ -609,7 +639,7 @@ impl TranspositionTable {
                 } else {
                     data.best_move
                 };
-                entry.store(PackedEntry::pack(
+                cluster.entries[index].store(PackedEntry::pack(
                     key,
                     EntryData {
                         best_move: preserved,
@@ -620,26 +650,13 @@ impl TranspositionTable {
             return;
         }
 
-        if let Some(entry) = cluster
-            .entries
-            .iter()
-            .find(|entry| entry.data.load(Ordering::Relaxed) == 0)
-        {
-            entry.store(packed);
+        if let Some(index) = first_empty {
+            cluster.entries[index].store(packed);
             return;
         }
 
-        let replacement = cluster
-            .entries
-            .iter()
-            .min_by_key(|entry| {
-                entry.load().map_or(i16::MIN, |stored| {
-                    let relative_age = data.age.wrapping_sub(stored.age()) & AGE_MASK;
-                    i16::from(stored.depth()) - 8 * i16::from(relative_age)
-                })
-            })
-            .expect("a cluster always contains at least one entry");
-        replacement.store(packed);
+        let replacement = replacement.expect("a full cluster always contains a replacement");
+        cluster.entries[replacement].store(packed);
     }
 
     #[inline]
