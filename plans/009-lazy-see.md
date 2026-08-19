@@ -118,7 +118,7 @@ strength-sensitive change gated by a match.
 
 ## Steps
 
-### Step 0: per-site SEE counters
+### Step 0: per-site SEE counters — DONE (08fec3b)
 
 Extend `SeeCounters` with one counter per call site (`load_captures`, `tt_validation`,
 `interior_quiets_fallback`, `quiet_checks`; record from those four sites exactly). Report
@@ -136,7 +136,7 @@ feature-gated); per-site shares recorded here (2026-08-19, profile mix, 668,558 
 Cross-check: the four sites sum to exactly the mf-core `see_calls` total (1,112,784), so
 they are exhaustive.
 
-### Step 1: `see_ge(position, mv, threshold) -> bool` — re-plan of 002 step 3
+### Step 1: `see_ge(position, mv, threshold) -> bool` — re-plan of 002 step 3 — DONE (48e5b49)
 
 Implement the classic swap-list loop with an early exit: walk the exchange maintaining the
 best/worst achievable result for the side to move, and return as soon as the answer cannot
@@ -149,7 +149,16 @@ for all positions, moves, and thresholds.
 generator, thresholds `{-200, -100, -50, 0, 50, 100, 200}`);
 `cargo test -p mf-core see && cargo test -p mf-core --features force-magic` → all pass.
 
-### Step 2: route the pure-predicate sites through `see_ge` (value-neutral)
+### Step 2: route the pure-predicate sites through `see_ge` (value-neutral) — DONE (65dfc06)
+
+**Execution record (2026-08-19)**: bench 37420 exact across three runs; all 73 workspace
+test targets green; depth-12 node counts identical on all four `nps_compare` positions.
+Default-build NPS A/B vs the previous commit (swapped engine order, 5–9 repeats): geomean
+0.98x–1.01x — neutral to ~2 % positive; the midgame position's apparent dip was scheduling
+luck (reversed at 9 repeats). The instrumented `see_profile` per-call figure rises
+(120 → 133 ns, stable across three runs) — an instrumentation/code-layout artifact, since
+the predicate walk is provably not longer than the exact walk and the default build shows
+no end-to-end regression.
 
 - Interior SEE-pruning quiets fallback (`search.rs` ~2724):
   `unwrap_or_else(|| static_exchange_evaluation(position, mv)) < threshold` becomes
@@ -216,12 +225,12 @@ README row.
 
 ## Done criteria
 
-- [ ] All workspace gates exit 0
-- [ ] `cargo test -p mf-core see` green including the new predicate differential
-- [ ] Exact-SEE oracle tests unchanged and passing
+- [x] All workspace gates exit 0 (through step 2; re-run after step 3)
+- [x] `cargo test -p mf-core see` green including the new predicate differential (default and force-magic backends)
+- [x] Exact-SEE oracle tests unchanged and passing (through step 2)
 - [ ] Bench signature 37420 unchanged through step 2; re-pinned with old → new after step 3
-- [ ] Per-site SEE shares (step 0) and see_profile before/after recorded
-- [ ] `nps_compare` ratio recorded
+- [x] Per-site SEE shares (step 0) and see_profile before/after recorded
+- [x] `nps_compare` ratio recorded (steps 0–2: 0.98x–1.01x vs pre-009; step 3 pending)
 - [ ] Match verdict for step 3 recorded
 
 ## STOP conditions
