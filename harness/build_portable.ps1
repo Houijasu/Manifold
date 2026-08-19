@@ -60,9 +60,12 @@ function Invoke-WithRestoredBuildEnvironment {
     $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
     $hadRustupToolchain = Test-Path Env:RUSTUP_TOOLCHAIN
     $savedRustupToolchain = $env:RUSTUP_TOOLCHAIN
+    $hadNnueTestNet = Test-Path Env:MF_NNUE_TEST_NET
+    $savedNnueTestNet = $env:MF_NNUE_TEST_NET
     try {
         Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
         Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+        Remove-Item Env:MF_NNUE_TEST_NET -ErrorAction SilentlyContinue
         & $Body
     } finally {
         if ($hadCargoTargetDir) {
@@ -84,6 +87,11 @@ function Invoke-WithRestoredBuildEnvironment {
             $env:RUSTUP_TOOLCHAIN = $savedRustupToolchain
         } else {
             Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+        }
+        if ($hadNnueTestNet) {
+            $env:MF_NNUE_TEST_NET = $savedNnueTestNet
+        } else {
+            Remove-Item Env:MF_NNUE_TEST_NET -ErrorAction SilentlyContinue
         }
     }
 }
@@ -477,6 +485,7 @@ function Invoke-PortableBuild {
                 "native RUSTFLAGS: $nativeRustFlags"
                 "portable RUSTFLAGS: $portableRustFlags"
                 "CARGO_ENCODED_RUSTFLAGS: cleared during build and tests"
+                "MF_NNUE_TEST_NET: cleared during build and tests; nets\main.nnue is authoritative"
                 "portable CARGO_TARGET_DIR: $portableBuildTarget"
                 "network: nets\main.nnue"
                 "network sha256: $networkHash"

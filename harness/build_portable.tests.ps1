@@ -96,11 +96,14 @@ $hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
 $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
 $hadRustupToolchain = Test-Path Env:RUSTUP_TOOLCHAIN
 $savedRustupToolchain = $env:RUSTUP_TOOLCHAIN
+$hadNnueTestNet = Test-Path Env:MF_NNUE_TEST_NET
+$savedNnueTestNet = $env:MF_NNUE_TEST_NET
 try {
     $env:CARGO_TARGET_DIR = 'caller-target'
     $env:RUSTFLAGS = 'caller-flags'
     $env:CARGO_ENCODED_RUSTFLAGS = 'caller-encoded-flags'
     $env:RUSTUP_TOOLCHAIN = 'caller-toolchain'
+    $env:MF_NNUE_TEST_NET = 'caller-nnue'
     try {
         Invoke-WithRestoredBuildEnvironment {
             if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
@@ -109,10 +112,14 @@ try {
             if (Test-Path Env:RUSTUP_TOOLCHAIN) {
                 throw 'RUSTUP_TOOLCHAIN was not cleared inside the build environment'
             }
+            if (Test-Path Env:MF_NNUE_TEST_NET) {
+                throw 'MF_NNUE_TEST_NET was not cleared inside the build environment'
+            }
             $env:CARGO_TARGET_DIR = 'inner-target'
             $env:RUSTFLAGS = 'inner-flags'
             $env:CARGO_ENCODED_RUSTFLAGS = 'inner-encoded-flags'
             $env:RUSTUP_TOOLCHAIN = 'inner-toolchain'
+            $env:MF_NNUE_TEST_NET = 'inner-nnue'
             throw 'expected test failure'
         }
     } catch {
@@ -129,6 +136,9 @@ try {
     }
     if ($env:RUSTUP_TOOLCHAIN -ne 'caller-toolchain') {
         throw 'caller RUSTUP_TOOLCHAIN was not restored'
+    }
+    if ($env:MF_NNUE_TEST_NET -ne 'caller-nnue') {
+        throw 'caller MF_NNUE_TEST_NET was not restored'
     }
 
     Remove-Item Env:CARGO_ENCODED_RUSTFLAGS
@@ -152,6 +162,17 @@ try {
     if (Test-Path Env:RUSTUP_TOOLCHAIN) {
         throw 'initially absent RUSTUP_TOOLCHAIN was not removed after success'
     }
+
+    Remove-Item Env:MF_NNUE_TEST_NET
+    Invoke-WithRestoredBuildEnvironment {
+        if (Test-Path Env:MF_NNUE_TEST_NET) {
+            throw 'initially absent MF_NNUE_TEST_NET appeared inside the build environment'
+        }
+        $env:MF_NNUE_TEST_NET = 'inner-nnue'
+    }
+    if (Test-Path Env:MF_NNUE_TEST_NET) {
+        throw 'initially absent MF_NNUE_TEST_NET was not removed after success'
+    }
 } finally {
     if ($hadCargoTargetDir) {
         $env:CARGO_TARGET_DIR = $savedCargoTargetDir
@@ -172,6 +193,11 @@ try {
         $env:RUSTUP_TOOLCHAIN = $savedRustupToolchain
     } else {
         Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+    }
+    if ($hadNnueTestNet) {
+        $env:MF_NNUE_TEST_NET = $savedNnueTestNet
+    } else {
+        Remove-Item Env:MF_NNUE_TEST_NET -ErrorAction SilentlyContinue
     }
 }
 
