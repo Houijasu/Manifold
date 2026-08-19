@@ -3,7 +3,7 @@
 ## Provenance
 
 - Engine source commit profiled:
-  `84a94c35d5714ea9018809eaa34213cbcaf82d1c`
+  `985c6af973df1d2ed284b408a1b8900a4cd71ac8`
 - NNUE fixture:
   `C:\Users\Samaritan\AppData\Local\Temp\manifold-reliability-foundation\nets\main.nnue`
 - NNUE size: `111,261,604` bytes
@@ -53,7 +53,8 @@ This final evidence refresh includes:
 - `8423434` — seed game-zero self-play checkpoints so pre-100-game resume is safe;
 - `0d56665` — stabilize PGO network and NPS evidence;
 - `447b4af` — honor the explicit NNUE fixture in UCI unit tests;
-- `84a94c3` — pin PGO tools to the active Rust toolchain.
+- `84a94c3` — pin PGO tools to the active Rust toolchain;
+- `985c6af` — pin portable-build toolchain identity.
 
 The authoritative workspace tests ran with the verified explicit fixture, so the
 fixture contract, UCI unit cleanup, and pre-100-game resume checkpoint regressions were
@@ -71,47 +72,45 @@ Result: exit `0`. The complete five-stage pipeline built a dedicated baseline, c
 three instrumented bench profiles, merged them, built the PGO binary, verified both
 node signatures, and ran the machine-local NPS comparison.
 The run completed on this exact clean HEAD immediately before the evidence refresh.
-Independent artifact verification found no mismatch, so the full command was not rerun.
+Independent checks then verified the published artifacts and metadata.
 
 | PGO evidence | Value |
 |---|---|
-| Source commit | `84a94c35d5714ea9018809eaa34213cbcaf82d1c` |
+| Source commit | `985c6af973df1d2ed284b408a1b8900a4cd71ac8` |
 | Baseline signature | 37,420 nodes |
 | PGO signature | 37,420 nodes |
 | Baseline artifact | `target\pgo\manifold-nopgo.exe` |
 | Baseline SHA-256 | `ADD38AD73A587DDAF49400AAD532238C4E56E9233991350744834A716EE82821` |
 | PGO artifact | `target\pgo\manifold-pgo.exe` |
-| PGO SHA-256 | `F6C0550CD9D85D1A2984C6F01C7B534485E9B9EDAC291C077FA89C4019A73A60` |
+| PGO SHA-256 | `816CD92734707D9A3CB74367A729C66BB01F0418C9BF529C3DDC14B1EE40B5A3` |
 | Merged profile | `target\pgo\merged.profdata` |
-| Profile SHA-256 | `1C2A5701BFEFECB2BFC89B8A41E522818287E71E95026CDC499DC9D779621BDC` |
+| Profile SHA-256 | `B557008D62DF9DD54160AB1E197F2E4ECA92EB3E1E84EF6B9EF8E471C48F0673` |
 | NPS evidence | `target\pgo\nps-verdict.txt` |
-| NPS evidence SHA-256 | `2B8A6AAF34EFADAD68A735A6163248C02E5096D60A41F6F48902612AC543B08F` |
+| NPS evidence SHA-256 | `9D3B69D7C7CA4A5B862AC967D7367BB1963E3F83C3785037DC28B632C9487E19` |
 | NPS verdict | Passed, exit 0 |
 | Network size / SHA-256 | `111,261,604` / `E8449B689E26E40DFD8FAC0423E7825377AFDE8B7D40FC14BFB96DFA32FF908A` |
-| Baseline source sidecar | `84a94c35d5714ea9018809eaa34213cbcaf82d1c` |
-| PGO source sidecar | `84a94c35d5714ea9018809eaa34213cbcaf82d1c` |
-| Ordinary release SHA-256 before/after | `F12531CAEC20EDE516E40061A79158CBD171FB5D7B94574FC74E24757BBDC916` |
+| Baseline source sidecar | `985c6af973df1d2ed284b408a1b8900a4cd71ac8` |
+| PGO source sidecar | `985c6af973df1d2ed284b408a1b8900a4cd71ac8` |
+| Ordinary release SHA-256 before/after | `A47749622EB717ED92B95C44233BA119EF495A60E74060164285EF1F80B9A8FE` |
 | Ordinary release preserved | Yes |
 
 The NPS comparison used depth 12, Hash 64, Threads 1, one discarded warmup, and three
 timed repeats per position. It completed successfully with geometric mean
-`baseline / PGO NPS = 0.98x` and nodes-to-depth ratio `1.00x`. Per-position NPS ratios
-were `0.99x`, `0.99x`, `0.97x`, and `0.97x`. This is a machine-local observation, not
+`baseline / PGO NPS = 0.96x` and nodes-to-depth ratio `1.00x`. Per-position NPS ratios
+were `0.95x`, `0.97x`, `0.98x`, and `0.93x`. This is a machine-local observation, not
 a portable speed claim or a strength result. The PGO binary remains experimental and
 is not the shipping `target\release\manifold.exe`.
 
 | Position | Baseline median NPS | PGO median NPS |
 |---|---:|---:|
-| startpos | 724,401 | 732,142 |
-| kiwipete | 615,326 | 623,127 |
-| midgame | 700,041 | 722,776 |
-| endgame | 1,263,805 | 1,302,073 |
+| startpos | 717,311 | 753,033 |
+| kiwipete | 607,302 | 627,594 |
+| midgame | 699,758 | 711,879 |
+| endgame | 1,217,633 | 1,311,045 |
 
 Independent checks confirmed every published hash, both exact source sidecars, the
 passed NPS status/exit, and the network identity against the artifacts on disk. The
-completed PGO run preserved the pre-existing ordinary release byte-for-byte. A later
-required ordinary release rebuild on this HEAD produced the current release hash used
-by the portable and match sections below.
+completed PGO run preserved the pre-existing ordinary release byte-for-byte.
 
 Pinned toolchain evidence:
 
@@ -139,7 +138,7 @@ Result: exit `0`.
 
 | Portable evidence | Value |
 |---|---|
-| Source commit/sidecar | `84a94c35d5714ea9018809eaa34213cbcaf82d1c` |
+| Source commit/sidecar | `985c6af973df1d2ed284b408a1b8900a4cd71ac8` |
 | Native bench | 37,420 nodes, 725,528 NPS |
 | Portable bench | 37,420 nodes, 725,493 NPS |
 | Portable perft 5 | 4,865,609 nodes |
@@ -162,14 +161,19 @@ and portable flags, cleared encoded flags, NNUE and binary hashes, bench/perft
 signatures, force-magic status, disassembler path, instruction-scan results, and
 ordinary release preservation.
 
+This full portable run had completed immediately before the evidence refresh on the
+same clean HEAD. Independent verification matched its exact sidecar, source and
+toolchain identities, host, pinned `llvm-objdump`, artifact and network hashes, gate
+results, instruction scan, and release-preservation record, so it was not rerun.
+
 ## Same-binary provenance smoke
 
 Exact command:
 
 ```powershell
 pwsh -NoProfile -File harness/run_match.ps1 `
-    -OutDir 'experiments\2026-08-18-reliability-foundation\provenance-smoke-84a94c35' `
-    -Purpose 'Final reliability same-binary provenance smoke at 84a94c35' `
+    -OutDir 'experiments\2026-08-18-reliability-foundation\provenance-smoke-985c6af9' `
+    -Purpose 'Final implementation same-binary provenance smoke at 985c6af9' `
     -AName 'Manifold-A' -ACmd 'target\release\manifold.exe' `
     -BName 'Manifold-B' -BCmd 'target\release\manifold.exe' `
     -TC '1+0.01' -Hash 16 -Rounds 1 -Seed 20260819 -RatingInterval 1
@@ -178,29 +182,28 @@ pwsh -NoProfile -File harness/run_match.ps1 `
 Output directory:
 
 ```text
-C:\Users\Samaritan\AppData\Local\Temp\manifold-reliability-foundation\experiments\2026-08-18-reliability-foundation\provenance-smoke-84a94c35
+C:\Users\Samaritan\AppData\Local\Temp\manifold-reliability-foundation\experiments\2026-08-18-reliability-foundation\provenance-smoke-985c6af9
 ```
 
-The ignored opening book was absent from this worktree and was copied without modifying
-the primary checkout original. Source and copy were both 16,226,151 bytes with SHA-256
+The ignored opening-book fixture was verified at 16,226,151 bytes with SHA-256
 `3F499996FF0B674A04F85F2634811D102DD53B5115841E8F11D18E1F550BA2CA`.
 
 | Match evidence | Value |
 |---|---|
 | Exit code | 0 |
 | Games | 2, paired opening |
-| Result | 1 win each, 0 draws |
+| Result | Manifold-A 1 win, 0 losses, 1 draw |
 | Time forfeits | 0 for both engines |
 | Crashes | 0 for both engines |
 | Illegal moves | 0 for both engines |
-| Driver commit | `84a94c35d5714ea9018809eaa34213cbcaf82d1c` |
-| Source A / B | `84a94c35d5714ea9018809eaa34213cbcaf82d1c` |
+| Driver commit | `985c6af973df1d2ed284b408a1b8900a4cd71ac8` |
+| Source A / B | `985c6af973df1d2ed284b408a1b8900a4cd71ac8` |
 | Source mode A / B | `inferred-target-worktree` |
 | SHA-256 A / B | `A47749622EB717ED92B95C44233BA119EF495A60E74060164285EF1F80B9A8FE` |
 | Affinity / concurrency | Enabled / 8 |
 | Threads / Hash | 1 per engine / 16 MiB |
-| PGN SHA-256 | `B1214A8864E426C496B1B461CB2D2AD84C1115376AD2CE27E0CD2563A1E519BF` |
-| Metadata SHA-256 | `2924FD6E15ED8296F61C2B33C9AE25CCB9844BFE3EBCCF64063019B6BB3A9247` |
+| PGN SHA-256 | `8B6E344C4CBF428E4418CC1CF236D6EF0AE43F5C76DFB0F3C47823C8EE3E18DD` |
+| Metadata SHA-256 | `7EE07A507FF48FCF0A1F00486E468D5B4AAA5DC3DEEEA1E129ED05E0BA499948` |
 
 `run-metadata.txt` contains the exact command, driver and binary provenance, hashes,
 TC, seed, book, affinity/concurrency/thread/hash settings, CPU-load sample, purpose,
@@ -221,8 +224,8 @@ The six searches produced exactly `37,420` nodes:
 | Total NNUE forward evaluations | 21,755 |
 | TT cutoffs | 5,703 |
 | SEE calls | 51,432 |
-| SEE cycles | 14,274,271 |
-| NNUE forward cycles | 12,707,874 |
+| SEE cycles | 13,495,962 |
+| NNUE forward cycles | 11,869,334 |
 | LMR reductions | 5,785 |
 | Reduced-search fail-highs | 19 |
 | Full-depth re-searches | 17 |
@@ -245,12 +248,12 @@ qsearch_nodes` is not used as a substitute for the profile's reported `nodes` va
 
 | Position | Nodes | Interior | Qsearch | Checked interior | Int eval/int | Int eval/total | Q eval/q | Q eval/total | SEE calls | SEE cycles | NNUE forwards | Forward cycles |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| bench1 | 6,085 | 5,759 | 3,170 | 74 (1.285%) | 148.984 | 141.002 | 814.511 | 424.322 | 3,791 | 779,297 | 3,440 | 1,726,803 |
-| bench2 | 13,484 | 8,783 | 7,562 | 480 (5.465%) | 322.441 | 210.027 | 772.547 | 433.254 | 25,340 | 7,805,224 | 8,674 | 5,204,441 |
-| bench3 | 3,125 | 2,940 | 1,379 | 223 (7.585%) | 143.878 | 135.360 | 622.190 | 274.560 | 2,443 | 318,375 | 1,281 | 749,954 |
-| bench4 | 6,006 | 4,542 | 3,001 | 187 (4.117%) | 280.273 | 211.955 | 761.080 | 380.286 | 8,881 | 2,247,939 | 3,557 | 2,363,721 |
-| bench5 | 2,972 | 2,775 | 1,295 | 263 (9.477%) | 151.351 | 141.319 | 815.444 | 355.316 | 2,200 | 506,963 | 1,476 | 879,546 |
-| bench6 | 5,748 | 4,795 | 2,748 | 326 (6.799%) | 257.560 | 214.857 | 761.281 | 363.953 | 8,777 | 2,616,473 | 3,327 | 1,783,409 |
+| bench1 | 6,085 | 5,759 | 3,170 | 74 (1.285%) | 148.984 | 141.002 | 814.511 | 424.322 | 3,791 | 719,619 | 3,440 | 1,700,755 |
+| bench2 | 13,484 | 8,783 | 7,562 | 480 (5.465%) | 322.441 | 210.027 | 772.547 | 433.254 | 25,340 | 7,371,737 | 8,674 | 4,902,729 |
+| bench3 | 3,125 | 2,940 | 1,379 | 223 (7.585%) | 143.878 | 135.360 | 622.190 | 274.560 | 2,443 | 328,104 | 1,281 | 757,084 |
+| bench4 | 6,006 | 4,542 | 3,001 | 187 (4.117%) | 280.273 | 211.955 | 761.080 | 380.286 | 8,881 | 2,027,300 | 3,557 | 2,026,879 |
+| bench5 | 2,972 | 2,775 | 1,295 | 263 (9.477%) | 151.351 | 141.319 | 815.444 | 355.316 | 2,200 | 477,353 | 1,476 | 826,452 |
+| bench6 | 5,748 | 4,795 | 2,748 | 326 (6.799%) | 257.560 | 214.857 | 761.281 | 363.953 | 8,777 | 2,571,849 | 3,327 | 1,655,435 |
 
 Additional search-event rows:
 
@@ -295,8 +298,8 @@ or net search benefit.
 
 ## Cycle-counter interpretation
 
-The current run recorded `14,274,271` SEE cycles across `51,432` calls and
-`12,707,874` NNUE forward cycles across `21,755` forward evaluations. These values are
+The current run recorded `13,495,962` SEE cycles across `51,432` calls and
+`11,869,334` NNUE forward cycles across `21,755` forward evaluations. These values are
 useful for identifying work within this one run. They are not portable timing claims:
 cycle values and NPS vary with CPU, clock behavior, scheduling, compiler, and build
 environment, and should not be compared as absolute performance numbers across CPUs.
@@ -308,7 +311,7 @@ environment, and should not be compared as absolute performance numbers across C
 Checked interior nodes were a nontrivial `5.248%` of interior nodes. The current
 counters do not distinguish checked nodes that performed a real NNUE forward from
 checked nodes that reused a TT static evaluation. Therefore `1,553` is only an upper
-bound on avoidable checked-node forwards. That upper bound is `22.056%` of the 7,041
+bound on avoidable checked-node forwards. That upper bound is `22.057%` of the 7,041
 interior forwards and `7.139%` of all 21,755 forwards in this profile.
 
 Decision: the measured ceiling is large enough to justify requesting approval for a
@@ -320,7 +323,7 @@ No strength change or experiment plan is included here.
 ### Threshold SEE
 
 The profile establishes substantial existing SEE activity: `51,432` calls and
-`14,274,271` run-local cycles. It does not separate threshold-capable call sites, record
+`13,495,962` run-local cycles. It does not separate threshold-capable call sites, record
 the threshold distribution, or estimate how much exchange work an early exit would
 avoid.
 
@@ -335,12 +338,12 @@ and random oracle. No such plan or implementation was created on this branch.
 The current pre-evidence range is:
 
 ```text
-943617a045b9cdfd7c102debd59e67e579326da8...84a94c35d5714ea9018809eaa34213cbcaf82d1c
+943617a045b9cdfd7c102debd59e67e579326da8...985c6af973df1d2ed284b408a1b8900a4cd71ac8
 ```
 
-It contains 30 commits and changes 37 files, with 7,240 insertions and 407 deletions.
-The five commits after the preceding evidence refresh are the explicit-fixture,
-game-zero resume, PGO network/NPS, UCI fixture, and pinned-toolchain fixes listed above.
+It contains 32 commits and changes 37 files, with 7,433 insertions and 407 deletions.
+The final implementation fixes are the explicit-fixture, game-zero resume, PGO
+network/NPS, UCI fixture, and pinned PGO and portable toolchain changes listed above.
 
 This evidence refresh validates the current clean HEAD and updates the review range. It
 does not claim that a final whole-range re-review has approved these fixes.
