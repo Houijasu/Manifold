@@ -1,6 +1,7 @@
 use mf_core::{
     Color, Move, MoveList, Piece, PieceKind, Position, Square, generate_pseudo_legal_captures,
-    generate_pseudo_legal_quiets, is_pseudo_legal, material_value, static_exchange_evaluation,
+    generate_pseudo_legal_quiets, is_pseudo_legal, material_value, see_ge,
+    static_exchange_evaluation,
 };
 
 use crate::history::{
@@ -651,7 +652,7 @@ fn quiet_checks(position: &Position, ordering: OrderingContext<'_>) -> MoveList 
         }
         #[cfg(feature = "instrumentation")]
         crate::instrumentation::record(|counters| counters.see_calls_quiet_checks += 1);
-        if static_exchange_evaluation(position, mv) < QUIET_CHECK_SEE_THRESHOLD {
+        if !see_ge(position, mv, QUIET_CHECK_SEE_THRESHOLD) {
             continue;
         }
         scores[checks.len()].write(ordering.ordering_history(position, color, mv));

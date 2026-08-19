@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use mf_core::{
     Bitboard, CastlingSide, Color, Move, MoveList, PieceKind, Position, Square, Undo,
     bishop_attacks, generate_legal_moves, has_legal_move, has_legal_move_in_place, is_in_check,
-    is_legal, king_attacks, knight_attacks, pawn_attacks, rook_attacks, static_exchange_evaluation,
+    is_legal, king_attacks, knight_attacks, pawn_attacks, rook_attacks, see_ge,
 };
 use mf_nnue::{ACCUMULATOR_STACK_CAPACITY, AccumulatorStack, AccumulatorStackError, Network};
 use mf_tb::{Tablebases, Wdl};
@@ -2714,18 +2714,23 @@ fn pvs(
             };
             // Captures reuse the exact SEE the picker computed while loading its
             // capture list; only quiets (whose SEE the picker never computes) still
-            // walk the exchange here, and only inside the depth window.
+            // walk the exchange here, and only inside the depth window. That walk
+            // answers a pure threshold question, so it takes the early-exit
+            // predicate rather than the exact value.
             if within_window
                 && {
                     #[cfg(feature = "instrumentation")]
                     crate::instrumentation::record(|counters| counters.see_pruning_attempts += 1);
-                    picker.current_capture_see().unwrap_or_else(|| {
-                        #[cfg(feature = "instrumentation")]
-                        crate::instrumentation::record(|counters| {
-                            counters.see_calls_interior_quiets_fallback += 1;
-                        });
-                        static_exchange_evaluation(position, mv)
-                    }) < threshold
+                    match picker.current_capture_see() {
+                        Some(see) => see < threshold,
+                        None => {
+                            #[cfg(feature = "instrumentation")]
+                            crate::instrumentation::record(|counters| {
+                                counters.see_calls_interior_quiets_fallback += 1;
+                            });
+                            !see_ge(position, mv, threshold)
+                        }
+                    }
                 }
                 && (quiet || alpha >= 0 || has_other_non_pawn_material(position, mover, mv))
             {
