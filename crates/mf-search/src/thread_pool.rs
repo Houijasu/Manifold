@@ -728,7 +728,13 @@ mod tests {
             table,
             SearchLimits {
                 depth: Some(1),
-                soft_time: Some(Duration::from_secs(1)),
+                // A zero soft budget makes worker 0's post-iteration
+                // `increase_depth` store deterministically `false`
+                // (`elapsed <= soft / 2` cannot hold), so worker 1 observes the
+                // injected value no matter how the two workers interleave. With a
+                // generous budget a slow scheduler can let worker 0 finish its
+                // iteration and overwrite the flag before worker 1's first read.
+                soft_time: Some(Duration::ZERO),
                 hard_time: Some(Duration::from_secs(4)),
                 use_clock_management: true,
                 ..SearchLimits::default()
