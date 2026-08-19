@@ -693,6 +693,19 @@ fn run_generate_with_policy<W: Write>(
                 progress_path.display()
             )
         })?;
+        append_generation_checkpoint(
+            &progress_path,
+            &GenerationCheckpoint {
+                games_completed: 0,
+                output_bytes: 0,
+                games: options.config.games,
+                nodes: options.config.nodes,
+                seed: options.config.seed,
+                score_bound: options.config.filter.score_bound,
+                syzygy_path: options.syzygy_path.clone().unwrap_or_default(),
+                stats: GenerateStats::default(),
+            },
+        )?;
         file
     };
     let output = RefCell::new(BufWriter::with_capacity(1 << 20, file));
@@ -1410,7 +1423,7 @@ mod tests {
     }
 
     #[test]
-    fn interrupted_self_play_resumes_to_the_uninterrupted_bytes_and_summary() {
+    fn self_play_interrupted_before_the_first_periodic_checkpoint_resumes_identically() {
         let whole = temp("self-play-resume-whole");
         let resumed = temp("self-play-resume-partial");
         let whole_summary = run(&[
@@ -1441,7 +1454,7 @@ mod tests {
                 "2026",
             ],
             GenerationRunPolicy {
-                checkpoint_every: 1,
+                checkpoint_every: super::GENERATION_CHECKPOINT_GAMES,
                 stop_after: Some(2),
             },
         )
@@ -1450,6 +1463,20 @@ mod tests {
         assert!(
             super::progress_path(&resumed).exists(),
             "interruption must retain the sidecar"
+        );
+        assert_eq!(
+            read_generation_checkpoint(&super::progress_path(&resumed))
+                .expect("the initial checkpoint is complete and valid"),
+            GenerationCheckpoint {
+                games_completed: 0,
+                output_bytes: 0,
+                games: 6,
+                nodes: 1_000,
+                seed: 2026,
+                score_bound: mf_datagen::DEFAULT_SCORE_BOUND,
+                syzygy_path: String::new(),
+                stats: GenerateStats::default(),
+            }
         );
 
         let resumed_summary = run(&[
