@@ -1,3 +1,6 @@
+use std::alloc::{Layout, alloc_zeroed, dealloc, handle_alloc_error};
+use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicI16, Ordering};
 
 use mf_core::{Color, Move, Piece, PieceKind, Position, Square};
@@ -129,8 +132,9 @@ const CONTINUATION_LEN: usize = PIECES * SQUARES * CONTINUATION_PLANE_LEN;
 /// [`CORRECTION_MAX`], not an ordering score bounded by `CONTINUATION_MAX`.
 const CORRECTION_CONTINUATION_LEN: usize = PIECES * SQUARES * CONTINUATION_PLANE_LEN;
 
-/// Forces each table onto its own cache line so concurrent updates to two different
-/// tables never contend for the same line.
+/// Keeps each table handle on its own cache line; the heap buffers themselves are
+/// aligned by [`AlignedTable`], so concurrent updates to two different tables never
+/// contend for the same line.
 #[repr(align(64))]
 struct CacheAligned<T>(T);
 
@@ -179,12 +183,12 @@ impl ContinuationKey {
 /// transposition table does: each `apply` performs one load and one store, so a torn
 /// interleaving can lose an update but can never store a value outside `[-D, D]`.
 pub struct SharedHistory {
-    butterfly: CacheAligned<Box<[AtomicI16]>>,
-    capture: CacheAligned<Box<[AtomicI16]>>,
-    pawn: CacheAligned<Box<[AtomicI16]>>,
+    butterfly: CacheAligned<AlignedTable>,
+    capture: CacheAligned<AlignedTable>,
+    pawn: CacheAligned<AlignedTable>,
     /// One table per entry in `CONTINUATION_PLIES`, each on its own cache-line-aligned
     /// allocation so an update at ply 1 cannot false-share with one at ply 6.
-    continuation: [CacheAligned<Box<[AtomicI16]>>; CONTINUATION_PLIES.len()],
+    continuation: [CacheAligned<AlignedTable>; CONTINUATION_PLIES.len()],
     /// One table per entry in [`CORRECTION_SOURCES`], each `[bucket][color]`.
     ///
     /// Kept as four separate allocations rather than the reference's packed
@@ -192,9 +196,9 @@ pub struct SharedHistory {
     /// hashes: bundling them would make every read of one variant pull the other three
     /// into cache on a line they will never be used from, since a single position
     /// hashes to four *different* buckets.
-    correction: [CacheAligned<Box<[AtomicI16]>>; CORRECTION_SOURCES],
+    correction: [CacheAligned<AlignedTable>; CORRECTION_SOURCES],
     /// Continuation correction history at plies 2 and 4.
-    correction_continuation: [CacheAligned<Box<[AtomicI16]>>; CORRECTION_CONTINUATION_PLIES.len()],
+    correction_continuation: [CacheAligned<AlignedTable>; CORRECTION_CONTINUATION_PLIES.len()],
 }
 
 impl SharedHistory {
@@ -460,25 +464,81 @@ fn continuation_index(previous: ContinuationKey, piece: Piece, to: Square) -> us
     previous.plane as usize + piece.index() * SQUARES + usize::from(to.index())
 }
 
-/// Allocates a zeroed table in ONE bulk request rather than element by element.
+/// A zeroed `i16` table on a genuinely 64-byte-aligned heap allocation.
 ///
-/// `(0..len).map(|_| AtomicI16::new(0)).collect()` writes every entry individually. At
-/// the 4.5 MiB the continuation tables occupy that is millions of stores per
-/// construction, which is invisible to any node-count anchor and cost ~15% of the
-/// measured bench NPS, since `bench` builds a fresh table per position inside its own
-/// timed region. `vec![0i16; len]` routes through `alloc_zeroed`, which hands back
-/// OS-zeroed pages.
-fn zeroed(len: usize) -> Box<[AtomicI16]> {
-    let zeros = vec![0i16; len].into_boxed_slice();
-    // SAFETY: `AtomicI16` is `#[repr(transparent)]` over `i16`, so the two have
-    // identical size, alignment, and layout, and every `i16` bit pattern is a valid
-    // `AtomicI16`. The pointer comes from `Box::into_raw`, is not aliased, and the
-    // slice length is carried through the fat pointer unchanged, so the reconstructed
-    // `Box` owns exactly the allocation it was handed. The debug assertion below pins
-    // the layout equality this relies on.
-    debug_assert_eq!(size_of::<AtomicI16>(), size_of::<i16>());
-    debug_assert_eq!(align_of::<AtomicI16>(), align_of::<i16>());
-    unsafe { Box::from_raw(Box::into_raw(zeros) as *mut [AtomicI16]) }
+/// `#[repr(align(64))]` on the wrapping [`CacheAligned`] aligns only the handle (the
+/// pointer and length) inside the owning struct; a `Box<[AtomicI16]>` buffer keeps
+/// `i16`'s two-byte alignment, and glibc hands back large buffers that straddle a
+/// cache-line boundary, so the alignment the table documentation claims was a
+/// platform lottery. False sharing between adjacent tables is a measured cost (the
+/// AGENTS.md 4.54 lesson), so the allocation itself requests the alignment.
+struct AlignedTable {
+    pointer: NonNull<AtomicI16>,
+    len: usize,
+}
+
+// SAFETY: the buffer is plain memory accessed only through `&AtomicI16`, which is
+// `Send + Sync`; it is freed only on drop, which requires exclusive access, and the
+// references handed out by `Deref`/`DerefMut` follow the usual aliasing rules.
+unsafe impl Send for AlignedTable {}
+unsafe impl Sync for AlignedTable {}
+
+impl AlignedTable {
+    fn layout(len: usize) -> Layout {
+        Layout::array::<AtomicI16>(len)
+            .and_then(|layout| layout.align_to(64))
+            .expect("history table layout is valid")
+    }
+
+    /// Allocates `len` zeroed entries in ONE bulk request rather than element by
+    /// element.
+    ///
+    /// `(0..len).map(|_| AtomicI16::new(0)).collect()` writes every entry
+    /// individually. At the 4.5 MiB the continuation tables occupy that is millions
+    /// of stores per construction, which is invisible to any node-count anchor and
+    /// cost ~15% of the measured bench NPS, since `bench` builds a fresh table per
+    /// position inside its own timed region. `alloc_zeroed` hands back OS-zeroed
+    /// pages.
+    fn zeroed(len: usize) -> Self {
+        let layout = Self::layout(len);
+        // SAFETY: every table length constant is nonzero, so `layout` has nonzero
+        // size; zeroed bytes are a valid `AtomicI16` (an all-zero `i16`).
+        let pointer = unsafe { alloc_zeroed(layout) }.cast::<AtomicI16>();
+        let pointer = NonNull::new(pointer).unwrap_or_else(|| handle_alloc_error(layout));
+        Self { pointer, len }
+    }
+}
+
+impl Drop for AlignedTable {
+    fn drop(&mut self) {
+        // SAFETY: `pointer` was allocated by `alloc_zeroed` with exactly this layout
+        // in `zeroed`, and the buffer is not aliased past this drop.
+        unsafe { dealloc(self.pointer.as_ptr().cast(), Self::layout(self.len)) };
+    }
+}
+
+impl Deref for AlignedTable {
+    type Target = [AtomicI16];
+
+    #[inline]
+    fn deref(&self) -> &[AtomicI16] {
+        // SAFETY: `pointer` owns `len` initialized entries for the lifetime of
+        // `self`.
+        unsafe { std::slice::from_raw_parts(self.pointer.as_ptr(), self.len) }
+    }
+}
+
+impl DerefMut for AlignedTable {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut [AtomicI16] {
+        // SAFETY: `pointer` owns `len` initialized entries and `&mut self` guarantees
+        // exclusive access.
+        unsafe { std::slice::from_raw_parts_mut(self.pointer.as_ptr(), self.len) }
+    }
+}
+
+fn zeroed(len: usize) -> AlignedTable {
+    AlignedTable::zeroed(len)
 }
 
 #[inline]
@@ -568,7 +628,7 @@ const LOW_PLY_UPDATE_NUMERATOR: i32 = 712;
 /// relaxed atomics purely so the worker can refill and update the table through a
 /// shared reference; the table itself is never shared across threads.
 pub(crate) struct LowPlyHistory {
-    table: Box<[AtomicI16]>,
+    table: AlignedTable,
 }
 
 impl LowPlyHistory {
