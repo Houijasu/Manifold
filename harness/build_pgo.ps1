@@ -101,7 +101,10 @@ function Invoke-WithRestoredBuildEnvironment {
     $savedCargoTargetDir = $env:CARGO_TARGET_DIR
     $hadRustFlags = Test-Path Env:RUSTFLAGS
     $savedRustFlags = $env:RUSTFLAGS
+    $hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
+    $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
     try {
+        Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
         & $Body
     } finally {
         if ($hadCargoTargetDir) {
@@ -113,6 +116,11 @@ function Invoke-WithRestoredBuildEnvironment {
             $env:RUSTFLAGS = $savedRustFlags
         } else {
             Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
+        }
+        if ($hadEncodedRustFlags) {
+            $env:CARGO_ENCODED_RUSTFLAGS = $savedEncodedRustFlags
+        } else {
+            Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
         }
     }
 }
@@ -169,6 +177,21 @@ function Get-ValidatedHeadCommit {
     return [string]$output[0]
 }
 
+function Assert-BuildInputsMatchHead {
+    param(
+        [scriptblock]$GetStatus = {
+            $lines = @(& git status --porcelain --untracked-files=normal -- Cargo.toml Cargo.lock .cargo crates 2>&1)
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = $lines }
+        }
+    )
+
+    $status = & $GetStatus
+    Assert-NativeSuccess $status.ExitCode 'git status for build inputs' 5
+    if ($status.Lines.Count -ne 0) {
+        throw (New-PgoFailure "ABORT: build inputs differ from HEAD: $($status.Lines -join '; ')." 5)
+    }
+}
+
 function Get-WorkingTreeState {
     $lines = @(& git status --porcelain --untracked-files=normal 2>&1)
     $gitExitCode = $LASTEXITCODE
@@ -177,6 +200,106 @@ function Get-WorkingTreeState {
         State = if ($lines.Count -eq 0) { 'clean' } else { 'dirty' }
         Details = if ($lines.Count -eq 0) { '(none)' } else { $lines -join '; ' }
     }
+}
+
+function Set-MetadataValue {
+    param(
+        [string]$MetadataPath,
+        [string]$Label,
+        [string]$Value
+    )
+
+    $lines = @(Get-Content -LiteralPath $MetadataPath)
+    $prefix = "$Label`:"
+    $replaced = $false
+    $updated = foreach ($line in $lines) {
+        if ($line.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+            $replaced = $true
+            "$prefix $Value"
+        } else {
+            $line
+        }
+    }
+    if (-not $replaced) {
+        throw (New-PgoFailure "ABORT: PGO metadata is missing label $Label." 5)
+    }
+    Set-Content -LiteralPath $MetadataPath -Value $updated
+}
+
+function Write-NpsNotMeasured {
+    param(
+        [string]$MetadataPath,
+        [string]$EvidencePath
+    )
+
+    @(
+        'status: not measured'
+        'command: not run'
+        'exit code: not applicable'
+        'output:'
+        '(none)'
+    ) | Set-Content -LiteralPath $EvidencePath
+    Set-MetadataValue $MetadataPath 'nps verdict' 'not measured'
+    Set-MetadataValue $MetadataPath 'nps evidence' "target\pgo\nps-verdict.txt (sha256 $((Get-FileHash $EvidencePath -Algorithm SHA256).Hash))"
+}
+
+function Write-NpsPending {
+    param(
+        [string]$MetadataPath,
+        [string]$EvidencePath
+    )
+
+    @(
+        'status: pending'
+        'command: pending publication'
+        'exit code: pending'
+        'output:'
+        '(pending)'
+    ) | Set-Content -LiteralPath $EvidencePath
+    Set-MetadataValue $MetadataPath 'nps verdict' 'pending publication'
+    Set-MetadataValue $MetadataPath 'nps evidence' "target\pgo\nps-verdict.txt (sha256 $((Get-FileHash $EvidencePath -Algorithm SHA256).Hash))"
+}
+
+function Invoke-NpsComparison {
+    param(
+        [string]$BaselineBinary,
+        [string]$OptimizedBinary,
+        [string]$MetadataPath,
+        [string]$EvidencePath,
+        [scriptblock]$RunComparison = {
+            param([string]$Baseline, [string]$Optimized)
+            $arguments = @(
+                '-3.14'
+                'harness\nps_compare.py'
+                '--engine', "A=$Baseline"
+                '--engine', "B=$Optimized"
+                '--depth', '12'
+                '--hash', '64'
+                '--warmup', '1'
+                '--repeat', '3'
+            )
+            $output = @(& py @arguments 2>&1)
+            [pscustomobject]@{
+                Command = "py $($arguments -join ' ')"
+                Output = $output
+                ExitCode = $LASTEXITCODE
+            }
+        }
+    )
+
+    $result = & $RunComparison $BaselineBinary $OptimizedBinary
+    $status = if ($result.ExitCode -eq 0) { 'passed' } else { 'failed' }
+    @(
+        "status: $status"
+        "command: $($result.Command)"
+        "exit code: $($result.ExitCode)"
+        'output:'
+        $result.Output
+    ) | Set-Content -LiteralPath $EvidencePath
+    Set-MetadataValue $MetadataPath 'nps verdict' "$status (exit $($result.ExitCode))"
+    Set-MetadataValue $MetadataPath 'nps evidence' "target\pgo\nps-verdict.txt (sha256 $((Get-FileHash $EvidencePath -Algorithm SHA256).Hash))"
+    $result.Output | Out-Host
+    Assert-NativeSuccess $result.ExitCode 'NPS comparison' 6
 }
 
 function Assert-PgoArtifacts {
@@ -191,7 +314,8 @@ function Assert-PgoArtifacts {
     $baseline = Join-Path $Directory 'manifold-nopgo.exe'
     $optimized = Join-Path $Directory 'manifold-pgo.exe'
     $metadataPath = Join-Path $Directory 'pgo-metadata.txt'
-    foreach ($path in @($baseline, $optimized, "$baseline.source-commit", "$optimized.source-commit", $metadataPath, (Join-Path $Directory 'merged.profdata'))) {
+    $npsEvidencePath = Join-Path $Directory 'nps-verdict.txt'
+    foreach ($path in @($baseline, $optimized, "$baseline.source-commit", "$optimized.source-commit", $metadataPath, $npsEvidencePath, (Join-Path $Directory 'merged.profdata'))) {
         if (-not (Test-Path -LiteralPath $path)) {
             throw (New-PgoFailure "ABORT: staged PGO artifact is missing: $path." 5)
         }
@@ -216,6 +340,10 @@ function Assert-PgoArtifacts {
             throw (New-PgoFailure "ABORT: PGO metadata is missing $required." 5)
         }
     }
+    $npsEvidenceHash = (Get-FileHash $npsEvidencePath -Algorithm SHA256).Hash
+    if (-not $metadata.Contains('nps verdict:') -or -not $metadata.Contains($npsEvidenceHash)) {
+        throw (New-PgoFailure 'ABORT: PGO metadata has no truthful NPS verdict evidence.' 5)
+    }
 }
 
 function Publish-PgoStaging {
@@ -227,6 +355,10 @@ function Publish-PgoStaging {
         [scriptblock]$MovePath = {
             param([string]$LiteralPath, [string]$Destination)
             Move-Item -LiteralPath $LiteralPath -Destination $Destination
+        },
+        [scriptblock]$RemoveBackup = {
+            param([string]$LiteralPath)
+            Remove-Item -LiteralPath $LiteralPath -Recurse -Force
         }
     )
 
@@ -236,6 +368,7 @@ function Publish-PgoStaging {
     $hadFinalDirectory = Test-Path -LiteralPath $FinalDirectory
     $backupMoveSucceeded = $false
     $stagingInstallAttempted = $false
+    $publicationCommitted = $false
     try {
         if ($hadFinalDirectory) {
             & $MovePath $FinalDirectory $BackupDirectory
@@ -244,12 +377,20 @@ function Publish-PgoStaging {
         $stagingInstallAttempted = $true
         & $MovePath $StagingDirectory $FinalDirectory
         & $ValidatePublished
+        $publicationCommitted = $true
         if ($backupMoveSucceeded) {
-            Remove-Item -LiteralPath $BackupDirectory -Recurse -Force
+            try {
+                & $RemoveBackup $BackupDirectory
+            } catch {
+                throw (New-PgoFailure "ABORT: PGO publication committed, but backup cleanup failed. The validated final was preserved; backup remainder requires inspection at $BackupDirectory. $($_.Exception.Message)" 8)
+            }
             $backupMoveSucceeded = $false
         }
     } catch {
         $publicationFailure = $_
+        if ($publicationCommitted) {
+            throw $publicationFailure
+        }
         try {
             if ($backupMoveSucceeded) {
                 Remove-Item -LiteralPath $FinalDirectory -Recurse -Force -ErrorAction SilentlyContinue
@@ -292,6 +433,7 @@ function Invoke-PgoBuild {
     try {
         Assert-ExactPath $pgoDirectory (Join-Path $repositoryRoot 'target\pgo') 'PGO publication directory'
         $sourceCommit = Get-ValidatedHeadCommit
+        Assert-BuildInputsMatchHead
         $workingTreeAtStart = Get-WorkingTreeState
         $releaseExistedBefore = Test-Path -LiteralPath $ordinaryRelease
         $releaseHashBefore = if ($releaseExistedBefore) {
@@ -361,23 +503,39 @@ function Invoke-PgoBuild {
             $rustcOutput = @(& rustc --version 2>&1)
             $rustcExitCode = $LASTEXITCODE
             Assert-NativeSuccess $rustcExitCode 'rustc --version' 5
+            Assert-BuildInputsMatchHead
+            if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
+                throw (New-PgoFailure 'ABORT: HEAD changed before PGO metadata generation.' 5)
+            }
             $workingTreeBeforePublication = Get-WorkingTreeState
+            $metadataPath = Join-Path $stagingDirectory 'pgo-metadata.txt'
+            $npsEvidencePath = Join-Path $stagingDirectory 'nps-verdict.txt'
             @(
                 "date:         $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
                 "commit:       $sourceCommit"
+                'build inputs: clean and matched HEAD before build and publication'
                 "tree start:   $($workingTreeAtStart.State)"
                 "changes start:$($workingTreeAtStart.Details)"
                 "tree publish: $($workingTreeBeforePublication.State)"
                 "changes pub:  $($workingTreeBeforePublication.Details)"
                 "rustc:        $($rustcOutput -join ' ')"
+                'CARGO_ENCODED_RUSTFLAGS: cleared during all Cargo stages'
                 "baseline:     target\pgo\manifold-nopgo.exe (sha256 $baselineHash)"
                 "optimized:    target\pgo\manifold-pgo.exe (sha256 $optimizedHash)"
                 "profile:      target\pgo\merged.profdata (sha256 $profileHash)"
                 "runs:         $BenchRuns x manifold bench"
                 "signature:    $nodesAfter nodes (verified unchanged)"
-            ) | Set-Content (Join-Path $stagingDirectory 'pgo-metadata.txt')
+                'nps verdict: pending'
+                'nps evidence: pending'
+            ) | Set-Content $metadataPath
+            if ($MeasureNps) {
+                Write-NpsPending $metadataPath $npsEvidencePath
+            } else {
+                Write-NpsNotMeasured $metadataPath $npsEvidencePath
+            }
 
             Assert-PgoArtifacts $stagingDirectory $sourceCommit $baselineHash $optimizedHash $profileHash
+            Assert-BuildInputsMatchHead
             if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
                 throw (New-PgoFailure 'ABORT: HEAD changed immediately before PGO publication.' 5)
             }
@@ -388,9 +546,14 @@ function Invoke-PgoBuild {
                 Assert-PgoArtifacts $pgoDirectory $sourceCommit $baselineHash $optimizedHash $profileHash
                 if ($MeasureNps) {
                     Write-Host '== NPS comparison (baseline vs PGO) =='
-                    & py -3.14 harness\nps_compare.py --engine "A=$publishedBaseline" --engine "B=$publishedOptimized" --depth 12 --hash 64 --warmup 1 --repeat 3
-                    $npsExitCode = $LASTEXITCODE
-                    Assert-NativeSuccess $npsExitCode 'NPS comparison' 6
+                    Invoke-NpsComparison $publishedBaseline $publishedOptimized `
+                        (Join-Path $pgoDirectory 'pgo-metadata.txt') `
+                        (Join-Path $pgoDirectory 'nps-verdict.txt')
+                }
+                Assert-PgoArtifacts $pgoDirectory $sourceCommit $baselineHash $optimizedHash $profileHash
+                Assert-BuildInputsMatchHead
+                if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
+                    throw (New-PgoFailure 'ABORT: HEAD changed during PGO publication validation.' 5)
                 }
                 Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore | Out-Null
             }

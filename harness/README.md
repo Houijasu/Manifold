@@ -103,7 +103,11 @@ The verified copies are published as experimental artifacts at
 outputs are not shipping/release artifacts. Publication is fixed to `target\pgo`: the script
 validates both binaries, sidecars, hashes, profile, and metadata in a staging directory before
 replacing the prior output, and restores the prior output if final validation fails. It also
-restores the caller's `CARGO_TARGET_DIR` and `RUSTFLAGS` values on every exit path.
+requires tracked Rust/Cargo inputs to match HEAD before building and publication, clears
+`CARGO_ENCODED_RUSTFLAGS` during every stage, and restores the caller's
+`CARGO_TARGET_DIR`, `RUSTFLAGS`, and `CARGO_ENCODED_RUSTFLAGS` values on every exit path.
+With `-MeasureNps`, `target\pgo\nps-verdict.txt` records the command, output, and exit code,
+and metadata records its verdict and hash; without it, both files explicitly say not measured.
 
 Two things it enforces mechanically:
 
