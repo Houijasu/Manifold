@@ -77,6 +77,7 @@ fn main() {
         println!(
             "position=bench{} depth={depth} nodes={} \
              interior_nodes={} qsearch_nodes={} checked_interior_nodes={} \
+             checked_node_static_evals={} checked_node_evals_skipped={} \
              interior_static_evals={} qsearch_static_evals={} tt_cutoffs={} \
              razoring_attempts={} razoring_cutoffs={} rfp_attempts={} rfp_cutoffs={} \
              nmp_attempts={} nmp_cutoffs={} probcut_attempts={} probcut_cutoffs={} \
@@ -98,6 +99,8 @@ fn main() {
             search.interior_nodes,
             search.qsearch_nodes,
             search.checked_interior_nodes,
+            search.checked_node_static_evals,
+            search.checked_node_evals_skipped,
             search.interior_static_evals,
             search.qsearch_static_evals,
             search.tt_cutoffs,

@@ -14,6 +14,15 @@ pub struct SearchCounters {
     pub qsearch_nodes: u64,
     /// Interior nodes that reached and observed the existing in-check test.
     pub checked_interior_nodes: u64,
+    /// Fresh NNUE forwards performed AT checked interior nodes
+    /// (`UseCheckedNodeEval` on). Checked nodes that reused a TT static eval are
+    /// counted in neither this nor `checked_node_evals_skipped`, so
+    /// `checked_node_static_evals + checked_node_evals_skipped <=
+    /// checked_interior_nodes`.
+    pub checked_node_static_evals: u64,
+    /// Checked interior nodes that skipped evaluation (`UseCheckedNodeEval` off).
+    /// Equals `checked_interior_nodes` in that mode.
+    pub checked_node_evals_skipped: u64,
     /// NNUE evaluations actually requested by principal-variation search.
     pub interior_static_evals: u64,
     /// NNUE evaluations actually requested by quiescence.
@@ -65,6 +74,8 @@ thread_local! {
         interior_nodes: 0,
         qsearch_nodes: 0,
         checked_interior_nodes: 0,
+        checked_node_static_evals: 0,
+        checked_node_evals_skipped: 0,
         interior_static_evals: 0,
         qsearch_static_evals: 0,
         tt_cutoffs: 0,

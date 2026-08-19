@@ -76,6 +76,7 @@ const UCI_RESPONSE: &[&str] = &[
     "option name UseTimeEffort type check default false",
     "option name UseInterpolatedTimeManagement type check default false",
     "option name UseSearchAgainDepth type check default false",
+    "option name UseCheckedNodeEval type check default true",
     "option name EvalFile type string default <empty>",
     "option name SyzygyPath type string default <empty>",
 ];
@@ -1084,6 +1085,10 @@ fn handle_setoption<W: Write>(
     } else if name.eq_ignore_ascii_case("UseSearchAgainDepth") {
         if let Some(enabled) = parse_check_option(&value) {
             state.search_options.use_search_again_depth = enabled;
+        }
+    } else if name.eq_ignore_ascii_case("UseCheckedNodeEval") {
+        if let Some(enabled) = parse_check_option(&value) {
+            state.search_options.use_checked_node_eval = enabled;
         }
     } else if name.eq_ignore_ascii_case("UseSingularExt") {
         if let Some(enabled) = parse_check_option(&value) {

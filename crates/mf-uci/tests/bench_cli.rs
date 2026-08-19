@@ -116,6 +116,16 @@ use std::time::{Duration, Instant};
 const BENCH_NODE_COUNT: u64 = 37_420;
 const BENCH_NODES: &str = "Nodes searched: 37420";
 
+/// The signature with `UseCheckedNodeEval=false`: the checked-node-eval experiment's
+/// own bench anchor.
+///
+/// In-check interior nodes then skip the fresh NNUE forward and the TT static-eval
+/// read, store the `UNEVALUATED_STATIC_EVAL` sentinel like qsearch does, and pin
+/// `improving = false` / `corrplexity = 0`. On this suite only the fourth position's
+/// tree moves (6_006 -> 5_892): the pinned `improving` changes an LMR reduction on a
+/// quiet check evasion. Recorded from this implementation.
+const BENCH_NODE_COUNT_WITHOUT_CHECKED_NODE_EVAL: u64 = 37_306;
+
 /// The signature with `UseCorrplexity=true`: the low-ply-plus-proxy tree. The toggle
 /// gates the three consumption reads only, so an exact anchor proves the feature adds
 /// no computation and no side effect beyond them. Pinned from the OFF side since the
@@ -1133,16 +1143,14 @@ fn checked_node_eval_ships_on_and_the_off_arm_has_its_own_signature() {
     assert_eq!(nodes.len(), 3);
 
     assert_eq!(
-        nodes[0], BENCH_NODE_COUNT,
-        "checked-node evaluation must be ON in the shipped default"
-    );
-    assert_eq!(
-        nodes[1], BENCH_NODE_COUNT,
-        "explicitly enabling the shipped default must not move the signature"
-    );
-    assert_ne!(
-        nodes[2], BENCH_NODE_COUNT,
-        "disabling checked-node evaluation must reach the search and change the tree"
+        nodes,
+        [
+            BENCH_NODE_COUNT,
+            BENCH_NODE_COUNT,
+            BENCH_NODE_COUNT_WITHOUT_CHECKED_NODE_EVAL,
+        ],
+        "checked-node evaluation must be ON in the shipped default, and the off arm \
+         must reproduce its own pinned signature"
     );
 }
 

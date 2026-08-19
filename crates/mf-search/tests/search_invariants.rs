@@ -568,12 +568,12 @@ fn assert_mate_found(fen: &str, expected: i32, options: SearchOptions, network: 
 }
 
 /// A mate in one where the side to move STARTS in check: the rook on b1 checks the
-/// black king on b3 along the b-file, and the mate is the capture of the checker
-/// itself, `Qxb1#` -- the queen is defended by the king and covers a2 and b2. This is
-/// the tactical-blindness guard for the checked-node eval experiment: with the toggle
-/// off the root's checked evasions are searched without any static eval, and the mate
-/// must still be found.
-const IN_CHECK_MATE_CASE: (&str, i32) = ("8/8/8/1q6/8/1k6/8/KR6 b - - 0 1", 1);
+/// black king on b4 along the b-file, and the mate is the capture of the checker
+/// itself, `Qxb1#` from d1 along rank 1 -- the queen is defended by the knight on c3,
+/// which also covers a2. This is the tactical-blindness guard for the checked-node
+/// eval experiment: with the toggle off the root's checked evasions are searched
+/// without any static eval, and the mate must still be found.
+const IN_CHECK_MATE_CASE: (&str, i32) = ("8/8/8/8/1k6/2n5/8/KR1q4 b - - 0 1", 1);
 
 #[test]
 fn mate_in_n_found() {
@@ -1085,13 +1085,23 @@ fn the_qsearch_checks_toggle_changes_the_searched_tree() {
 /// the experiment's determinism anchor -- recorded once from this implementation, and
 /// any change to what the off arm searches moves it. The ON arm must agree with the
 /// default search bit-for-bit: the shipped default keeps today's tree.
+/// The checked-node-eval OFF arm's own fixed-depth signature.
+///
+/// The fourth bench position at depth 7 with a fresh TT: a tactical middlegame where
+/// the side to move lands in check with quiet evasions worth reducing, so the pinned
+/// `improving = false` changes an LMR reduction and the tree with it. Both numbers are
+/// recorded from this implementation: any change to what either arm searches moves
+/// them, and the ON arm agreeing with the default search is the bit-identical-default
+/// contract.
 #[test]
 fn checked_node_eval_toggle_off_has_a_stable_fixed_depth_signature() {
+    const ON_NODES: u64 = 6_006;
+    const OFF_NODES: u64 = 5_892;
     let Some(network) = network() else {
         return;
     };
     let position = Position::from_fen(
-        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
         false,
     )
     .expect("test FEN should parse");
@@ -1105,9 +1115,10 @@ fn checked_node_eval_toggle_off_has_a_stable_fixed_depth_signature() {
     let repeat_table = TranspositionTable::new(16).expect("test TT should allocate");
     let repeat = search(&position, &repeat_table, limits(7), off_options, network);
     assert_eq!(
-        off.nodes, repeat.nodes,
+        repeat.nodes, off.nodes,
         "the toggle-off tree must be deterministic"
     );
+    assert_eq!(off.nodes, OFF_NODES, "the toggle-off fixed-depth signature");
 
     let on_table = TranspositionTable::new(16).expect("test TT should allocate");
     let on = search_default(&position, &on_table, limits(7), network);
@@ -1123,13 +1134,10 @@ fn checked_node_eval_toggle_off_has_a_stable_fixed_depth_signature() {
         network,
     );
     assert_eq!(
-        on.nodes, explicit_on.nodes,
-        "the shipped default and the explicit-on arm must be bit-identical"
+        explicit_on.nodes, on.nodes,
+        "explicit-on must be bit-identical"
     );
-    assert_ne!(
-        off.nodes, on.nodes,
-        "disabling checked-node evaluation must reach the search and change the tree"
-    );
+    assert_eq!(on.nodes, ON_NODES, "the default fixed-depth signature");
 }
 
 /// Capture LMR must SAVE nodes on tactical middlegames without changing the move played.
