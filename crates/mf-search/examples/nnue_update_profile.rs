@@ -253,6 +253,9 @@ impl Totals {
         self.counters.finny_cycles += counters.finny_cycles;
         self.counters.finny_refreshes += counters.finny_refreshes;
         self.counters.finny_delta_rows += counters.finny_delta_rows;
+        self.counters.finny_threat_rebuild_cycles += counters.finny_threat_rebuild_cycles;
+        self.counters.threat_scan_cycles += counters.threat_scan_cycles;
+        self.counters.threat_scan_edges += counters.threat_scan_edges;
         self.counters.forward_cycles += counters.forward_cycles;
         self.counters.deferred_pushes_skipped += counters.deferred_pushes_skipped;
     }
@@ -316,6 +319,41 @@ impl Totals {
             "per finny-served king move (ns): {:.1}",
             counters.finny_cycles as f64 / counters.finny_king_updates as f64 / ghz,
         );
+        // The plan-010 step-0 gate. The mirror-flip branch rescans the board
+        // (`append_active_threats`) before re-streaming every threat row; an edge cache
+        // would remove the scan, so the scan's share of wall is the plan's ceiling.
+        if counters.finny_threat_rebuilds > 0 {
+            let flips = counters.finny_threat_rebuilds as f64;
+            let per_flip_ns = counters.finny_threat_rebuild_cycles as f64 / flips / ghz;
+            let scan_ns_per_flip = counters.threat_scan_cycles as f64 / flips / ghz;
+            let scan_share = if counters.finny_threat_rebuild_cycles > 0 {
+                counters.threat_scan_cycles as f64 * 100.0
+                    / counters.finny_threat_rebuild_cycles as f64
+            } else {
+                0.0
+            };
+            let elapsed_cycles = self.wall_ns * ghz;
+            let ceiling = if elapsed_cycles > 0.0 {
+                counters.threat_scan_cycles as f64 * 100.0 / elapsed_cycles
+            } else {
+                0.0
+            };
+            println!(
+                "flip path: flips={} ({:.1}/1000 nodes) per-flip={:.1} ns \
+                 (scan={:.1} ns = {:.1}% of flip, rows+prefetch={:.1} ns) edges/scan={:.2}",
+                counters.finny_threat_rebuilds,
+                flips * 1000.0 / self.nodes as f64,
+                per_flip_ns,
+                scan_ns_per_flip,
+                scan_share,
+                per_flip_ns - scan_ns_per_flip,
+                counters.threat_scan_edges as f64 / flips,
+            );
+            println!(
+                "projected ceiling: scan = {:.2}% of wall (plan 010 gate: keep only if >= 0.50%)",
+                ceiling,
+            );
+        }
         println!(
             "per forward (ns): {:.1}",
             counters.forward_cycles as f64 / counters.forward_evaluations as f64 / ghz,

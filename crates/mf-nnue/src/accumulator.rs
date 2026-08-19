@@ -238,6 +238,8 @@ impl AccumulatorState {
                     // be recomputed from the position. The piece half still comes from the cache,
                     // which is the larger of the two: the M2-F1 profile measured a rebuild as
                     // 49.4% HalfKA rows against 46.9% threat scan plus threat rows.
+                    #[cfg(feature = "instrumentation")]
+                    let threat_rebuild_started = instrumentation::cycles();
                     rebuild_threats_onto(
                         context.backend,
                         context.network,
@@ -246,6 +248,11 @@ impl AccumulatorState {
                         context.finny.entry(child_entry),
                         &mut self.accumulators[index],
                     );
+                    #[cfg(feature = "instrumentation")]
+                    instrumentation::record(|counters| {
+                        counters.finny_threat_rebuild_cycles +=
+                            instrumentation::cycles().wrapping_sub(threat_rebuild_started);
+                    });
                 }
 
                 #[cfg(feature = "instrumentation")]
@@ -879,7 +886,17 @@ fn rebuild_threats_onto(
     accumulator.psqt = entry.psqt;
 
     let mut active_threats = [0; MAX_ACTIVE];
+    #[cfg(feature = "instrumentation")]
+    let scan_started = instrumentation::cycles();
     let threat_count = append_active_threats(perspective, position, &mut active_threats);
+    #[cfg(feature = "instrumentation")]
+    {
+        let scan_cycles = instrumentation::cycles().wrapping_sub(scan_started);
+        instrumentation::record(|counters| {
+            counters.threat_scan_cycles += scan_cycles;
+            counters.threat_scan_edges += threat_count as u64;
+        });
+    }
     prefetch_threat_rows_indexed(network, &active_threats[..threat_count]);
     for &feature in &active_threats[..threat_count] {
         add_i8_row(
@@ -1351,6 +1368,9 @@ mod tests {
 
         crate::reset_update_counters();
         stack.push_real(&child, mv, &undo).expect("push should fit");
+        // Lazy updates defer the work to materialization, so the counters can only be
+        // read after the frame is actually applied.
+        let _ = stack.current();
 
         let counters = crate::update_counters();
         assert_eq!(
@@ -1379,6 +1399,9 @@ mod tests {
 
         crate::reset_update_counters();
         stack.push_real(&child, mv, &undo).expect("push should fit");
+        // Lazy updates defer the work to materialization, so the counters can only be
+        // read after the frame is actually applied.
+        let _ = stack.current();
 
         let counters = crate::update_counters();
         assert_eq!(

@@ -46,6 +46,14 @@ pub struct UpdateCounters {
     pub finny_refreshes: u64,
     /// HalfKA rows applied by Finny-table refreshes, the work a rebuild would have redone whole.
     pub finny_delta_rows: u64,
+    /// Reference cycles inside the mirror-flip branch's whole threat rebuild
+    /// (`rebuild_threats_onto`): the board scan, the prefetches, and every re-streamed row.
+    pub finny_threat_rebuild_cycles: u64,
+    /// Reference cycles inside the flip-path board scan (`append_active_threats`) alone —
+    /// the portion plan 010's edge cache would remove.
+    pub threat_scan_cycles: u64,
+    /// Active FullThreats edges enumerated by flip-path scans.
+    pub threat_scan_edges: u64,
     /// Reference cycles spent in the forward pass.
     pub forward_cycles: u64,
     /// Real pushes popped without ever being materialized — the work lazy updates actually saved.
@@ -73,6 +81,9 @@ impl UpdateCounters {
         finny_cycles: 0,
         finny_refreshes: 0,
         finny_delta_rows: 0,
+        finny_threat_rebuild_cycles: 0,
+        threat_scan_cycles: 0,
+        threat_scan_edges: 0,
         forward_cycles: 0,
         deferred_pushes_skipped: 0,
     };

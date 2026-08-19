@@ -95,7 +95,7 @@ frame's *position* (frames store their position eagerly) to repopulate and conti
 
 ## Steps
 
-### Step 0: size the ceiling with instrumentation (gate for everything after)
+### Step 0: size the ceiling with instrumentation (gate for everything after) — DONE (2026-08-20)
 
 Add to `UpdateCounters` (feature-gated, thread-local, same pattern as `finny_cycles`):
 
@@ -120,6 +120,29 @@ retire it: nobody should re-audit a named ceiling that measurement has retired. 
 orientation: the AVX2 rebase kernel landed ~2 %; flips are 2.2 % of nodes, so the scan
 share must be ≥ ~25 % of a ~1.5 µs flip for the plan to clear the bar — plausible but
 unproven until this step runs.)
+
+**Execution record (2026-08-20)**: measured over the profile mix (671,669 nodes,
+TSC 2.419 GHz, two runs agreeing):
+
+- flips = 14,747 (**22.0 / 1000 nodes**), whole flip path **974–998 ns per flip**
+- board scan = **256–258 ns per flip = 25.6–26.5 % of the flip path**, 24.43 edges/scan
+- rows + prefetch = **716–742 ns per flip** — the dominant cost, and unremovable
+- **projected ceiling: scan = 0.32 % of wall — BELOW the 0.50 % gate, in both runs**
+
+**Verdict: REJECTED-BY-MEASUREMENT.** Steps 1–4 are not executed. The scan the cache
+would remove is worth 0.32 % of wall at best, before subtracting the walk + delta-apply
+replacement cost and ~200 KB per worker; the flip path's real cost is streaming
+re-indexed threat rows, which no edge cache can avoid because every FullThreats index
+changes on a flip. The step-0 instrumentation (three counters plus the profile's
+flip-path and ceiling lines) is kept so this stays cheap to re-check on future hardware
+or nets. Default build untouched: bench 37557 exact.
+
+Side find: `cargo test -p mf-nnue --features instrumentation` had two pre-existing
+failures at `f3651cd` — `a_king_move_that_{keeps,flips}_the_mirror_*` read Finny
+counters immediately after `push_real`, but lazy updates defer that work to
+materialization. Nobody had run the instrumentation suite since the lazy-update
+change landed (it is not part of the default workspace run). Both tests now
+materialize via `current()` before asserting; 68/68 instrumentation tests green.
 
 ### Step 1: `append_active_threat_edges` — physical-edge enumeration (value-neutral)
 
@@ -232,11 +255,12 @@ commit.
 
 ## Done criteria
 
-- [ ] Step 0 ceiling measured and ≥ 0.5 % of wall (else REJECTED-by-measurement)
-- [ ] All workspace gates exit 0
-- [ ] Bench signature 37557 exact through every step
-- [ ] Flip-path cost and NPS ratio recorded (step 3)
-- [ ] README row and investigate item updated
+- [x] Step 0 ceiling measured: **0.32 % of wall < 0.50 % → REJECTED-by-measurement** (the
+      criterion's else-branch; steps 1–4 not executed)
+- [x] All workspace gates exit 0 (68/68 instrumentation tests; default bench 37557 exact)
+- [x] Bench signature 37557 exact through every executed step (only step 0 ran)
+- [x] Flip-path cost and ceiling recorded (step 0 execution record above)
+- [x] README row and investigate item updated (REJECTED, retired)
 
 ## STOP conditions
 
