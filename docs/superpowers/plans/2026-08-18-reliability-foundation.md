@@ -1,6 +1,6 @@
 # Reliability Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make Manifold's tests, CI, datagen, UCI error handling, measurement provenance,
 release builds, and search profiling reliable before attempting further strength changes.
@@ -122,7 +122,7 @@ GitHub Actions, GitHub release assets, existing fastchess and benchmark harnesse
 - Produces: explicit fixture failures in CI and no process test that allocates the machine
   maximum Hash
 
-- [ ] **Step 1: Prove explicit missing fixtures currently skip**
+- [x] **Step 1: Prove explicit missing fixtures currently skip**
 
 Run:
 
@@ -137,7 +137,7 @@ if ($before -ne 0) { throw 'Expected the old helper to skip and exit zero' }
 
 Expected: exit 0 with a `SKIPPED:` diagnostic. That zero exit is the defect.
 
-- [ ] **Step 2: Make every explicit path authoritative**
+- [x] **Step 2: Make every explicit path authoritative**
 
 Use this pattern in each helper that currently skips an explicit missing path:
 
@@ -172,13 +172,13 @@ if let Some(path) = std::env::var_os("MF_NNUE_TEST_NET").map(PathBuf::from) {
 }
 ```
 
-- [ ] **Step 3: Verify the explicit path now fails**
+- [x] **Step 3: Verify the explicit path now fails**
 
 Run the Step 1 command again.
 
 Expected: nonzero exit with `MF_NNUE_TEST_NET requires an existing network file`.
 
-- [ ] **Step 4: Remove the dangerous Hash process test**
+- [x] **Step 4: Remove the dangerous Hash process test**
 
 Delete
 `the_advertised_hash_maximum_is_accepted_rather_than_refused` from
@@ -186,7 +186,7 @@ Delete
 `the_advertised_hash_maximum_is_the_one_the_engine_enforces`, which proves the handshake and
 resize path share `max_hash_mebibytes()` without allocating it.
 
-- [ ] **Step 5: Convert the 50 ms stress loop to one legality check**
+- [x] **Step 5: Convert the 50 ms stress loop to one legality check**
 
 Rename the test to `fifty_millisecond_clock_returns_a_legal_move`, remove the `for sample in
 0..50` loop and the `reported < 80` assertion, then send one search:
@@ -206,7 +206,7 @@ let mv = bestmove
 assert!(legal_moves.iter().any(|legal| legal == mv));
 ```
 
-- [ ] **Step 6: Run focused and full UCI tests**
+- [x] **Step 6: Run focused and full UCI tests**
 
 Run:
 
@@ -220,7 +220,7 @@ cargo test -p mf-datagen --test bulletformat_round_trip
 
 Expected: all pass with the real local network.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Commit subject: `Make NNUE tests explicit and scheduler independent`
 
@@ -239,13 +239,13 @@ Commit subject: `Make NNUE tests explicit and scheduler independent`
   `nnue-e8449b6/manifold-main-e8449b6.nnue`
 - Produces: `MF_NNUE_TEST_NET` on Windows and Ubuntu CI jobs
 
-- [ ] **Step 1: Obtain explicit authorization for the network release**
+- [x] **Step 1: Obtain explicit authorization for the network release**
 
 Ask permission to create tag/release `nnue-e8449b6` and upload the local
 `nets/main.nnue` as `manifold-main-e8449b6.nnue`. Do not perform the upload without that
 authorization.
 
-- [ ] **Step 2: Create and verify the release asset**
+- [x] **Step 2: Create and verify the release asset**
 
 After authorization, create the release and upload the asset. Download it to a temporary path
 and verify:
@@ -263,7 +263,7 @@ Expected hash:
 `E8449B689E26E40DFD8FAC0423E7825377AFDE8B7D40FC14BFB96DFA32FF908A`.
 Expected length: `111261604`.
 
-- [ ] **Step 3: Create the CI workflow**
+- [x] **Step 3: Create the CI workflow**
 
 Use two explicit jobs rather than a shell-heavy matrix so checksum commands stay native:
 
@@ -312,13 +312,13 @@ jobs:
       - run: cargo test --workspace
 ```
 
-- [ ] **Step 4: Document provisioning**
+- [x] **Step 4: Document provisioning**
 
 Add the release URL, exact checksum, and download examples for PowerShell and POSIX shells to
 README Development. Mark plan 007's CI and provisioning checkboxes complete only after both
 jobs pass.
 
-- [ ] **Step 5: Validate locally**
+- [x] **Step 5: Validate locally**
 
 Run:
 
@@ -336,7 +336,7 @@ If PyYAML is unavailable, parse with Ruby:
 ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml')"
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit subject: `Add checksum-pinned CI gates`
 
@@ -356,7 +356,7 @@ Do not claim CI is green until the branch is pushed and both jobs finish success
   - prompt worker, channel, and sink error propagation
 - Preserves: canonical byte order across thread counts
 
-- [ ] **Step 1: Add failing coordinator tests**
+- [x] **Step 1: Add failing coordinator tests**
 
 Extract one private generic coordinator with this interface:
 
@@ -429,7 +429,7 @@ fn a_sink_error_cancels_before_the_run_claims_every_game() {
 
 `empty_output(index)` returns a `GameOutput` with no records and `stats.games = 1`.
 
-- [ ] **Step 2: Run the tests and observe failure**
+- [x] **Step 2: Run the tests and observe failure**
 
 Run:
 
@@ -439,7 +439,7 @@ cargo test -p mf-datagen a_worker_error_is_returned_instead_of_waiting_for_the_m
 
 Expected: compile failure because `generate_with_worker` does not exist.
 
-- [ ] **Step 3: Implement the standard-library coordinator**
+- [x] **Step 3: Implement the standard-library coordinator**
 
 Use `std::sync::mpsc`, `BTreeMap`, and `Arc<AtomicBool>`. Each worker:
 
@@ -454,7 +454,7 @@ first error. On any error it sets cancellation before leaving the receive loop. 
 disconnect before `config.games` is complete returns
 `"datagen workers stopped before every game was produced"`.
 
-- [ ] **Step 4: Wrap real game state and add restart index**
+- [x] **Step 4: Wrap real game state and add restart index**
 
 Production `W` is `(TranspositionTable, SharedHistory)`. `play_game` remains unchanged and is
 wrapped in `Ok(...)`.
@@ -488,7 +488,7 @@ where
 
 `progress(completed_game_count, &stats)` runs after each emitted whole game.
 
-- [ ] **Step 5: Run datagen tests**
+- [x] **Step 5: Run datagen tests**
 
 Run:
 
@@ -499,7 +499,7 @@ cargo test -p mf-datagen --test bulletformat_round_trip
 
 Expected: all pass, including existing thread-count byte identity.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit subject: `Cancel datagen promptly on worker and sink errors`
 
@@ -519,7 +519,7 @@ Commit subject: `Cancel datagen promptly on worker and sink errors`
   - `<out>.progress` append-only checkpoint log;
   - uninterrupted/resumed byte identity
 
-- [ ] **Step 1: Add checkpoint codec tests**
+- [x] **Step 1: Add checkpoint codec tests**
 
 Define:
 
@@ -544,7 +544,7 @@ Use one tab-separated `key=value` line. Add tests proving:
 - a final truncated line is ignored;
 - a config mismatch is rejected with the mismatched key named.
 
-- [ ] **Step 2: Observe the parser tests fail**
+- [x] **Step 2: Observe the parser tests fail**
 
 Run:
 
@@ -554,7 +554,7 @@ cargo test -p mf-uci datagen_cli::tests::generation_checkpoint -- --nocapture
 
 Expected: compile failure because the checkpoint type/functions do not exist.
 
-- [ ] **Step 3: Implement append-only checkpoints**
+- [x] **Step 3: Implement append-only checkpoints**
 
 Add:
 
@@ -571,7 +571,7 @@ Open with `OpenOptions::new().create(true).append(true)`, write one line plus `\
 `flush()`. `read_generation_checkpoint` scans lines and keeps the last line that parses
 completely.
 
-- [ ] **Step 4: Permit `--resume` for self-play**
+- [x] **Step 4: Permit `--resume` for self-play**
 
 Add `resume: bool` to `GenerateOptions`. Remove the parser rejection that says resume applies
 only to JSONL. Keep conversion behavior unchanged.
@@ -586,7 +586,7 @@ On resume:
 
 Thread count is deliberately not part of the identity.
 
-- [ ] **Step 5: Checkpoint only complete games**
+- [x] **Step 5: Checkpoint only complete games**
 
 Use `generate_from`'s progress callback. Maintain cumulative statistics by merging the prior
 checkpoint stats with current-run stats. After every 100 completed games, and at normal
@@ -598,7 +598,7 @@ completion:
 
 After a successful complete run, remove the sidecar. On error, retain it.
 
-- [ ] **Step 6: Add an end-to-end interrupted/resumed test**
+- [x] **Step 6: Add an end-to-end interrupted/resumed test**
 
 Extract:
 
@@ -620,7 +620,7 @@ Generate the same six-game fixed-seed corpus twice:
 Assert byte identity, equal final summary counts, and absence of the progress sidecar after
 completion.
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run:
 
@@ -629,7 +629,7 @@ cargo test -p mf-uci datagen_cli::tests -- --nocapture
 cargo test -p mf-datagen
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Commit subject: `Make self-play generation resumable`
 
@@ -648,7 +648,7 @@ Commit subject: `Make self-play generation resumable`
   - `ActiveSearch::stop_and_join(self) -> io::Result<()>`;
   - `JoinHandle<io::Result<()>>`
 
-- [ ] **Step 1: Add malformed finite parser tests**
+- [x] **Step 1: Add malformed finite parser tests**
 
 Add unit tests:
 
@@ -678,7 +678,7 @@ fn one_valid_finite_value_wins_over_an_invalid_sibling() {
 }
 ```
 
-- [ ] **Step 2: Observe parser failure**
+- [x] **Step 2: Observe parser failure**
 
 Run:
 
@@ -688,7 +688,7 @@ cargo test -p mf-uci invalid_finite_values_use_an_emergency_node_budget
 
 Expected: `parameters.infinite` is true and `nodes` is `None`.
 
-- [ ] **Step 3: Implement the emergency budget**
+- [x] **Step 3: Implement the emergency budget**
 
 Track `finite_keyword_seen` and `finite_value_parsed`. Set the latter only after a successful
 parse of depth, nodes, movetime, either clock, or mate. Before the bare-go infinite fallback:
@@ -701,7 +701,7 @@ if finite_keyword_seen && !finite_value_parsed && !parameters.infinite {
 
 Valid mixed requests remain unchanged.
 
-- [ ] **Step 4: Add a failing writer regression**
+- [x] **Step 4: Add a failing writer regression**
 
 In the `lib.rs` test module, implement a writer that fails every write:
 
@@ -728,7 +728,7 @@ assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
 
 Current behavior incorrectly returns `Ok(())`.
 
-- [ ] **Step 5: Return search-thread results**
+- [x] **Step 5: Return search-thread results**
 
 Change:
 
@@ -744,7 +744,7 @@ Make `ActiveSearch::stop_and_join` and `stop_active_search` return `io::Result<(
 `?` at every join site and at EOF. Convert a thread panic to `io::Error::other("search thread
 panicked")`.
 
-- [ ] **Step 6: Add process coverage for malformed go**
+- [x] **Step 6: Add process coverage for malformed go**
 
 Send:
 
@@ -757,7 +757,7 @@ quit
 Require one legal `bestmove`, an `info string ignoring ... depth banana` diagnostic, and clean
 exit inside the ordinary watchdog.
 
-- [ ] **Step 7: Run UCI tests**
+- [x] **Step 7: Run UCI tests**
 
 Run:
 
@@ -767,7 +767,7 @@ cargo test -p mf-uci search_output_failure -- --nocapture
 cargo test -p mf-uci --test uci_protocol
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Commit subject: `Propagate UCI search failures and bound malformed go`
 
@@ -787,7 +787,7 @@ Commit subject: `Propagate UCI search failures and bound malformed go`
   - `Get-BinarySourceAttestation`
   - metadata fields `Driver commit`, `Source A/B`, and `Source mode A/B`
 
-- [ ] **Step 1: Write failing PowerShell assertions**
+- [x] **Step 1: Write failing PowerShell assertions**
 
 `harness/provenance.tests.ps1` dot-sources `provenance.ps1` and throws unless:
 
@@ -805,7 +805,7 @@ if ($outside.Mode -ne 'unattested' -or $outside.Commit -ne 'unknown') {
 }
 ```
 
-- [ ] **Step 2: Observe the script fail**
+- [x] **Step 2: Observe the script fail**
 
 Run:
 
@@ -815,7 +815,7 @@ pwsh -NoProfile -File harness/provenance.tests.ps1
 
 Expected: failure because `provenance.ps1` does not exist.
 
-- [ ] **Step 3: Implement the minimal helpers**
+- [x] **Step 3: Implement the minimal helpers**
 
 `Get-ManifoldRepositoryRoot` resolves `Join-Path $PSScriptRoot '..'`.
 
@@ -829,7 +829,7 @@ unless the resolved binary is under the current root's `target` directory, in wh
 returns current worktree HEAD with mode `inferred-target-worktree`. If
 `<binary>.source-commit` exists, its exact 40-hex SHA wins with mode `sidecar`.
 
-- [ ] **Step 4: Update `run_match.ps1`**
+- [x] **Step 4: Update `run_match.ps1`**
 
 Dot-source the helper. Replace the hard-coded root and book with:
 
@@ -859,13 +859,13 @@ SHA-256 B:
 
 Do not emit a generic `Commit:` label.
 
-- [ ] **Step 5: Verify helpers and a two-game smoke**
+- [x] **Step 5: Verify helpers and a two-game smoke**
 
 Copy the ignored local fastchess/book assets into the worktree, build release, then run one
 paired round with the same binary in both arms. Require exit 0, zero forfeits, and metadata
 whose source commit equals this worktree HEAD.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit subject: `Make match provenance worktree aware`
 
@@ -885,30 +885,30 @@ Commit subject: `Make match provenance worktree aware`
   - `target/pgo/manifold-pgo.exe`
 - Preserves: `target/release/manifold.exe`
 
-- [ ] **Step 1: Add a failing preservation smoke**
+- [x] **Step 1: Add a failing preservation smoke**
 
 Build the ordinary release binary and record its SHA-256. Run the current PGO script with one
 bench run. Assert the ordinary release hash is unchanged. Current behavior fails because the
 script rebuilds `target/release/manifold.exe`.
 
-- [ ] **Step 2: Parameterize the Cargo target directory**
+- [x] **Step 2: Parameterize the Cargo target directory**
 
 Change `Invoke-CargoBuild` to accept `TargetDir`, set `CARGO_TARGET_DIR`, and return the
 resulting executable path. Use separate directories for baseline, instrumented, and optimized
 stages.
 
-- [ ] **Step 3: Publish only the experimental copy**
+- [x] **Step 3: Publish only the experimental copy**
 
 Copy baseline to `target/pgo/manifold-nopgo.exe` and optimized to
 `target/pgo/manifold-pgo.exe`. Write `<artifact>.source-commit` sidecars and metadata including
 both binary hashes and the profile hash.
 
-- [ ] **Step 4: Keep the node-signature and NPS gates**
+- [x] **Step 4: Keep the node-signature and NPS gates**
 
 Compare signatures using the dedicated paths. `-MeasureNps` compares the two `target/pgo`
 copies. Update the completion message so it never calls the PGO artifact the shipping build.
 
-- [ ] **Step 5: Run the full PGO script**
+- [x] **Step 5: Run the full PGO script**
 
 Run:
 
@@ -919,7 +919,7 @@ pwsh -NoProfile -File harness/build_pgo.ps1 -BenchRuns 3 -MeasureNps
 Expected: signature 37,420 for both, ordinary release hash unchanged, and PGO result reported
 without replacing the shipping binary.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit subject: `Isolate PGO artifacts from release builds`
 
@@ -940,7 +940,7 @@ Commit subject: `Isolate PGO artifacts from release builds`
   - `target/portable/manifold.exe.source-commit`
   - `target/portable/build-metadata.txt`
 
-- [ ] **Step 1: Write the script around a dedicated target**
+- [x] **Step 1: Write the script around a dedicated target**
 
 Set:
 
@@ -952,7 +952,7 @@ $env:CARGO_TARGET_DIR = (Join-Path $root 'target\portable-build')
 Build `mf-uci --release --bin manifold`, copy the executable to `target/portable`, and restore
 both environment variables in `finally`.
 
-- [ ] **Step 2: Add deterministic gates**
+- [x] **Step 2: Add deterministic gates**
 
 The script must:
 
@@ -968,13 +968,13 @@ The script must:
 If `llvm-objdump` is absent, exit nonzero with the exact `rustup component add
 llvm-tools-preview` instruction.
 
-- [ ] **Step 3: Write metadata and source sidecar**
+- [x] **Step 3: Write metadata and source sidecar**
 
 Record full Git SHA, `rustc -vV`, flags, network checksum, binary checksum, bench signature,
 perft signature, and disassembler path. Write the full SHA to
 `manifold.exe.source-commit`.
 
-- [ ] **Step 4: Run the portable build**
+- [x] **Step 4: Run the portable build**
 
 Run:
 
@@ -984,12 +984,12 @@ pwsh -NoProfile -File harness/build_portable.ps1
 
 Expected: all gates pass and `target/release/manifold.exe` remains unchanged.
 
-- [ ] **Step 5: Document and update plan status**
+- [x] **Step 5: Document and update plan status**
 
 Document native versus portable artifacts and mark plan 008 done only after the instruction
 scan, bench identity, perft, and force-magic gates pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Commit subject: `Add a verified portable x86-64 build`
 
@@ -1010,7 +1010,7 @@ Commit subject: `Add a verified portable x86-64 build`
   - `reset_search_counters()`
   - `search_counters()`
 
-- [ ] **Step 1: Write counter lifecycle tests**
+- [x] **Step 1: Write counter lifecycle tests**
 
 Model the new module on `mf-core/src/instrumentation.rs`:
 
@@ -1047,7 +1047,7 @@ pub struct SearchCounters {
 
 Test zero, accumulation, reset, and thread-local isolation.
 
-- [ ] **Step 2: Observe compile failure**
+- [x] **Step 2: Observe compile failure**
 
 Run:
 
@@ -1057,7 +1057,7 @@ cargo test -p mf-search --features instrumentation instrumentation -- --nocaptur
 
 Expected: module/types do not exist.
 
-- [ ] **Step 3: Implement the thread-local module**
+- [x] **Step 3: Implement the thread-local module**
 
 Use `Cell<SearchCounters>` and:
 
@@ -1067,7 +1067,7 @@ pub(crate) fn record(update: impl FnOnce(&mut SearchCounters))
 
 Export reset/snapshot from `lib.rs` only under the existing instrumentation feature.
 
-- [ ] **Step 4: Instrument existing decisions**
+- [x] **Step 4: Instrument existing decisions**
 
 Add `#[cfg(feature = "instrumentation")]` record calls:
 
@@ -1084,7 +1084,7 @@ Add `#[cfg(feature = "instrumentation")]` record calls:
 
 Do not rearrange conditions or compute values solely for counters.
 
-- [ ] **Step 5: Add a search smoke test**
+- [x] **Step 5: Add a search smoke test**
 
 With instrumentation enabled, run fixed-depth startpos and assert:
 
@@ -1099,7 +1099,7 @@ assert!(counters.razoring_cutoffs <= counters.razoring_attempts);
 
 Reset and verify a second search starts from zero.
 
-- [ ] **Step 6: Add `search_profile`**
+- [x] **Step 6: Add `search_profile`**
 
 Register:
 
@@ -1118,7 +1118,7 @@ position=bench1 depth=7 nodes=... interior_nodes=... qsearch_nodes=... checked_i
 Print every `SearchCounters` field plus existing `SeeCounters` and `UpdateCounters`. Keep
 wall-clock NPS informational and never use it in assertions.
 
-- [ ] **Step 7: Verify zero production impact**
+- [x] **Step 7: Verify zero production impact**
 
 Run:
 
@@ -1132,7 +1132,7 @@ cargo run --release -p mf-uci --bin manifold -- bench
 Expected: both uninstrumented benches report exactly 37,420 nodes. Inspect a release build
 without the feature using `cargo tree -e features` and confirm instrumentation is absent.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 Commit subject: `Add default-off search event telemetry`
 
@@ -1150,7 +1150,7 @@ Commit subject: `Add default-off search event telemetry`
 - Produces: validated branch and evidence-backed decision on whether to start checked-node
   evaluation or threshold-SEE experiments
 
-- [ ] **Step 1: Run formatting, lint, and workspace tests**
+- [x] **Step 1: Run formatting, lint, and workspace tests**
 
 ```powershell
 cargo fmt --all -- --check
@@ -1159,7 +1159,7 @@ cargo test --workspace
 cargo test -p mf-core --features force-magic
 ```
 
-- [ ] **Step 2: Run authoritative release perft**
+- [x] **Step 2: Run authoritative release perft**
 
 ```powershell
 cargo test --release -p mf-core --test perft
@@ -1167,7 +1167,7 @@ cargo test --release -p mf-core --test perft
 
 Expected: all eight tests pass.
 
-- [ ] **Step 3: Run bench twice**
+- [x] **Step 3: Run bench twice**
 
 ```powershell
 cargo run --release -p mf-uci --bin manifold -- bench
@@ -1176,7 +1176,7 @@ cargo run --release -p mf-uci --bin manifold -- bench
 
 Expected: exactly 37,420 nodes both times.
 
-- [ ] **Step 4: Capture telemetry**
+- [x] **Step 4: Capture telemetry**
 
 ```powershell
 cargo run --release -p mf-search --features instrumentation --example search_profile -- 7 |
@@ -1193,16 +1193,16 @@ The README records:
 - pruning attempt/cutoff rates;
 - whether checked-node evaluation has enough measured ceiling to justify a toggle experiment.
 
-- [ ] **Step 5: Run standards and spec review**
+- [x] **Step 5: Run standards and spec review**
 
 Review the complete range from the design commit's parent through HEAD. Reject unsupported
 claims, generated artifacts, default changes, and instrumentation present in default builds.
 
-- [ ] **Step 6: Commit evidence and bookkeeping**
+- [x] **Step 6: Commit evidence and bookkeeping**
 
 Commit subject: `Record reliability foundation validation`
 
-- [ ] **Step 7: Stop before strength changes**
+- [x] **Step 7: Stop before strength changes**
 
 If telemetry justifies checked-node evaluation or threshold SEE, write a separate design and
 implementation plan. Do not implement either experiment on this reliability branch without
