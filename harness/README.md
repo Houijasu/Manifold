@@ -104,8 +104,10 @@ outputs are not shipping/release artifacts. Publication is fixed to `target\pgo`
 validates both binaries, sidecars, hashes, profile, and metadata in a staging directory before
 replacing the prior output, and restores the prior output if final validation fails. It also
 requires tracked Rust/Cargo inputs to match HEAD before building and publication, clears
-`CARGO_ENCODED_RUSTFLAGS` during every stage, and restores the caller's
-`CARGO_TARGET_DIR`, `RUSTFLAGS`, and `CARGO_ENCODED_RUSTFLAGS` values on every exit path.
+`CARGO_ENCODED_RUSTFLAGS` and inherited `RUSTUP_TOOLCHAIN` during every stage, and restores the
+caller's `CARGO_TARGET_DIR`, `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, and `RUSTUP_TOOLCHAIN`
+values on every exit path. `llvm-profdata` must exist under the exact sysroot/host reported by
+the pinned `rustc`; the script never falls back to another installed toolchain.
 The ignored embedded network `nets\main.nnue` is also required and must retain its captured
 size and SHA-256 across every build and publication boundary.
 
@@ -113,7 +115,8 @@ With `-MeasureNps`, artifacts are committed first with a pending verdict, then t
 `target\pgo` copies are compared. `target\pgo\nps-verdict.txt` records the command, output, and
 exit code, and metadata records its verdict and hash. A failed comparison preserves the newly
 published artifacts and failed evidence but exits non-zero without printing success. Without
-measurement, both files explicitly say not measured.
+measurement, both files explicitly say not measured. The comparison also scopes
+`PSNativeCommandUseErrorActionPreference` off and restores the caller's exact preference.
 
 Two things it enforces mechanically:
 

@@ -92,24 +92,67 @@ try {
     Remove-Item $stableFileTestDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+$toolchainTestDirectory = Join-Path $root 'target\pgo-toolchain-tests'
+$exactSysroot = Join-Path $toolchainTestDirectory 'exact-sysroot'
+$exactHost = 'test-host'
+$exactProfdata = Join-Path $exactSysroot "lib\rustlib\$exactHost\bin\llvm-profdata.exe"
+Remove-Item $toolchainTestDirectory -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path (Split-Path -Parent $exactProfdata) -Force | Out-Null
+Set-Content $exactProfdata 'exact toolchain'
+try {
+    $resolvedProfdata = Find-LlvmProfdata ([pscustomobject]@{
+        Sysroot = $exactSysroot
+        Host = $exactHost
+    })
+    if ($resolvedProfdata -cne $exactProfdata) {
+        throw 'llvm-profdata did not resolve from the exact sysroot/host'
+    }
+
+    $missingSysroot = Join-Path $toolchainTestDirectory 'missing-sysroot'
+    try {
+        Find-LlvmProfdata ([pscustomobject]@{
+            Sysroot = $missingSysroot
+            Host = $exactHost
+        })
+        throw 'missing exact llvm-profdata must fail'
+    } catch {
+        if ($_.Exception.Message -eq 'missing exact llvm-profdata must fail') { throw }
+        if ($_.Exception.Message -notmatch [regex]::Escape((Join-Path $missingSysroot "lib\rustlib\$exactHost\bin\llvm-profdata.exe"))) {
+            throw 'missing llvm-profdata error did not name the exact toolchain path'
+        }
+        if ($_.Exception.Message -notmatch 'rustup component add llvm-tools-preview') {
+            throw 'missing llvm-profdata error omitted the install instruction'
+        }
+    }
+} finally {
+    Remove-Item $toolchainTestDirectory -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $hadCargoTargetDir = Test-Path Env:CARGO_TARGET_DIR
 $savedCargoTargetDir = $env:CARGO_TARGET_DIR
 $hadRustFlags = Test-Path Env:RUSTFLAGS
 $savedRustFlags = $env:RUSTFLAGS
 $hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
 $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
+$hadRustupToolchain = Test-Path Env:RUSTUP_TOOLCHAIN
+$savedRustupToolchain = $env:RUSTUP_TOOLCHAIN
 try {
     $env:CARGO_TARGET_DIR = 'caller-target'
     $env:RUSTFLAGS = 'caller-flags'
     $env:CARGO_ENCODED_RUSTFLAGS = 'caller-encoded-flags'
+    $env:RUSTUP_TOOLCHAIN = 'caller-toolchain'
     try {
         Invoke-WithRestoredBuildEnvironment {
             if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
                 throw 'CARGO_ENCODED_RUSTFLAGS was not cleared inside the build environment'
             }
+            if (Test-Path Env:RUSTUP_TOOLCHAIN) {
+                throw 'RUSTUP_TOOLCHAIN was not cleared inside the build environment'
+            }
             $env:CARGO_TARGET_DIR = 'inner-target'
             $env:RUSTFLAGS = 'inner-flags'
             $env:CARGO_ENCODED_RUSTFLAGS = 'inner-encoded-flags'
+            $env:RUSTUP_TOOLCHAIN = 'inner-toolchain'
             throw 'expected test failure'
         }
     } catch {
@@ -124,17 +167,25 @@ try {
     if ($env:CARGO_ENCODED_RUSTFLAGS -ne 'caller-encoded-flags') {
         throw 'caller CARGO_ENCODED_RUSTFLAGS was not restored after failure'
     }
+    if ($env:RUSTUP_TOOLCHAIN -ne 'caller-toolchain') {
+        throw 'caller RUSTUP_TOOLCHAIN was not restored after failure'
+    }
 
     Remove-Item Env:CARGO_TARGET_DIR
     Remove-Item Env:RUSTFLAGS
     Remove-Item Env:CARGO_ENCODED_RUSTFLAGS
+    Remove-Item Env:RUSTUP_TOOLCHAIN
     Invoke-WithRestoredBuildEnvironment {
         if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
             throw 'initially absent CARGO_ENCODED_RUSTFLAGS appeared inside the build environment'
         }
+        if (Test-Path Env:RUSTUP_TOOLCHAIN) {
+            throw 'initially absent RUSTUP_TOOLCHAIN appeared inside the build environment'
+        }
         $env:CARGO_TARGET_DIR = 'inner-target'
         $env:RUSTFLAGS = 'inner-flags'
         $env:CARGO_ENCODED_RUSTFLAGS = 'inner-encoded-flags'
+        $env:RUSTUP_TOOLCHAIN = 'inner-toolchain'
     }
     if (Test-Path Env:CARGO_TARGET_DIR) {
         throw 'previously absent CARGO_TARGET_DIR was not removed after success'
@@ -144,6 +195,9 @@ try {
     }
     if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
         throw 'previously absent CARGO_ENCODED_RUSTFLAGS was not removed after success'
+    }
+    if (Test-Path Env:RUSTUP_TOOLCHAIN) {
+        throw 'previously absent RUSTUP_TOOLCHAIN was not removed after success'
     }
 } finally {
     if ($hadCargoTargetDir) {
@@ -160,6 +214,11 @@ try {
         $env:CARGO_ENCODED_RUSTFLAGS = $savedEncodedRustFlags
     } else {
         Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+    }
+    if ($hadRustupToolchain) {
+        $env:RUSTUP_TOOLCHAIN = $savedRustupToolchain
+    } else {
+        Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
     }
 }
 
@@ -323,14 +382,22 @@ Set-Content $npsMetadata @(
     'nps evidence: pending'
 )
 try {
+    $savedNativePreference = $PSNativeCommandUseErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $true
     Invoke-NpsComparison -BaselineBinary 'baseline.exe' -OptimizedBinary 'optimized.exe' `
         -MetadataPath $npsMetadata -EvidencePath $npsEvidence -RunComparison {
+            if ($PSNativeCommandUseErrorActionPreference -ne $false) {
+                throw 'native command preference was not disabled for NPS comparison'
+            }
             [pscustomobject]@{
                 Command = 'fake nps comparison'
                 Output = @('geometric mean NPS ratio A/B = 0.99x')
                 ExitCode = 0
             }
         }
+    if ($PSNativeCommandUseErrorActionPreference -ne $true) {
+        throw 'true native command preference was not restored'
+    }
     $passedEvidence = Get-Content $npsEvidence -Raw
     $passedMetadata = Get-Content $npsMetadata -Raw
     if (-not $passedEvidence.Contains('status: passed') -or
@@ -343,13 +410,40 @@ try {
         throw 'successful NPS metadata verdict was incomplete'
     }
 
+    function Test-AbsentNativePreferenceRestoration {
+        Remove-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Local -ErrorAction SilentlyContinue
+        Invoke-NpsComparison -BaselineBinary 'baseline.exe' -OptimizedBinary 'optimized.exe' `
+            -MetadataPath $npsMetadata -EvidencePath $npsEvidence -RunComparison {
+                if ($PSNativeCommandUseErrorActionPreference -ne $false) {
+                    throw 'absent native command preference was not disabled for NPS comparison'
+                }
+                [pscustomobject]@{
+                    Command = 'fake absent-preference comparison'
+                    Output = @('comparison complete')
+                    ExitCode = 0
+                }
+            }
+        if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Local -ErrorAction SilentlyContinue) {
+            throw 'initially absent native command preference was not removed'
+        }
+    }
     Set-Content $npsMetadata @(
         'nps verdict: pending'
         'nps evidence: pending'
     )
+    Test-AbsentNativePreferenceRestoration
+
+    Set-Content $npsMetadata @(
+        'nps verdict: pending'
+        'nps evidence: pending'
+    )
+    $PSNativeCommandUseErrorActionPreference = $false
     try {
         Invoke-NpsComparison -BaselineBinary 'baseline.exe' -OptimizedBinary 'optimized.exe' `
             -MetadataPath $npsMetadata -EvidencePath $npsEvidence -RunComparison {
+                if ($PSNativeCommandUseErrorActionPreference -ne $false) {
+                    throw 'false native command preference changed inside NPS comparison'
+                }
                 [pscustomobject]@{
                     Command = 'fake failing nps comparison'
                     Output = @('comparison failed')
@@ -366,6 +460,9 @@ try {
     }
     if (-not (Get-Content $npsMetadata -Raw).Contains('nps verdict: failed')) {
         throw 'failed NPS metadata verdict was not truthful'
+    }
+    if ($PSNativeCommandUseErrorActionPreference -ne $false) {
+        throw 'false native command preference was not restored'
     }
 
     Write-NpsNotMeasured -MetadataPath $npsMetadata -EvidencePath $npsEvidence
@@ -390,6 +487,7 @@ try {
     )
     Set-Content (Join-Path $transactionStaging 'nps-verdict.txt') 'status: pending'
     Set-Content (Join-Path $transactionFinal 'old.txt') 'old'
+    $PSNativeCommandUseErrorActionPreference = $true
     try {
         Publish-AndMeasurePgo -StagingDirectory $transactionStaging `
             -FinalDirectory $transactionFinal -BackupDirectory $transactionBackup `
@@ -398,6 +496,9 @@ try {
                     throw 'new publication was not installed'
                 }
             } -MeasureNps -RunComparison {
+                if ($PSNativeCommandUseErrorActionPreference -ne $false) {
+                    throw 'published NPS comparison inherited native command preference'
+                }
                 [pscustomobject]@{
                     Command = 'fake published-copy comparison'
                     Output = @('published comparison failed')
@@ -427,7 +528,11 @@ try {
     if (Test-Path $transactionStaging) {
         throw 'published NPS failure leaked staging'
     }
+    if ($PSNativeCommandUseErrorActionPreference -ne $true) {
+        throw 'published NPS failure did not restore native command preference'
+    }
 } finally {
+    $PSNativeCommandUseErrorActionPreference = $savedNativePreference
     Remove-Item $npsTestDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }
 

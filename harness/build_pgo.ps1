@@ -104,8 +104,11 @@ function Invoke-WithRestoredBuildEnvironment {
     $savedRustFlags = $env:RUSTFLAGS
     $hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
     $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
+    $hadRustupToolchain = Test-Path Env:RUSTUP_TOOLCHAIN
+    $savedRustupToolchain = $env:RUSTUP_TOOLCHAIN
     try {
         Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+        Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
         & $Body
     } finally {
         if ($hadCargoTargetDir) {
@@ -122,6 +125,11 @@ function Invoke-WithRestoredBuildEnvironment {
             $env:CARGO_ENCODED_RUSTFLAGS = $savedEncodedRustFlags
         } else {
             Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+        }
+        if ($hadRustupToolchain) {
+            $env:RUSTUP_TOOLCHAIN = $savedRustupToolchain
+        } else {
+            Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
         }
     }
 }
@@ -154,18 +162,36 @@ function Get-BenchSignature {
     return [int64]$Matches[1]
 }
 
-function Find-LlvmProfdata {
-    $toml = Get-Content 'rust-toolchain.toml' -Raw
-    $channels = @()
-    if ($toml -match 'channel\s*=\s*"([^"]+)"') { $channels += $Matches[1] }
-    $channels += 'stable'
-    foreach ($channel in $channels) {
-        $candidate = Join-Path $env:USERPROFILE ".rustup\toolchains\$channel-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\bin\llvm-profdata.exe"
-        if (Test-Path $candidate) { return $candidate }
+function Get-ActiveRustToolchainIdentity {
+    $sysrootOutput = @(& rustc --print sysroot 2>&1)
+    $sysrootExitCode = $LASTEXITCODE
+    Assert-NativeSuccess $sysrootExitCode 'rustc --print sysroot' 2
+    if ($sysrootOutput.Count -ne 1) {
+        throw (New-PgoFailure 'ABORT: rustc returned an invalid sysroot.' 2)
     }
-    Write-Host 'ABORT: llvm-profdata.exe not found in the pinned or stable toolchain.'
-    Write-Host '       Run: rustup component add llvm-tools-preview'
-    throw (New-PgoFailure 'ABORT: llvm-profdata.exe is unavailable.' 2)
+
+    $verboseOutput = @(& rustc -vV 2>&1)
+    $verboseExitCode = $LASTEXITCODE
+    Assert-NativeSuccess $verboseExitCode 'rustc -vV' 2
+    $hostLine = $verboseOutput | Where-Object { $_ -match '^host:\s*(\S+)$' } | Select-Object -First 1
+    if (-not $hostLine -or $hostLine -notmatch '^host:\s*(\S+)$') {
+        throw (New-PgoFailure 'ABORT: rustc -vV did not report a host triple.' 2)
+    }
+    [pscustomobject]@{
+        Sysroot = [string]$sysrootOutput[0]
+        Host = [string]$Matches[1]
+        RustcVerbose = $verboseOutput -join [Environment]::NewLine
+    }
+}
+
+function Find-LlvmProfdata {
+    param([psobject]$Toolchain)
+
+    $candidate = Join-Path $Toolchain.Sysroot "lib\rustlib\$($Toolchain.Host)\bin\llvm-profdata.exe"
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        throw (New-PgoFailure "ABORT: exact pinned llvm-profdata.exe is unavailable at $candidate.`n       Run: rustup component add llvm-tools-preview" 2)
+    }
+    return $candidate
 }
 
 function Get-ValidatedHeadCommit {
@@ -324,7 +350,18 @@ function Invoke-NpsComparison {
         }
     )
 
-    $result = & $RunComparison $BaselineBinary $OptimizedBinary
+    $callerPreference = Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope 1 -ErrorAction SilentlyContinue
+    $savedCallerPreference = if ($callerPreference) { $callerPreference.Value } else { $null }
+    try {
+        Set-Variable -Name PSNativeCommandUseErrorActionPreference -Value $false -Scope 1
+        $result = & $RunComparison $BaselineBinary $OptimizedBinary
+    } finally {
+        if ($callerPreference) {
+            Set-Variable -Name PSNativeCommandUseErrorActionPreference -Value $savedCallerPreference -Scope 1
+        } else {
+            Remove-Variable -Name PSNativeCommandUseErrorActionPreference -Scope 1 -ErrorAction SilentlyContinue
+        }
+    }
     $status = if ($result.ExitCode -eq 0) { 'passed' } else { 'failed' }
     @(
         "status: $status"
@@ -503,6 +540,8 @@ function Invoke-PgoBuild {
         $sourceCommit = Get-ValidatedHeadCommit
         Assert-BuildInputsMatchHead
         $networkIdentity = Get-RequiredFileIdentity $networkPath 'embedded network'
+        $toolchain = Get-ActiveRustToolchainIdentity
+        $profdata = Find-LlvmProfdata $toolchain
         $workingTreeAtStart = Get-WorkingTreeState
         $releaseExistedBefore = Test-Path -LiteralPath $ordinaryRelease
         $releaseHashBefore = if ($releaseExistedBefore) {
@@ -539,7 +578,6 @@ function Invoke-PgoBuild {
             Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
 
             Write-Host '== Stage 3/5: merge profiles =='
-            $profdata = Find-LlvmProfdata
             $mergedProfile = Join-Path $stagingDirectory 'merged.profdata'
             & $profdata merge -o $mergedProfile ($profraws.FullName)
             $mergeExitCode = $LASTEXITCODE
@@ -573,9 +611,6 @@ function Invoke-PgoBuild {
             $baselineHash = (Get-FileHash $stagedBaseline -Algorithm SHA256).Hash
             $optimizedHash = (Get-FileHash $stagedOptimized -Algorithm SHA256).Hash
             $profileHash = (Get-FileHash $mergedProfile -Algorithm SHA256).Hash
-            $rustcOutput = @(& rustc --version 2>&1)
-            $rustcExitCode = $LASTEXITCODE
-            Assert-NativeSuccess $rustcExitCode 'rustc --version' 5
             Assert-BuildInputsMatchHead
             Assert-StableFileIdentity $networkPath $networkIdentity.Size $networkIdentity.Hash 'embedded network'
             if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
@@ -592,7 +627,12 @@ function Invoke-PgoBuild {
                 "changes start:$($workingTreeAtStart.Details)"
                 "tree publish: $($workingTreeBeforePublication.State)"
                 "changes pub:  $($workingTreeBeforePublication.Details)"
-                "rustc:        $($rustcOutput -join ' ')"
+                "rustc sysroot: $($toolchain.Sysroot)"
+                "rustc host:    $($toolchain.Host)"
+                'rustc -vV:'
+                $toolchain.RustcVerbose
+                "llvm-profdata: $profdata"
+                'RUSTUP_TOOLCHAIN: cleared; rust-toolchain.toml authoritative'
                 'CARGO_ENCODED_RUSTFLAGS: cleared during all Cargo stages'
                 "baseline:     target\pgo\manifold-nopgo.exe (sha256 $baselineHash)"
                 "optimized:    target\pgo\manifold-pgo.exe (sha256 $optimizedHash)"
