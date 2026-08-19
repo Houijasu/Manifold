@@ -67,6 +67,15 @@ pub struct SearchCounters {
     pub reduced_fail_highs: u64,
     /// Searches of an LMR-reduced move launched at its original child depth.
     pub full_depth_researches: u64,
+    /// SEE calls issued from `load_captures` capture staging, one per generated capture.
+    pub see_calls_load_captures: u64,
+    /// SEE calls issued from TT-move validation of a capture-family move.
+    pub see_calls_tt_validation: u64,
+    /// SEE calls issued from the interior SEE-pruning gate's quiets fallback, where no
+    /// memoized capture SEE exists and the exchange is walked fresh.
+    pub see_calls_interior_quiets_fallback: u64,
+    /// SEE calls issued from the qsearch quiet-checks gate.
+    pub see_calls_quiet_checks: u64,
 }
 
 thread_local! {
@@ -98,6 +107,10 @@ thread_local! {
         lmr_reductions: 0,
         reduced_fail_highs: 0,
         full_depth_researches: 0,
+        see_calls_load_captures: 0,
+        see_calls_tt_validation: 0,
+        see_calls_interior_quiets_fallback: 0,
+        see_calls_quiet_checks: 0,
     }) };
 }
 

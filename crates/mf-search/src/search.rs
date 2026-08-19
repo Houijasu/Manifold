@@ -2719,10 +2719,13 @@ fn pvs(
                 && {
                     #[cfg(feature = "instrumentation")]
                     crate::instrumentation::record(|counters| counters.see_pruning_attempts += 1);
-                    picker
-                        .current_capture_see()
-                        .unwrap_or_else(|| static_exchange_evaluation(position, mv))
-                        < threshold
+                    picker.current_capture_see().unwrap_or_else(|| {
+                        #[cfg(feature = "instrumentation")]
+                        crate::instrumentation::record(|counters| {
+                            counters.see_calls_interior_quiets_fallback += 1;
+                        });
+                        static_exchange_evaluation(position, mv)
+                    }) < threshold
                 }
                 && (quiet || alpha >= 0 || has_other_non_pawn_material(position, mover, mv))
             {

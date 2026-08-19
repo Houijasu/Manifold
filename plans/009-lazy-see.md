@@ -126,12 +126,15 @@ the per-site shares in `see_profile`'s totals. This sizes step 3's ceiling befor
 built: the fraction of `load_captures` calls whose capture is never yielded.
 
 **Verify**: instrumentation build green; default build's bench still 37420 (counters are
-feature-gated); per-site shares recorded here:
+feature-gated); per-site shares recorded here (2026-08-19, profile mix, 668,558 nodes):
 
-- load_captures: ___ calls/kn
-- tt_validation: ___ calls/kn
-- interior_quiets_fallback: ___ calls/kn
-- quiet_checks: ___ calls/kn (expect ~0 at default options — `UseQSearchChecks=false`)
+- load_captures: **1201.24 calls/kn — 72.2 % of SEE calls** (the step-3 ceiling)
+- tt_validation: 48.43 calls/kn (2.9 %)
+- interior_quiets_fallback: 414.78 calls/kn (24.9 % — step 2's target)
+- quiet_checks: 0.00 calls/kn (as expected at default options — `UseQSearchChecks=false`)
+
+Cross-check: the four sites sum to exactly the mf-core `see_calls` total (1,112,784), so
+they are exhaustive.
 
 ### Step 1: `see_ge(position, mv, threshold) -> bool` — re-plan of 002 step 3
 

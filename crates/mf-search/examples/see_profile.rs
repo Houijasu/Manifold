@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use mf_core::{Position, reset_see_counters, see_counters};
-use mf_search::{SearchLimits, SearchOptions, TranspositionTable, search};
+use mf_search::{
+    SearchLimits, SearchOptions, TranspositionTable, reset_search_counters, search, search_counters,
+};
 
 const DEFAULT_DEPTH: u32 = 7;
 const HASH_MIB: usize = 16;
@@ -92,6 +94,36 @@ struct Row {
     wall_ns: f64,
     calls: u64,
     cycles: u64,
+    sites: SeeSites,
+}
+
+/// Per-call-site SEE counts, so the profile can show where the aggregate SEE cost is
+/// issued from. The four sites are every non-test `static_exchange_evaluation` call in
+/// mf-search, so their sum must equal the mf-core `see_calls` total.
+#[derive(Clone, Copy, Default)]
+struct SeeSites {
+    load_captures: u64,
+    tt_validation: u64,
+    interior_quiets_fallback: u64,
+    quiet_checks: u64,
+}
+
+impl SeeSites {
+    fn from_counters(counters: &mf_search::SearchCounters) -> Self {
+        Self {
+            load_captures: counters.see_calls_load_captures,
+            tt_validation: counters.see_calls_tt_validation,
+            interior_quiets_fallback: counters.see_calls_interior_quiets_fallback,
+            quiet_checks: counters.see_calls_quiet_checks,
+        }
+    }
+
+    fn add(&mut self, other: Self) {
+        self.load_captures += other.load_captures;
+        self.tt_validation += other.tt_validation;
+        self.interior_quiets_fallback += other.interior_quiets_fallback;
+        self.quiet_checks += other.quiet_checks;
+    }
 }
 
 fn profile(network: &mf_nnue::Network, label: &str, fen: &str, depth: u32) -> Row {
@@ -99,6 +131,7 @@ fn profile(network: &mf_nnue::Network, label: &str, fen: &str, depth: u32) -> Ro
     let table = TranspositionTable::new(HASH_MIB).expect("profile Hash should allocate");
 
     reset_see_counters();
+    reset_search_counters();
     let started = Instant::now();
     let result = search(
         &position,
@@ -117,6 +150,7 @@ fn profile(network: &mf_nnue::Network, label: &str, fen: &str, depth: u32) -> Ro
         wall_ns,
         calls: counters.calls,
         cycles: counters.cycles,
+        sites: SeeSites::from_counters(&search_counters()),
     };
     print_row(label, depth, &row);
     row
@@ -196,6 +230,7 @@ struct Totals {
     wall_ns: f64,
     calls: u64,
     cycles: u64,
+    sites: SeeSites,
 }
 
 impl Totals {
@@ -204,6 +239,7 @@ impl Totals {
         self.wall_ns += row.wall_ns;
         self.calls += row.calls;
         self.cycles += row.cycles;
+        self.sites.add(row.sites);
     }
 
     fn row(&self) -> Row {
@@ -212,6 +248,7 @@ impl Totals {
             wall_ns: self.wall_ns,
             calls: self.calls,
             cycles: self.cycles,
+            sites: self.sites,
         }
     }
 
@@ -232,6 +269,23 @@ impl Totals {
         println!(
             "share of wall: {:.1}%",
             see_share_of_wall(&self.row()) * 100.0,
+        );
+        let per_kilonode = |count: u64| count as f64 * 1000.0 / self.nodes as f64;
+        println!(
+            "per site (calls/1000 nodes): load_captures={:.2} tt_validation={:.2} \
+             interior_quiets_fallback={:.2} quiet_checks={:.2}",
+            per_kilonode(self.sites.load_captures),
+            per_kilonode(self.sites.tt_validation),
+            per_kilonode(self.sites.interior_quiets_fallback),
+            per_kilonode(self.sites.quiet_checks),
+        );
+        let site_sum = self.sites.load_captures
+            + self.sites.tt_validation
+            + self.sites.interior_quiets_fallback
+            + self.sites.quiet_checks;
+        println!(
+            "site sum {site_sum} vs see_calls total {} (must match)",
+            self.calls
         );
     }
 }

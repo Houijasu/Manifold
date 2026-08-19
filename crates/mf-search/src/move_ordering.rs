@@ -483,6 +483,8 @@ impl<'a> MovePicker<'a> {
             // One SEE per capture: the score, the good/bad split, the qsearch gate,
             // and the value the search reads back through `current_capture_see` all
             // share it.
+            #[cfg(feature = "instrumentation")]
+            crate::instrumentation::record(|counters| counters.see_calls_load_captures += 1);
             let see = static_exchange_evaluation(position, mv);
             // The qsearch gate drops below-threshold captures outright — they are
             // never deferred to a later stage. Promotions are exempt: a promotion
@@ -543,6 +545,8 @@ impl<'a> MovePicker<'a> {
         self.current_capture_see = if capture_family {
             // Exempt from generation, not from the SEE contract: ProbCut thresholds
             // every capture-family yield through `current_capture_see`.
+            #[cfg(feature = "instrumentation")]
+            crate::instrumentation::record(|counters| counters.see_calls_tt_validation += 1);
             Some(static_exchange_evaluation(position, tt_move))
         } else {
             None
@@ -642,9 +646,12 @@ fn quiet_checks(position: &Position, ordering: OrderingContext<'_>) -> MoveList 
         // The check test before the SEE call on purpose: it rejects the large
         // majority of quiets for a couple of bitboard tests, while SEE walks a
         // whole recapture sequence.
-        if !check_info.gives_check(position, mv)
-            || static_exchange_evaluation(position, mv) < QUIET_CHECK_SEE_THRESHOLD
-        {
+        if !check_info.gives_check(position, mv) {
+            continue;
+        }
+        #[cfg(feature = "instrumentation")]
+        crate::instrumentation::record(|counters| counters.see_calls_quiet_checks += 1);
+        if static_exchange_evaluation(position, mv) < QUIET_CHECK_SEE_THRESHOLD {
             continue;
         }
         scores[checks.len()].write(ordering.ordering_history(position, color, mv));
