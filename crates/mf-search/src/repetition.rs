@@ -184,9 +184,14 @@ impl RepetitionHistory {
 
     pub(crate) fn upcoming_repetition(&self, position: &Position, ply: usize) -> bool {
         let current_index = self.entries.len().saturating_sub(1);
-        let end = usize::from(position.halfmove_clock())
-            .min(self.plies_since_null())
-            .min(current_index);
+        // The halfmove clock and the history length are free to read; a repetition
+        // needs three reversible plies, so either being short rules one out before
+        // the backward `plies_since_null` scan runs.
+        let end = usize::from(position.halfmove_clock()).min(current_index);
+        if end < 3 {
+            return false;
+        }
+        let end = end.min(self.plies_since_null());
         if end < 3 {
             return false;
         }
