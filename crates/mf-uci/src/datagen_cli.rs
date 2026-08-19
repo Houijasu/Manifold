@@ -23,14 +23,15 @@
 //! rather than reporting what the generator believed it wrote. That is what makes the
 //! record count in the validation contract a real check on the writer.
 
+use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use mf_datagen::{
     ConvertConfig, ConvertStats, Filter, GenerateConfig, GenerateStats, RECORD_BYTES, Rejection,
-    SkipReason, ValidationReport, convert, generate, validate_file,
+    SkipReason, ValidationReport, convert, generate_from, validate_file,
 };
 
 /// The only output format currently supported.
@@ -39,6 +40,7 @@ use mf_datagen::{
 /// `viriformat` or `binpack` later is not a breaking change to the command line, and
 /// so that a typo fails loudly instead of silently writing the wrong format.
 const FORMAT_BULLETFORMAT: &str = "bulletformat";
+const GENERATION_CHECKPOINT_GAMES: u64 = 100;
 
 /// Runs the `datagen` subcommand.
 pub fn run_datagen_subcommand<I, S, W>(arguments: I, mut writer: W) -> Result<(), String>
@@ -74,6 +76,56 @@ struct GenerateOptions {
     config: GenerateConfig,
     /// `';'`-separated Syzygy tablebase directories for game adjudication.
     syzygy_path: Option<String>,
+    resume: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GenerationCheckpoint {
+    games_completed: u64,
+    output_bytes: u64,
+    games: u64,
+    nodes: u64,
+    seed: u64,
+    score_bound: i32,
+    syzygy_path: String,
+    stats: GenerateStats,
+}
+
+#[derive(Clone, Copy)]
+struct GenerationRunPolicy {
+    checkpoint_every: u64,
+    stop_after: Option<u64>,
+}
+
+impl GenerationCheckpoint {
+    fn to_line(&self) -> String {
+        format!(
+            "games_completed={}\toutput_bytes={}\tgames={}\tnodes={}\tseed={}\t\
+             score_bound={}\tsyzygy_path={}\tstats_games={}\tpositions={}\t\
+             considered={}\trejected={},{},{},{},{}\tdeduplicated={}\t\
+             results={},{},{}\ttb_adjudicated={}",
+            self.games_completed,
+            self.output_bytes,
+            self.games,
+            self.nodes,
+            self.seed,
+            self.score_bound,
+            encode_checkpoint_string(&self.syzygy_path),
+            self.stats.games,
+            self.stats.positions,
+            self.stats.considered,
+            self.stats.rejected[0],
+            self.stats.rejected[1],
+            self.stats.rejected[2],
+            self.stats.rejected[3],
+            self.stats.rejected[4],
+            self.stats.deduplicated,
+            self.stats.results[0],
+            self.stats.results[1],
+            self.stats.results[2],
+            self.stats.tb_adjudicated,
+        )
+    }
 }
 
 struct ConvertOptions {
@@ -253,12 +305,6 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                      self-play generation is bounded by --games",
                 ));
             }
-            if resume {
-                return Err(datagen_usage(
-                    "--resume applies to --from-jsonl conversion; self-play generation \
-                     is reproduced from --seed instead",
-                ));
-            }
             if sample_stride.is_some() {
                 return Err(datagen_usage(
                     "--sample-stride subsamples a --from-jsonl source; self-play \
@@ -284,6 +330,7 @@ fn parse_arguments(arguments: &[String]) -> Result<Command, String> {
                     filter,
                 },
                 syzygy_path,
+                resume,
             }))
         }
     }
@@ -332,10 +379,267 @@ fn parse_i32(value: &str, name: &str) -> Result<i32, String> {
         .map_err(|_| datagen_usage(&format!("invalid {name} value '{value}'")))
 }
 
+fn encode_checkpoint_string(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(value.len() * 2);
+    for byte in value.bytes() {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
+fn decode_checkpoint_string(value: &str) -> Result<String, String> {
+    if !value.len().is_multiple_of(2) {
+        return Err("invalid checkpoint syzygy_path encoding".to_string());
+    }
+    let mut decoded = Vec::with_capacity(value.len() / 2);
+    for pair in value.as_bytes().chunks_exact(2) {
+        let pair = std::str::from_utf8(pair)
+            .map_err(|_| "invalid checkpoint syzygy_path encoding".to_string())?;
+        decoded.push(
+            u8::from_str_radix(pair, 16)
+                .map_err(|_| "invalid checkpoint syzygy_path encoding".to_string())?,
+        );
+    }
+    String::from_utf8(decoded).map_err(|_| "checkpoint syzygy_path is not UTF-8".to_string())
+}
+
+fn checkpoint_value<'a>(
+    fields: &mut impl Iterator<Item = &'a str>,
+    key: &str,
+) -> Result<&'a str, String> {
+    let field = fields
+        .next()
+        .ok_or_else(|| format!("checkpoint is missing {key}"))?;
+    field
+        .strip_prefix(key)
+        .and_then(|value| value.strip_prefix('='))
+        .ok_or_else(|| format!("checkpoint expected {key}, found '{field}'"))
+}
+
+fn checkpoint_number<'a, T>(
+    fields: &mut impl Iterator<Item = &'a str>,
+    key: &str,
+) -> Result<T, String>
+where
+    T: std::str::FromStr,
+{
+    let value = checkpoint_value(fields, key)?;
+    value
+        .parse()
+        .map_err(|_| format!("checkpoint has invalid {key} value '{value}'"))
+}
+
+fn checkpoint_array<'a, const N: usize>(
+    fields: &mut impl Iterator<Item = &'a str>,
+    key: &str,
+) -> Result<[u64; N], String> {
+    let value = checkpoint_value(fields, key)?;
+    let values = value
+        .split(',')
+        .map(|part| {
+            part.parse()
+                .map_err(|_| format!("checkpoint has invalid {key} value '{value}'"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    values
+        .try_into()
+        .map_err(|_| format!("checkpoint has invalid {key} value '{value}'"))
+}
+
+fn parse_generation_checkpoint(line: &str) -> Result<GenerationCheckpoint, String> {
+    let mut fields = line.split('\t');
+    let games_completed = checkpoint_number(&mut fields, "games_completed")?;
+    let output_bytes = checkpoint_number(&mut fields, "output_bytes")?;
+    let games = checkpoint_number(&mut fields, "games")?;
+    let nodes = checkpoint_number(&mut fields, "nodes")?;
+    let seed = checkpoint_number(&mut fields, "seed")?;
+    let score_bound = checkpoint_number(&mut fields, "score_bound")?;
+    let syzygy_path = decode_checkpoint_string(checkpoint_value(&mut fields, "syzygy_path")?)?;
+    let stats = GenerateStats {
+        games: checkpoint_number(&mut fields, "stats_games")?,
+        positions: checkpoint_number(&mut fields, "positions")?,
+        considered: checkpoint_number(&mut fields, "considered")?,
+        rejected: checkpoint_array(&mut fields, "rejected")?,
+        deduplicated: checkpoint_number(&mut fields, "deduplicated")?,
+        results: checkpoint_array(&mut fields, "results")?,
+        tb_adjudicated: checkpoint_number(&mut fields, "tb_adjudicated")?,
+    };
+    if let Some(field) = fields.next() {
+        return Err(format!("checkpoint has unexpected field '{field}'"));
+    }
+    if stats.games != games_completed {
+        return Err("checkpoint stats_games does not match games_completed".to_string());
+    }
+    if games_completed > games {
+        return Err("checkpoint games_completed exceeds games".to_string());
+    }
+    if stats.positions.checked_mul(RECORD_BYTES as u64) != Some(output_bytes) {
+        return Err("checkpoint output_bytes does not match positions".to_string());
+    }
+    Ok(GenerationCheckpoint {
+        games_completed,
+        output_bytes,
+        games,
+        nodes,
+        seed,
+        score_bound,
+        syzygy_path,
+        stats,
+    })
+}
+
+fn append_generation_checkpoint(
+    path: &Path,
+    checkpoint: &GenerationCheckpoint,
+) -> Result<(), String> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| {
+            format!(
+                "unable to open generation checkpoint '{}': {error}",
+                path.display()
+            )
+        })?;
+    writeln!(file, "{}", checkpoint.to_line()).map_err(|error| {
+        format!(
+            "unable to write generation checkpoint '{}': {error}",
+            path.display()
+        )
+    })?;
+    file.flush().map_err(|error| {
+        format!(
+            "unable to flush generation checkpoint '{}': {error}",
+            path.display()
+        )
+    })
+}
+
+fn read_generation_checkpoint(path: &Path) -> Result<GenerationCheckpoint, String> {
+    let file = File::open(path).map_err(|error| {
+        format!(
+            "unable to open generation checkpoint '{}': {error}",
+            path.display()
+        )
+    })?;
+    let mut reader = BufReader::new(file);
+    let mut line = Vec::new();
+    let mut checkpoint = None;
+    loop {
+        line.clear();
+        let bytes = reader.read_until(b'\n', &mut line).map_err(|error| {
+            format!(
+                "unable to read generation checkpoint '{}': {error}",
+                path.display()
+            )
+        })?;
+        if bytes == 0 {
+            break;
+        }
+        if !line.ends_with(b"\n") {
+            break;
+        }
+        line.pop();
+        if line.ends_with(b"\r") {
+            line.pop();
+        }
+        let Ok(line) = std::str::from_utf8(&line) else {
+            continue;
+        };
+        if let Ok(parsed) = parse_generation_checkpoint(line) {
+            checkpoint = Some(parsed);
+        }
+    }
+    checkpoint.ok_or_else(|| {
+        format!(
+            "generation checkpoint '{}' has no complete valid line",
+            path.display()
+        )
+    })
+}
+
+fn validate_generation_checkpoint(
+    checkpoint: &GenerationCheckpoint,
+    config: &GenerateConfig,
+    syzygy_path: Option<&str>,
+) -> Result<(), String> {
+    let expected_path = syzygy_path.unwrap_or_default();
+    for (key, matches) in [
+        ("games", checkpoint.games == config.games),
+        ("nodes", checkpoint.nodes == config.nodes),
+        ("seed", checkpoint.seed == config.seed),
+        (
+            "score_bound",
+            checkpoint.score_bound == config.filter.score_bound,
+        ),
+        ("syzygy_path", checkpoint.syzygy_path == expected_path),
+    ] {
+        if !matches {
+            return Err(format!(
+                "generation checkpoint {key} does not match the requested run"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn run_generate<W: Write>(options: GenerateOptions, mut writer: W) -> Result<(), String> {
-    let file = File::create(&options.out)
-        .map_err(|error| format!("unable to create '{}': {error}", options.out.display()))?;
-    let mut output = BufWriter::with_capacity(1 << 20, file);
+    run_generate_with_policy(
+        options,
+        &mut writer,
+        GenerationRunPolicy {
+            checkpoint_every: GENERATION_CHECKPOINT_GAMES,
+            stop_after: None,
+        },
+    )
+}
+
+fn run_generate_with_policy<W: Write>(
+    options: GenerateOptions,
+    mut writer: W,
+    policy: GenerationRunPolicy,
+) -> Result<(), String> {
+    if policy.checkpoint_every == 0 {
+        return Err("generation checkpoint interval must be at least 1".to_string());
+    }
+    let progress_path = progress_path(&options.out);
+    let (first_game, prior_stats, checkpoint_bytes) = if options.resume {
+        let checkpoint = read_generation_checkpoint(&progress_path).map_err(|error| {
+            format!(
+                "--resume needs a valid checkpoint '{}': {error}",
+                progress_path.display()
+            )
+        })?;
+        validate_generation_checkpoint(
+            &checkpoint,
+            &options.config,
+            options.syzygy_path.as_deref(),
+        )?;
+        let output_bytes = std::fs::metadata(&options.out)
+            .map_err(|error| {
+                format!(
+                    "unable to inspect checkpointed output '{}': {error}",
+                    options.out.display()
+                )
+            })?
+            .len();
+        if output_bytes < checkpoint.output_bytes {
+            return Err(format!(
+                "checkpoint output_bytes {} exceeds output length {output_bytes}",
+                checkpoint.output_bytes
+            ));
+        }
+        (
+            checkpoint.games_completed,
+            checkpoint.stats,
+            checkpoint.output_bytes,
+        )
+    } else {
+        (0, GenerateStats::default(), 0)
+    };
 
     // Self-play evaluates with NNUE, so datagen resolves a network the same way the
     // engine does: explicit EvalFile is not in play here, so this is the automatic
@@ -356,20 +660,122 @@ fn run_generate<W: Write>(options: GenerateOptions, mut writer: W) -> Result<(),
         })
         .transpose()?;
 
+    let file = if options.resume {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .open(&options.out)
+            .map_err(|error| {
+                format!(
+                    "unable to open checkpointed output '{}': {error}",
+                    options.out.display()
+                )
+            })?;
+        file.set_len(checkpoint_bytes).map_err(|error| {
+            format!(
+                "unable to truncate checkpointed output '{}': {error}",
+                options.out.display()
+            )
+        })?;
+        file.seek(SeekFrom::Start(checkpoint_bytes))
+            .map_err(|error| {
+                format!(
+                    "unable to seek checkpointed output '{}': {error}",
+                    options.out.display()
+                )
+            })?;
+        file
+    } else {
+        let file = File::create(&options.out)
+            .map_err(|error| format!("unable to create '{}': {error}", options.out.display()))?;
+        File::create(&progress_path).map_err(|error| {
+            format!(
+                "unable to create generation checkpoint '{}': {error}",
+                progress_path.display()
+            )
+        })?;
+        append_generation_checkpoint(
+            &progress_path,
+            &GenerationCheckpoint {
+                games_completed: 0,
+                output_bytes: 0,
+                games: options.config.games,
+                nodes: options.config.nodes,
+                seed: options.config.seed,
+                score_bound: options.config.filter.score_bound,
+                syzygy_path: options.syzygy_path.clone().unwrap_or_default(),
+                stats: GenerateStats::default(),
+            },
+        )?;
+        file
+    };
+    let output = RefCell::new(BufWriter::with_capacity(1 << 20, file));
+
     let started = Instant::now();
-    let stats = generate(options.config, &network, tablebases.as_ref(), |batch| {
-        for record in batch {
-            output
-                .write_all(&record.to_bytes())
-                .map_err(|error| format!("unable to write training record: {error}"))?;
-        }
-        Ok(())
-    })?;
+    let current_stats = generate_from(
+        options.config,
+        first_game,
+        &network,
+        tablebases.as_ref(),
+        |batch| {
+            let mut output = output.borrow_mut();
+            for record in batch {
+                output
+                    .write_all(&record.to_bytes())
+                    .map_err(|error| format!("unable to write training record: {error}"))?;
+            }
+            Ok(())
+        },
+        |games_completed, current_stats| {
+            let should_checkpoint = games_completed % policy.checkpoint_every == 0
+                || games_completed == options.config.games;
+            if should_checkpoint {
+                let mut output = output.borrow_mut();
+                output
+                    .flush()
+                    .map_err(|error| format!("unable to flush training data: {error}"))?;
+                let output_bytes = output
+                    .get_ref()
+                    .metadata()
+                    .map_err(|error| {
+                        format!(
+                            "unable to inspect generated output '{}': {error}",
+                            options.out.display()
+                        )
+                    })?
+                    .len();
+                let mut stats = prior_stats;
+                stats.merge(current_stats);
+                append_generation_checkpoint(
+                    &progress_path,
+                    &GenerationCheckpoint {
+                        games_completed,
+                        output_bytes,
+                        games: options.config.games,
+                        nodes: options.config.nodes,
+                        seed: options.config.seed,
+                        score_bound: options.config.filter.score_bound,
+                        syzygy_path: options.syzygy_path.clone().unwrap_or_default(),
+                        stats,
+                    },
+                )?;
+            }
+            if policy
+                .stop_after
+                .is_some_and(|stop_after| games_completed >= stop_after)
+            {
+                return Err(format!(
+                    "generation interrupted after {games_completed} games"
+                ));
+            }
+            Ok(())
+        },
+    )?;
     output
+        .borrow_mut()
         .flush()
         .map_err(|error| format!("unable to flush training data: {error}"))?;
-    drop(output);
-
+    let mut stats = prior_stats;
+    stats.merge(&current_stats);
     let elapsed = started.elapsed();
     let per_second = (stats.positions as f64) / elapsed.as_secs_f64().max(f64::MIN_POSITIVE);
 
@@ -379,7 +785,13 @@ fn run_generate<W: Write>(options: GenerateOptions, mut writer: W) -> Result<(),
         &stats,
         elapsed.as_secs_f64(),
         per_second,
-    )
+    )?;
+    std::fs::remove_file(&progress_path).map_err(|error| {
+        format!(
+            "unable to remove completed generation checkpoint '{}': {error}",
+            progress_path.display()
+        )
+    })
 }
 
 fn write_generate_summary<W: Write>(
@@ -681,7 +1093,7 @@ fn datagen_help() -> &'static str {
     "Usage:\n\
      \x20 manifold datagen --out <FILE> [--format bulletformat] [--games N] [--nodes N]\n\
      \x20                  [--threads N] [--seed N] [--score-bound N]\n\
-     \x20                  [--syzygy-path <DIRS>]\n\
+     \x20                  [--syzygy-path <DIRS>] [--resume]\n\
      \x20 manifold datagen --out <FILE> --from-jsonl <FILE|-> [--max-positions N]\n\
      \x20                  [--sample-stride N] [--resume] [--score-bound N]\n\
      \x20 manifold datagen --validate <FILE> [--format bulletformat] [--check-filters]\n\
@@ -700,7 +1112,8 @@ fn datagen_help() -> &'static str {
      \x20 --max-positions N   stop after emitting N records (--from-jsonl only)\n\
      \x20 --sample-stride N   keep one source line in every N, spreading a bounded\n\
      \x20                     sample across the whole file (--from-jsonl only)\n\
-     \x20 --resume            continue a --from-jsonl run from its .progress checkpoint\n\
+     \x20 --resume            continue a self-play or --from-jsonl run from its\n\
+     \x20                     .progress checkpoint\n\
      \x20 --format <NAME>     output format; only 'bulletformat' is supported\n\
      \x20 --games N           self-play games to generate (default 100)\n\
      \x20 --nodes N           per-move search node budget (default 5000)\n\
@@ -734,11 +1147,33 @@ fn datagen_help() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::run_datagen_subcommand;
+    use mf_datagen::{Filter, GenerateConfig, GenerateStats};
+
+    use super::{
+        Command, GenerationCheckpoint, GenerationRunPolicy, parse_arguments,
+        parse_generation_checkpoint, read_generation_checkpoint, run_datagen_subcommand,
+        run_generate_with_policy, validate_generation_checkpoint,
+    };
 
     fn run(arguments: &[&str]) -> Result<String, String> {
         let mut output = Vec::new();
         run_datagen_subcommand(arguments.iter().map(|s| s.to_string()), &mut output)?;
+        Ok(String::from_utf8(output).expect("output is UTF-8"))
+    }
+
+    fn run_generation_with_policy(
+        arguments: &[&str],
+        policy: GenerationRunPolicy,
+    ) -> Result<String, String> {
+        let arguments = arguments
+            .iter()
+            .map(|argument| argument.to_string())
+            .collect::<Vec<_>>();
+        let Command::Generate(options) = parse_arguments(&arguments)? else {
+            panic!("test arguments must select self-play generation");
+        };
+        let mut output = Vec::new();
+        run_generate_with_policy(options, &mut output, policy)?;
         Ok(String::from_utf8(output).expect("output is UTF-8"))
     }
 
@@ -749,6 +1184,128 @@ mod tests {
             std::process::id()
         ));
         path
+    }
+
+    fn generation_checkpoint() -> GenerationCheckpoint {
+        GenerationCheckpoint {
+            games_completed: 17,
+            output_bytes: 234 * 32,
+            games: 100,
+            nodes: 5_000,
+            seed: 42,
+            score_bound: 9_000,
+            syzygy_path: r"C:\tb;D:\more=tb".to_string(),
+            stats: GenerateStats {
+                games: 17,
+                positions: 234,
+                considered: 345,
+                rejected: [1, 2, 3, 4, 5],
+                deduplicated: 6,
+                results: [7, 8, 9],
+                tb_adjudicated: 10,
+            },
+        }
+    }
+
+    #[test]
+    fn generation_checkpoint_round_trip_preserves_every_field() {
+        let checkpoint = generation_checkpoint();
+        let encoded = checkpoint.to_line();
+        let decoded = parse_generation_checkpoint(&encoded).expect("checkpoint parses");
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn generation_checkpoint_reader_returns_the_last_complete_valid_line() {
+        let path = temp("checkpoint-last");
+        let first = generation_checkpoint();
+        let mut second = first.clone();
+        second.games_completed = 18;
+        second.stats.games = 18;
+        std::fs::write(
+            &path,
+            format!(
+                "{}\nnot-a-checkpoint\n{}\n",
+                first.to_line(),
+                second.to_line()
+            ),
+        )
+        .expect("checkpoint log writes");
+
+        assert_eq!(
+            read_generation_checkpoint(&path).expect("last checkpoint reads"),
+            second
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn generation_checkpoint_reader_ignores_a_truncated_final_line() {
+        let path = temp("checkpoint-truncated");
+        let checkpoint = generation_checkpoint();
+        std::fs::write(
+            &path,
+            format!(
+                "{}\ngames_completed=18\toutput_bytes=",
+                checkpoint.to_line()
+            ),
+        )
+        .expect("checkpoint log writes");
+
+        assert_eq!(
+            read_generation_checkpoint(&path).expect("complete checkpoint reads"),
+            checkpoint
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn generation_checkpoint_config_mismatch_names_the_mismatched_key() {
+        let checkpoint = generation_checkpoint();
+        let base = GenerateConfig {
+            games: checkpoint.games,
+            nodes: checkpoint.nodes,
+            threads: 99,
+            seed: checkpoint.seed,
+            filter: Filter {
+                score_bound: checkpoint.score_bound,
+            },
+        };
+
+        let mut config = base;
+        config.games += 1;
+        let error =
+            validate_generation_checkpoint(&checkpoint, &config, Some(&checkpoint.syzygy_path))
+                .expect_err("games mismatch must fail");
+        assert!(error.contains("games"), "{error}");
+
+        let mut config = base;
+        config.nodes += 1;
+        let error =
+            validate_generation_checkpoint(&checkpoint, &config, Some(&checkpoint.syzygy_path))
+                .expect_err("nodes mismatch must fail");
+        assert!(error.contains("nodes"), "{error}");
+
+        let mut config = base;
+        config.seed += 1;
+        let error =
+            validate_generation_checkpoint(&checkpoint, &config, Some(&checkpoint.syzygy_path))
+                .expect_err("seed mismatch must fail");
+        assert!(error.contains("seed"), "{error}");
+
+        let mut config = base;
+        config.filter.score_bound += 1;
+        let error =
+            validate_generation_checkpoint(&checkpoint, &config, Some(&checkpoint.syzygy_path))
+                .expect_err("score-bound mismatch must fail");
+        assert!(error.contains("score_bound"), "{error}");
+
+        let error = validate_generation_checkpoint(&checkpoint, &base, Some("different"))
+            .expect_err("Syzygy path mismatch must fail");
+        assert!(error.contains("syzygy_path"), "{error}");
+
+        validate_generation_checkpoint(&checkpoint, &base, Some(&checkpoint.syzygy_path))
+            .expect("thread count is not checkpoint identity");
     }
 
     #[test]
@@ -863,6 +1420,112 @@ mod tests {
 
         let _ = std::fs::remove_file(&first);
         let _ = std::fs::remove_file(&second);
+    }
+
+    #[test]
+    fn self_play_interrupted_before_the_first_periodic_checkpoint_resumes_identically() {
+        let whole = temp("self-play-resume-whole");
+        let resumed = temp("self-play-resume-partial");
+        let whole_summary = run(&[
+            "--out",
+            whole.to_str().expect("path is UTF-8"),
+            "--games",
+            "6",
+            "--nodes",
+            "1000",
+            "--threads",
+            "2",
+            "--seed",
+            "2026",
+        ])
+        .expect("uninterrupted generation succeeds");
+
+        let error = run_generation_with_policy(
+            &[
+                "--out",
+                resumed.to_str().expect("path is UTF-8"),
+                "--games",
+                "6",
+                "--nodes",
+                "1000",
+                "--threads",
+                "2",
+                "--seed",
+                "2026",
+            ],
+            GenerationRunPolicy {
+                checkpoint_every: super::GENERATION_CHECKPOINT_GAMES,
+                stop_after: Some(2),
+            },
+        )
+        .expect_err("the test policy interrupts generation");
+        assert!(error.contains("interrupted"), "{error}");
+        assert!(
+            super::progress_path(&resumed).exists(),
+            "interruption must retain the sidecar"
+        );
+        assert_eq!(
+            read_generation_checkpoint(&super::progress_path(&resumed))
+                .expect("the initial checkpoint is complete and valid"),
+            GenerationCheckpoint {
+                games_completed: 0,
+                output_bytes: 0,
+                games: 6,
+                nodes: 1_000,
+                seed: 2026,
+                score_bound: mf_datagen::DEFAULT_SCORE_BOUND,
+                syzygy_path: String::new(),
+                stats: GenerateStats::default(),
+            }
+        );
+
+        let resumed_summary = run(&[
+            "--out",
+            resumed.to_str().expect("path is UTF-8"),
+            "--games",
+            "6",
+            "--nodes",
+            "1000",
+            "--threads",
+            "1",
+            "--seed",
+            "2026",
+            "--resume",
+        ])
+        .expect("resumed generation succeeds");
+
+        assert_eq!(
+            std::fs::read(&resumed).expect("resumed corpus"),
+            std::fs::read(&whole).expect("whole corpus"),
+            "resume must reproduce uninterrupted output byte for byte"
+        );
+        for key in [
+            "games=",
+            "tb_adjudicated=",
+            "considered=",
+            "positions=",
+            "bytes=",
+            "rejected_in_check=",
+            "rejected_tactical_move=",
+            "rejected_score_out_of_bounds=",
+            "rejected_mate_scores=",
+            "rejected_no_best_move=",
+            "deduplicated=",
+            "results ",
+        ] {
+            assert_eq!(
+                field(&resumed_summary, key),
+                field(&whole_summary, key),
+                "resumed summary differs for {key}"
+            );
+        }
+        assert!(
+            !super::progress_path(&resumed).exists(),
+            "normal completion removes the sidecar"
+        );
+
+        let _ = std::fs::remove_file(whole);
+        let _ = std::fs::remove_file(resumed);
     }
 
     #[test]

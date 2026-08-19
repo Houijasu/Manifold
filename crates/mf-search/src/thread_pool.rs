@@ -682,11 +682,17 @@ mod tests {
     use super::*;
 
     fn local_network() -> Option<Arc<Network>> {
-        let path = std::env::var_os("MF_NNUE_TEST_NET").map_or_else(
+        let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+        let path = explicit_path.clone().map_or_else(
             || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
             PathBuf::from,
         );
         if !path.is_file() {
+            assert!(
+                explicit_path.is_none(),
+                "MF_NNUE_TEST_NET requires an existing network file: {}",
+                path.display()
+            );
             eprintln!(
                 "SKIPPED: search-again dispatch test needs {}",
                 path.display()
@@ -722,7 +728,13 @@ mod tests {
             table,
             SearchLimits {
                 depth: Some(1),
-                soft_time: Some(Duration::from_secs(1)),
+                // A zero soft budget makes worker 0's post-iteration
+                // `increase_depth` store deterministically `false`
+                // (`elapsed <= soft / 2` cannot hold), so worker 1 observes the
+                // injected value no matter how the two workers interleave. With a
+                // generous budget a slow scheduler can let worker 0 finish its
+                // iteration and overwrite the flag before worker 1's first read.
+                soft_time: Some(Duration::ZERO),
                 hard_time: Some(Duration::from_secs(4)),
                 use_clock_management: true,
                 ..SearchLimits::default()

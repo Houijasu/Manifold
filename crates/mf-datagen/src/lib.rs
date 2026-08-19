@@ -33,7 +33,7 @@ pub mod rng;
 pub mod validate;
 
 pub use filter::{DEFAULT_SCORE_BOUND, Filter, Rejection};
-pub use generate::{GenerateConfig, GenerateStats, generate};
+pub use generate::{GenerateConfig, GenerateStats, generate, generate_from};
 pub use jsonl::{
     ConvertConfig, ConvertStats, MATE_SATURATION_CP, RUNG1_WDL_LAMBDA, SkipReason, TIE_BREAK_RULE,
     convert,

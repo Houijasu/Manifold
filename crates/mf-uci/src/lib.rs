@@ -247,11 +247,11 @@ struct ActiveSearch {
     stop: Arc<AtomicBool>,
     /// The `go ponder` latch, present only while this search was started pondering.
     ponder: Option<Arc<PonderState>>,
-    handle: JoinHandle<()>,
+    handle: JoinHandle<io::Result<()>>,
 }
 
 impl ActiveSearch {
-    fn stop_and_join(self) {
+    fn stop_and_join(self) -> io::Result<()> {
         // A ponder miss: end the ponder wait WITHOUT re-basing the clock, so the
         // search thread prints the deferred bestmove instead of spinning forever.
         // The stop flag alone cannot do this, because the pool sets that same flag
@@ -264,7 +264,9 @@ impl ActiveSearch {
             thread::sleep(Duration::from_millis(1));
         }
         self.stop.store(true, Ordering::Relaxed);
-        let _ = self.handle.join();
+        self.handle
+            .join()
+            .map_err(|_| io::Error::other("search thread panicked"))?
     }
 }
 
@@ -311,7 +313,7 @@ where
             writeln!(writer, "readyok")?;
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("stop") && has_no_arguments {
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
         } else if keyword.eq_ignore_ascii_case("ponderhit") && has_no_arguments {
             // The predicted move was played: the ponder search becomes the real one.
             // The latch flip re-bases the clock, so the budget computed at `go ponder`
@@ -326,10 +328,10 @@ where
                 ponder.ponderhit();
             }
         } else if keyword.eq_ignore_ascii_case("quit") && has_no_arguments {
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
             break;
         } else if keyword.eq_ignore_ascii_case("ucinewgame") && has_no_arguments {
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
             if let Err(error) = state.new_game() {
                 let mut writer = writer
                     .lock()
@@ -338,7 +340,7 @@ where
                 writer.flush()?;
             }
         } else if keyword.eq_ignore_ascii_case("bench") && has_no_arguments {
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
             let mut writer = writer
                 .lock()
                 .expect("UCI writer lock should not be poisoned");
@@ -346,14 +348,14 @@ where
                 .map_err(io::Error::other)?;
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("d") && has_no_arguments {
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
             let mut writer = writer
                 .lock()
                 .expect("UCI writer lock should not be poisoned");
             write_position_diagram(&mut *writer, &state.position, state.chess960)?;
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("eval") && has_no_arguments {
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
             let mut writer = writer
                 .lock()
                 .expect("UCI writer lock should not be poisoned");
@@ -372,14 +374,14 @@ where
             }
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("setoption") {
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
             let mut writer = writer
                 .lock()
                 .expect("UCI writer lock should not be poisoned");
             handle_setoption(command, &mut state, &mut *writer)?;
             writer.flush()?;
         } else if keyword.eq_ignore_ascii_case("position") {
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
             match handle_position(command, &mut state) {
                 Ok(()) => state.position_is_stale = false,
                 Err(error) => {
@@ -398,7 +400,7 @@ where
             let Some(request) = GoRequest::parse(&tokens) else {
                 continue;
             };
-            stop_active_search(&mut active_search);
+            stop_active_search(&mut active_search)?;
             // Answering from a board the GUI is not showing produces a move that is
             // illegal there, which most GUIs score as an immediate loss. UCI still
             // requires a reply to every `go`, so emit the null move rather than a
@@ -479,8 +481,7 @@ where
         }
     }
 
-    stop_active_search(&mut active_search);
-    Ok(())
+    stop_active_search(&mut active_search)
 }
 
 /// Reports `go` arguments the engine could not act on, so a dialect gap stays visible.
@@ -502,10 +503,11 @@ fn report_ignored_go_arguments<W: Write>(
     writer.flush()
 }
 
-fn stop_active_search(active_search: &mut Option<ActiveSearch>) {
+fn stop_active_search(active_search: &mut Option<ActiveSearch>) -> io::Result<()> {
     if let Some(search) = active_search.take() {
-        search.stop_and_join();
+        search.stop_and_join()?;
     }
+    Ok(())
 }
 
 fn active_evaluator_diagnostic(state: &EngineState) -> String {
@@ -544,17 +546,16 @@ where
     let stop = Arc::new(AtomicBool::new(false));
     let search_stop = Arc::clone(&stop);
     let search_ponder = ponder.clone();
+    let first_write_error = Arc::new(Mutex::new(None));
     let handle = thread::spawn(move || {
-        if let Ok(mut writer) = writer.lock() {
-            let _ = writeln!(writer, "{evaluator_diagnostic}");
-            let _ = writer.flush();
-        }
+        write_search_output(&writer, &first_write_error, &search_stop, |writer| {
+            writeln!(writer, "{evaluator_diagnostic}")
+        });
         let mate_stop = Arc::clone(&search_stop);
         let on_iteration = |iteration: &IterationInfo| {
-            if let Ok(mut writer) = writer.lock() {
-                let _ = write_iteration_info(&mut *writer, &position, iteration, chess960);
-                let _ = writer.flush();
-            }
+            write_search_output(&writer, &first_write_error, &search_stop, |writer| {
+                write_iteration_info(writer, &position, iteration, chess960)
+            });
             // `go mate N`: the requested mate (or shorter) for the side to move ends
             // the search. The search's own mate-score exit usually fires first; this
             // is what makes a bare `go mate N` terminate instead of running unbounded.
@@ -566,10 +567,9 @@ where
             }
         };
         let on_current_move = |root_move: &RootMoveInfo| {
-            if let Ok(mut writer) = writer.lock() {
-                let _ = write_current_move_info(&mut *writer, &position, root_move, chess960);
-                let _ = writer.flush();
-            }
+            write_search_output(&writer, &first_write_error, &search_stop, |writer| {
+                write_current_move_info(writer, &position, root_move, chess960)
+            });
         };
         let result = if fixed_depth {
             search_pool.search_fixed_depth_with_history_callback(
@@ -613,22 +613,66 @@ where
         while wait_for_stop && !search_stop.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(1));
         }
-        if let Ok(mut writer) = writer.lock() {
-            match result {
-                Ok(result) => {
-                    let _ = write_pool_search_tail(&mut *writer, &position, &result, chess960);
-                }
-                Err(error) => {
-                    let _ = write_search_failure(&mut *writer, &position, error, chess960);
-                }
-            }
-            let _ = writer.flush();
+        write_search_output(
+            &writer,
+            &first_write_error,
+            &search_stop,
+            |writer| match result {
+                Ok(result) => write_pool_search_tail(writer, &position, &result, chess960),
+                Err(error) => write_search_failure(writer, &position, error, chess960),
+            },
+        );
+        match first_write_error
+            .lock()
+            .expect("search write error lock should not be poisoned")
+            .take()
+        {
+            Some((kind, message)) => Err(io::Error::new(kind, message)),
+            None => Ok(()),
         }
     });
     ActiveSearch {
         stop,
         ponder,
         handle,
+    }
+}
+
+fn write_search_output<W: Write>(
+    writer: &Mutex<W>,
+    first_write_error: &Mutex<Option<(io::ErrorKind, String)>>,
+    search_stop: &AtomicBool,
+    write: impl FnOnce(&mut W) -> io::Result<()>,
+) {
+    if first_write_error
+        .lock()
+        .expect("search write error lock should not be poisoned")
+        .is_some()
+    {
+        return;
+    }
+    let result = {
+        let mut writer = writer
+            .lock()
+            .expect("UCI writer lock should not be poisoned");
+        write(&mut writer).and_then(|()| writer.flush())
+    };
+    record_search_write_error(result, first_write_error, search_stop);
+}
+
+fn record_search_write_error(
+    result: io::Result<()>,
+    first_write_error: &Mutex<Option<(io::ErrorKind, String)>>,
+    search_stop: &AtomicBool,
+) {
+    if let Err(error) = result {
+        let mut first_write_error = first_write_error
+            .lock()
+            .expect("search write error lock should not be poisoned");
+        if first_write_error.is_none() {
+            *first_write_error = Some((error.kind(), error.to_string()));
+        }
+        search_stop.store(true, Ordering::Relaxed);
     }
 }
 
@@ -1512,6 +1556,10 @@ struct GoParameters {
     /// `ponderhit` (convert to a normal timed search) or `stop` (ponder miss).
     ponder: bool,
     infinite: bool,
+    /// A recognized finite keyword had no parseable value.
+    malformed_finite_value: bool,
+    /// At least one side clock (`wtime` or `btime`) was supplied.
+    clock_keyword_seen: bool,
 }
 
 /// Reads a non-negative millisecond or count value, clamping a negative one to zero.
@@ -1543,6 +1591,8 @@ impl GoParameters {
         let mut parameters = Self::default();
         let mut ignored = Vec::new();
         let mut recognized = false;
+        let mut finite_keyword_seen = false;
+        let mut finite_value_parsed = false;
         let mut index = 0;
         while index < tokens.len() {
             let key = tokens[index];
@@ -1570,19 +1620,36 @@ impl GoParameters {
                 continue;
             }
             if key.eq_ignore_ascii_case("mate") {
+                finite_keyword_seen = true;
                 match tokens.get(index).copied().and_then(parse_go_value) {
                     Some(parsed) => {
                         index += 1;
                         parameters.mate = Some(parsed.min(u64::from(u32::MAX)) as u32);
+                        finite_value_parsed = true;
                     }
-                    None => ignored.push(key.to_string()),
+                    None => {
+                        ignored.push(key.to_string());
+                        parameters.malformed_finite_value = true;
+                    }
                 }
                 recognized = true;
                 continue;
             }
 
+            let clock_keyword =
+                key.eq_ignore_ascii_case("wtime") || key.eq_ignore_ascii_case("btime");
+            parameters.clock_keyword_seen |= clock_keyword;
+            let finite_keyword = key.eq_ignore_ascii_case("depth")
+                || key.eq_ignore_ascii_case("nodes")
+                || key.eq_ignore_ascii_case("movetime")
+                || clock_keyword;
+            if finite_keyword {
+                finite_keyword_seen = true;
+                recognized = true;
+            }
             let Some(value) = tokens.get(index).copied() else {
                 ignored.push(key.to_string());
+                parameters.malformed_finite_value |= finite_keyword;
                 break;
             };
 
@@ -1608,8 +1675,14 @@ impl GoParameters {
                 index += 1;
                 recognized = true;
                 match parse_go_value(value) {
-                    Some(parsed) => *slot = Some(parsed),
-                    None => ignored.push(format!("{key} {value}")),
+                    Some(parsed) => {
+                        *slot = Some(parsed);
+                        finite_value_parsed |= finite_keyword;
+                    }
+                    None => {
+                        ignored.push(format!("{key} {value}"));
+                        parameters.malformed_finite_value |= finite_keyword;
+                    }
                 }
             } else if key.eq_ignore_ascii_case("depth") {
                 index += 1;
@@ -1617,8 +1690,12 @@ impl GoParameters {
                 match parse_go_value(value) {
                     Some(parsed) => {
                         parameters.depth = Some(parsed.min(u64::from(u32::MAX)) as u32);
+                        finite_value_parsed = true;
                     }
-                    None => ignored.push(format!("{key} {value}")),
+                    None => {
+                        ignored.push(format!("{key} {value}"));
+                        parameters.malformed_finite_value = true;
+                    }
                 }
             } else {
                 // An unrecognized key. Skip a numeric follower too, on the assumption it
@@ -1630,6 +1707,9 @@ impl GoParameters {
             }
         }
 
+        if finite_keyword_seen && !finite_value_parsed && !parameters.infinite {
+            parameters.nodes = Some(1);
+        }
         // A `go` carrying no budget at all -- bare `go`, or one whose only arguments
         // were `ponder`/`searchmoves` -- is an unbounded analysis request. UCI
         // requires a `bestmove` for every `go`, so treat it as infinite and let `stop`
@@ -1697,9 +1777,23 @@ impl GoParameters {
             let (soft_time, hard_time) = self.clock_limits(position, move_overhead_millis);
             (soft_time, hard_time, soft_time.is_some())
         };
+        let emergency_nodes = (self.malformed_finite_value || self.clock_keyword_seen)
+            && !self.infinite
+            && self.depth.is_none()
+            && self.nodes.is_none()
+            && self.movetime.is_none()
+            && self.mate.is_none()
+            && soft_time.is_none()
+            && hard_time.is_none();
         SearchLimits {
             depth: if self.infinite { None } else { self.depth },
-            nodes: if self.infinite { None } else { self.nodes },
+            nodes: if self.infinite {
+                None
+            } else if emergency_nodes {
+                Some(1)
+            } else {
+                self.nodes
+            },
             soft_time,
             hard_time,
             infinite: self.infinite,
@@ -2052,6 +2146,43 @@ mod tests {
     use mf_search::{Bound, EntryData, PoolSearchResult};
 
     use super::*;
+
+    fn test_network_path() -> std::path::PathBuf {
+        if let Some(path) = std::env::var_os("MF_NNUE_TEST_NET").map(std::path::PathBuf::from) {
+            assert!(
+                path.is_file(),
+                "MF_NNUE_TEST_NET requires an existing network file: {}",
+                path.display()
+            );
+            return path;
+        }
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue")
+    }
+
+    struct BrokenWriter;
+
+    impl Write for BrokenWriter {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "test pipe closed",
+            ))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "test pipe closed",
+            ))
+        }
+    }
+
+    #[test]
+    fn search_output_failure_is_returned_from_run() {
+        let input = io::Cursor::new(b"position startpos\ngo depth 8\nquit\n");
+        let error = run(input, BrokenWriter).expect_err("search output failure must escape run");
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    }
 
     #[test]
     fn engine_construction_returns_automatic_network_errors() {
@@ -2622,8 +2753,7 @@ mod tests {
 
     #[test]
     fn bad_explicit_eval_file_preserves_the_previous_network_arc() {
-        let valid =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let valid = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
@@ -2659,8 +2789,7 @@ mod tests {
 
     #[test]
     fn good_explicit_eval_file_loads_and_reports_source_description_and_backend() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
 
@@ -2684,8 +2813,7 @@ mod tests {
 
     #[test]
     fn changing_eval_file_clears_eval_dependent_search_state() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let key = state.position.zobrist().main();
         state.transposition_table.store(
@@ -2714,8 +2842,7 @@ mod tests {
 
     #[test]
     fn empty_marker_eval_file_value_returns_to_automatic_resolution() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
@@ -2747,8 +2874,7 @@ mod tests {
 
     #[test]
     fn empty_eval_file_value_returns_to_automatic_resolution() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
@@ -2801,8 +2927,7 @@ mod tests {
     /// left over from a previous run.
     #[test]
     fn bench_node_count_is_deterministic_for_a_given_network() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let network = Network::load(&path)
             .unwrap_or_else(|error| panic!("test NNUE network {}: {error}", path.display()));
         let mut first_output = Vec::new();
@@ -2905,6 +3030,176 @@ mod tests {
                 "{arguments:?} must not activate clock management"
             );
         }
+    }
+
+    #[test]
+    fn invalid_finite_values_use_an_emergency_node_budget_instead_of_infinite_search() {
+        for arguments in [
+            &["depth", "banana"][..],
+            &["nodes", "banana"][..],
+            &["movetime", "banana"][..],
+            &["mate", "banana"][..],
+        ] {
+            let (parameters, ignored) =
+                GoParameters::parse(arguments).expect("finite keyword is recognized");
+            assert_eq!(parameters.nodes, Some(1), "{arguments:?}");
+            assert!(!parameters.infinite, "{arguments:?}");
+            assert!(!ignored.is_empty(), "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn one_valid_finite_value_wins_over_an_invalid_sibling() {
+        let (parameters, _) = GoParameters::parse(&["depth", "banana", "nodes", "20"]).unwrap();
+        assert_eq!(parameters.nodes, Some(20));
+        assert!(!parameters.infinite);
+    }
+
+    #[test]
+    fn malformed_side_to_move_clock_uses_an_emergency_node_budget_for_either_color() {
+        let white_to_move = Position::startpos();
+        let mut black_to_move = white_to_move.clone();
+        let e2e4 = parse_uci_move(&black_to_move, "e2e4", false).expect("e2e4 is legal");
+        black_to_move.make_move(e2e4);
+
+        for (arguments, position) in [
+            (&["wtime", "banana", "btime", "1000"][..], &white_to_move),
+            (&["btime", "banana", "wtime", "1000"][..], &black_to_move),
+        ] {
+            let (parameters, ignored) =
+                GoParameters::parse(arguments).expect("clock arguments should parse");
+            assert!(parameters.malformed_finite_value, "{arguments:?}");
+            assert!(!ignored.is_empty(), "{arguments:?}");
+
+            let limits = parameters.search_limits(position, TIME_OVERHEAD_MILLIS);
+            assert_eq!(limits.nodes, Some(1), "{arguments:?}");
+            assert_eq!(limits.depth, None, "{arguments:?}");
+            assert_eq!(limits.soft_time, None, "{arguments:?}");
+            assert_eq!(limits.hard_time, None, "{arguments:?}");
+            assert!(!limits.infinite, "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn wrong_side_only_clock_uses_an_emergency_node_budget_for_either_color() {
+        let white_to_move = Position::startpos();
+        let mut black_to_move = white_to_move.clone();
+        let e2e4 = parse_uci_move(&black_to_move, "e2e4", false).expect("e2e4 is legal");
+        black_to_move.make_move(e2e4);
+
+        for (arguments, position) in [
+            (&["btime", "1000"][..], &white_to_move),
+            (&["wtime", "1000"][..], &black_to_move),
+        ] {
+            let (parameters, ignored) =
+                GoParameters::parse(arguments).expect("clock arguments should parse");
+            assert!(parameters.clock_keyword_seen, "{arguments:?}");
+            assert!(ignored.is_empty(), "{arguments:?}");
+
+            let limits = parameters.search_limits(position, TIME_OVERHEAD_MILLIS);
+            assert_eq!(limits.nodes, Some(1), "{arguments:?}");
+            assert_eq!(limits.depth, None, "{arguments:?}");
+            assert_eq!(limits.soft_time, None, "{arguments:?}");
+            assert_eq!(limits.hard_time, None, "{arguments:?}");
+            assert!(!limits.infinite, "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn usable_finite_sibling_wins_over_a_wrong_side_clock() {
+        let white_to_move = Position::startpos();
+
+        let (nodes, _) = GoParameters::parse(&["btime", "1000", "nodes", "20"]).unwrap();
+        let limits = nodes.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, Some(20));
+
+        let (depth, _) = GoParameters::parse(&["btime", "1000", "depth", "5"]).unwrap();
+        let limits = depth.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.depth, Some(5));
+        assert_eq!(limits.nodes, None);
+
+        let (movetime, _) = GoParameters::parse(&["btime", "1000", "movetime", "100"]).unwrap();
+        let limits = movetime.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+        assert!(limits.hard_time.is_some());
+
+        let (mate, _) = GoParameters::parse(&["btime", "1000", "mate", "3"]).unwrap();
+        let limits = mate.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+
+        let (clock, _) = GoParameters::parse(&["btime", "1000", "wtime", "1000"]).unwrap();
+        let limits = clock.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+    }
+
+    #[test]
+    fn wrong_side_clock_preserves_explicit_and_implicit_infinite_requests() {
+        let white_to_move = Position::startpos();
+        let (explicit, _) = GoParameters::parse(&["infinite", "btime", "1000"]).unwrap();
+        let limits = explicit.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert!(limits.infinite);
+        assert_eq!(limits.nodes, None);
+        assert_eq!(limits.soft_time, None);
+        assert_eq!(limits.hard_time, None);
+
+        for arguments in [&[][..], &["ponder"][..], &["searchmoves", "e2e4"][..]] {
+            let (parameters, _) = GoParameters::parse(arguments).unwrap();
+            assert!(parameters.infinite, "{arguments:?}");
+            let limits = parameters.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+            assert!(limits.infinite, "{arguments:?}");
+            assert_eq!(limits.nodes, None, "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn usable_finite_sibling_wins_over_a_malformed_clock() {
+        let white_to_move = Position::startpos();
+        let mut black_to_move = white_to_move.clone();
+        let e2e4 = parse_uci_move(&black_to_move, "e2e4", false).expect("e2e4 is legal");
+        black_to_move.make_move(e2e4);
+
+        let (nodes, _) =
+            GoParameters::parse(&["wtime", "banana", "btime", "1000", "nodes", "20"]).unwrap();
+        let limits = nodes.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, Some(20));
+
+        let (depth, _) =
+            GoParameters::parse(&["wtime", "banana", "btime", "1000", "depth", "5"]).unwrap();
+        let limits = depth.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.depth, Some(5));
+        assert_eq!(limits.nodes, None);
+
+        let (movetime, _) =
+            GoParameters::parse(&["wtime", "banana", "btime", "1000", "movetime", "100"]).unwrap();
+        let limits = movetime.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+        assert!(limits.hard_time.is_some());
+
+        let (white_clock, _) = GoParameters::parse(&["btime", "banana", "wtime", "1000"]).unwrap();
+        let limits = white_clock.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+
+        let (black_clock, _) = GoParameters::parse(&["wtime", "banana", "btime", "1000"]).unwrap();
+        let limits = black_clock.search_limits(&black_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+        assert!(limits.soft_time.is_some());
+
+        let (mate, _) =
+            GoParameters::parse(&["wtime", "banana", "btime", "1000", "mate", "3"]).unwrap();
+        let limits = mate.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert_eq!(limits.nodes, None);
+
+        let (infinite, _) =
+            GoParameters::parse(&["infinite", "wtime", "banana", "btime", "1000"]).unwrap();
+        let limits = infinite.search_limits(&white_to_move, TIME_OVERHEAD_MILLIS);
+        assert!(limits.infinite);
+        assert_eq!(limits.nodes, None);
+        assert_eq!(limits.soft_time, None);
+        assert_eq!(limits.hard_time, None);
     }
 
     #[test]
@@ -3022,11 +3317,12 @@ mod tests {
         assert!(!parameters.infinite);
         assert!(ignored.is_empty());
 
-        // A bare `mate` without a value is malformed: reported, and the command falls
-        // back to unbounded analysis so the GUI still gets its bestmove.
+        // A bare `mate` without a value is malformed: report it and use the same
+        // emergency budget as every other malformed finite request.
         let (bare, ignored) = GoParameters::parse(&["mate"]).expect("bare mate should parse");
         assert_eq!(bare.mate, None);
-        assert!(bare.infinite);
+        assert_eq!(bare.nodes, Some(1));
+        assert!(!bare.infinite);
         assert_eq!(ignored, ["mate"]);
     }
 

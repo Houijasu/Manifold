@@ -117,16 +117,21 @@ fn a_tiny_machine_is_still_offered_a_usable_table() {
     assert_eq!(max_hash_for_installed_memory(Some(1024 * 1024)), 16);
 }
 
+/// The live ceiling -- real memory detection plus the cached answer -- obeys the
+/// policy's invariants on every machine, from a small laptop to a workstation.
+/// Machine-size claims belong to the parameterized policy test above: a 16 GB CI
+/// runner is legitimately offered 4096 MB, so asserting more here would hard-code one
+/// developer's RAM into the suite.
 #[test]
-fn this_machine_is_offered_more_than_the_old_hard_coded_cap() {
+fn this_machine_is_offered_a_power_of_two_at_or_above_the_floor() {
     let maximum = max_hash_mebibytes();
     assert!(
         maximum.is_power_of_two(),
         "the advertised maximum should be a round number a GUI can offer: got {maximum}"
     );
     assert!(
-        maximum >= 8192,
-        "this 32 GB machine must offer a genuinely large table, past the old 4096 cap: got {maximum}"
+        maximum >= 16,
+        "even the smallest machine must be offered a usable table: got {maximum}"
     );
 }
 

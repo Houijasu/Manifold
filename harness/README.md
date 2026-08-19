@@ -10,6 +10,7 @@ a wrong conclusion; they belong in version control.
 | `run_match.ps1` | Guard-railed fastchess match driver. **Use it for every match.** |
 | `nps_compare.py` | Fair two-engine NPS/nodes comparison with warmup handling. |
 | `build_pgo.ps1` | Reproducible PGO build with a hard node-signature gate. |
+| `build_portable.ps1` | Verified baseline x86-64 release build and BMI2 scan. |
 
 ## `run_match.ps1`
 
@@ -37,10 +38,14 @@ Enforces, mechanically, what mission `AGENTS.md` §4.451 says must not be left t
    engine defect. Conflating them invents findings.
 
 4. **Writes the mandatory §4.7 `run-metadata.txt` BEFORE the match starts**, so even a
-   killed run carries provenance: commit, both binaries with SHA-256, TC, seed, book,
-   affinity/concurrency/threads/hash, SPRT bounds, pre-run CPU load (max of 5 samples, since
-   `Win32_Processor` intermittently returns `null` on this machine), purpose, date, and the
-   full command line.
+   killed run carries provenance: the driver commit plus each binary's source commit,
+   attestation mode, and SHA-256; TC, seed, book, affinity/concurrency/threads/hash, SPRT
+   bounds, pre-run CPU load (max of 5 samples, since `Win32_Processor` intermittently
+   returns `null` on this machine), purpose, date, and the full command line. An exact
+   40-hex `<binary>.source-commit` sidecar is authoritative. Without one, a binary under a
+   Git worktree infers that containing worktree's validated HEAD, including linked
+   worktrees and independent repositories. Paths outside every worktree remain
+   `unknown`/`unattested`.
 
 5. `-ForfeitsAllowedFor <name>` is the only escape hatch, for third-party opponents whose
    failures the validation contract says to record separately rather than charge to Manifold
@@ -48,6 +53,9 @@ Enforces, mechanically, what mission `AGENTS.md` §4.451 says must not be left t
 
 Guardrail self-tests, including a verified forfeit abort whose PGN attribution matched the
 console counts exactly, are in `experiments/M4-F4-harness-selftest/`.
+
+The default fastchess executable and opening book are resolved relative to the checkout
+containing `harness/run_match.ps1`, so the driver works unchanged from linked worktrees.
 
 ### Examples
 
@@ -84,9 +92,32 @@ script that ends in `quit` aborts the search and manufactures convincing false p
 `.\harness\build_pgo.ps1 [-BenchRuns 3] [-MeasureNps]`
 
 Runs the `research/rust-perf-and-nnue-training.md` §0.5 PGO round-trip as one command:
-plain build (baseline preserved at `target\release\manifold-nopgo.exe`), instrumented
-`-Cprofile-generate` build, `bench` profiling runs, `llvm-profdata` merge from the pinned
-toolchain, `-Cprofile-use` rebuild, and provenance in `target\pgo\pgo-metadata.txt`.
+plain, instrumented `-Cprofile-generate`, and optimised `-Cprofile-use` builds isolated under
+`target\pgo-build\baseline`, `target\pgo-build\instrumented`, and
+`target\pgo-build\optimized`; `bench` profiling runs; `llvm-profdata` merge from the pinned
+toolchain; and provenance in `target\pgo\pgo-metadata.txt`.
+
+The verified copies are published as experimental artifacts at
+`target\pgo\manifold-nopgo.exe` and `target\pgo\manifold-pgo.exe`, each with an exact 40-hex
+`.source-commit` sidecar. The script never replaces `target\release\manifold.exe`; these PGO
+outputs are not shipping/release artifacts. Publication is fixed to `target\pgo`: the script
+validates both binaries, sidecars, hashes, profile, and metadata in a staging directory before
+replacing the prior output, and restores the prior output if final validation fails. It also
+requires tracked Rust/Cargo inputs to match HEAD before building and publication, clears
+`CARGO_ENCODED_RUSTFLAGS`, inherited `RUSTUP_TOOLCHAIN`, and `MF_NNUE_TEST_NET` during every
+stage, and restores the caller's `CARGO_TARGET_DIR`, `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
+`RUSTUP_TOOLCHAIN`, and `MF_NNUE_TEST_NET` values on every exit path. `llvm-profdata` must exist
+under the exact sysroot/host reported by the pinned `rustc`; the script never falls back to
+another installed toolchain.
+The ignored embedded network `nets\main.nnue` is also required and must retain its captured
+size and SHA-256 across every build and publication boundary.
+
+With `-MeasureNps`, artifacts are committed first with a pending verdict, then the two published
+`target\pgo` copies are compared. `target\pgo\nps-verdict.txt` records the command, output, and
+exit code, and metadata records its verdict and hash. A failed comparison preserves the newly
+published artifacts and failed evidence but exits non-zero without printing success. Without
+measurement, both files explicitly say not measured. The comparison also scopes
+`PSNativeCommandUseErrorActionPreference` off and restores the caller's exact preference.
 
 Two things it enforces mechanically:
 
@@ -99,3 +130,29 @@ Two things it enforces mechanically:
 Measured on this repo (2026-08, depth-12 `nps_compare.py` medians): geomean 1.00x --
 parity, not a gain, because fat LTO + `codegen-units = 1` + `target-cpu=native` leave
 PGO little headroom. Re-run after large source changes.
+
+## `build_portable.ps1`
+
+`pwsh -NoProfile -File harness/build_portable.ps1`
+
+Builds native and baseline x86-64 references under `target\native-build` and
+`target\portable-build`, then publishes `target\portable\manifold.exe` only after both
+bench signatures equal 37,420, portable perft 5 equals 4,865,609, the force-magic tests
+pass, and pinned-toolchain `llvm-objdump` finds no `pext`, `pdep`, `bzhi`, `mulx`,
+`sarx`, `shlx`, `shrx`, or `rorx` instruction tokens. A controlled disassembly-text
+fixture tests the scanner independently of host CPU features; native scan results are
+informational only. The portable build output is copied once into unique staging, and
+bench, perft, disassembly, and hashes all use those exact staged bytes. Publication
+includes an exact source-commit sidecar and metadata with toolchain, flags, stable
+network/binary hashes, signatures, and disassembler path; staging rollback prevents
+partial artifacts. Once the new final directory validates, publication is committed
+before backup cleanup; a cleanup failure preserves both the validated final and backup
+remainder for inspection. The script clears higher-precedence
+`CARGO_ENCODED_RUSTFLAGS` and `RUSTUP_TOOLCHAIN` while building/testing, then restores
+caller `RUSTFLAGS`/`CARGO_ENCODED_RUSTFLAGS`/`CARGO_TARGET_DIR`/`RUSTUP_TOOLCHAIN`
+exactly. `rust-toolchain.toml` is a tracked build input, and LLVM tools are accepted only
+under the exact sysroot and host reported by that pinned `rustc`; metadata records the
+rustc output, sysroot, host, and objdump identity. The script revalidates the embedded
+network inside final publication validation and keeps
+`target\release\manifold.exe` byte-for-byte unchanged. The default embedded network
+means no adjacent `nets` copy is required.

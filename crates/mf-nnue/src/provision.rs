@@ -270,8 +270,26 @@ mod tests {
         }
 
         fn link_main_network(&self, destination: &Path) {
-            let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
-            fs::hard_link(source, destination).expect("test network hard link should be created");
+            let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+            let source = explicit_path.clone().map_or_else(
+                || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+                PathBuf::from,
+            );
+            assert!(
+                source.is_file(),
+                "{} requires an existing network file: {}",
+                if explicit_path.is_some() {
+                    "MF_NNUE_TEST_NET"
+                } else {
+                    "NNUE provisioning tests"
+                },
+                source.display()
+            );
+            // Hard links cannot cross Windows volumes, and the explicit fixture may live on a
+            // different drive than the temporary directory; copying carries identical bytes.
+            if fs::hard_link(&source, destination).is_err() {
+                fs::copy(&source, destination).expect("test network copy should be created");
+            }
         }
     }
 

@@ -2149,6 +2149,8 @@ fn pvs(
     context: &mut SearchContext<'_>,
     pv: &mut PvLine,
 ) -> Option<i32> {
+    #[cfg(feature = "instrumentation")]
+    crate::instrumentation::record(|counters| counters.interior_nodes += 1);
     if !context.visit_node(ply) {
         return None;
     }
@@ -2166,6 +2168,8 @@ fn pvs(
         return Some(draw_score);
     }
     if ply >= MAX_SEARCH_PLY {
+        #[cfg(feature = "instrumentation")]
+        crate::instrumentation::record(|counters| counters.interior_static_evals += 1);
         return Some(context.static_eval(position));
     }
     // Mate distance pruning. A mate already found closer to the root cannot be beaten
@@ -2210,6 +2214,8 @@ fn pvs(
                     context.transposition_table,
                 )
             {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.tt_cutoffs += 1);
                 return Some(score);
             }
         }
@@ -2279,6 +2285,10 @@ fn pvs(
     }
 
     let in_check = is_in_check(position, position.side_to_move());
+    #[cfg(feature = "instrumentation")]
+    if in_check {
+        crate::instrumentation::record(|counters| counters.checked_interior_nodes += 1);
+    }
     // The RAW static eval is what goes to the TT, deliberately. Storing the corrected
     // value would fold a residual that was learned at one point in the search into an
     // entry read at another, and the correction would then be applied a second time on
@@ -2286,7 +2296,11 @@ fn pvs(
     let raw_static_eval = tt_entry
         .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
         .map_or_else(
-            || context.static_eval(position),
+            || {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.interior_static_evals += 1);
+                context.static_eval(position)
+            },
             |entry| i32::from(entry.static_eval),
         );
     #[cfg(feature = "corrhist-regression")]
@@ -2316,8 +2330,14 @@ fn pvs(
             && depth <= RAZOR_MAX_DEPTH
             && !is_mate_score(alpha)
             && eval_pruning_rule50_safe(position, depth)
-            && static_eval < alpha - razoring_margin(&context.options.parameters, depth)
+            && {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.razoring_attempts += 1);
+                static_eval < alpha - razoring_margin(&context.options.parameters, depth)
+            }
         {
+            #[cfg(feature = "instrumentation")]
+            crate::instrumentation::record(|counters| counters.razoring_cutoffs += 1);
             return quiescence(
                 position, alpha, beta, ply, pv_node, false, true, context, pv,
             );
@@ -2327,17 +2347,23 @@ fn pvs(
             && depth <= RFP_MAX_DEPTH
             && !is_mate_score(beta)
             && eval_pruning_rule50_safe(position, depth)
-            && static_eval
-                - reverse_futility_margin(
-                    &context.options.parameters,
-                    depth,
-                    improving,
-                    cut_node,
-                    tt_pv,
-                    corrplexity,
-                )
-                >= beta
+            && {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.rfp_attempts += 1);
+                static_eval
+                    - reverse_futility_margin(
+                        &context.options.parameters,
+                        depth,
+                        improving,
+                        cut_node,
+                        tt_pv,
+                        corrplexity,
+                    )
+                    >= beta
+            }
         {
+            #[cfg(feature = "instrumentation")]
+            crate::instrumentation::record(|counters| counters.rfp_cutoffs += 1);
             return Some((661 * beta + 363 * static_eval) / 1024);
         }
 
@@ -2352,9 +2378,13 @@ fn pvs(
             && eval_pruning_rule50_safe(position, depth)
             && context.nmp_allowed_at(ply)
             && has_non_pawn_material(position)
-            && static_eval
-                >= beta - context.options.parameters.nmp_margin_per_depth * depth
-                    + context.options.parameters.nmp_margin_base
+            && {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.nmp_attempts += 1);
+                static_eval
+                    >= beta - context.options.parameters.nmp_margin_per_depth * depth
+                        + context.options.parameters.nmp_margin_base
+            }
         {
             let reduction =
                 null_move_reduction(&context.options.parameters, depth, static_eval, beta);
@@ -2382,6 +2412,8 @@ fn pvs(
 
             if null_value >= beta && !is_mate_score(null_value) {
                 if !requires_null_move_verification(context.nmp_min_ply, depth) {
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record(|counters| counters.nmp_cutoffs += 1);
                     return Some(null_value);
                 }
 
@@ -2405,6 +2437,8 @@ fn pvs(
                 context.nmp_min_ply = 0;
                 let verification = verification?;
                 if verification >= beta {
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record(|counters| counters.nmp_cutoffs += 1);
                     return Some(null_value);
                 }
             }
@@ -2424,6 +2458,8 @@ fn pvs(
         && !is_mate_score(beta)
         && eval_pruning_rule50_safe(position, depth)
     {
+        #[cfg(feature = "instrumentation")]
+        crate::instrumentation::record(|counters| counters.probcut_attempts += 1);
         let probcut_beta = probcut_beta(&context.options.parameters, beta, improving);
         let tt_score = tt_entry
             .map(|entry| value_from_tt(i32::from(entry.score), ply, position.halfmove_clock()));
@@ -2509,6 +2545,8 @@ fn pvs(
                         );
                     }
                     if let Some(cutoff_value) = probcut_cutoff_value(value, beta, probcut_beta) {
+                        #[cfg(feature = "instrumentation")]
+                        crate::instrumentation::record(|counters| counters.probcut_cutoffs += 1);
                         return Some(cutoff_value);
                     }
                 }
@@ -2604,8 +2642,16 @@ fn pvs(
             && effective_depth <= HISTORY_PRUNING_MAX_EFFECTIVE_DEPTH
             && best_move.is_some()
             && shallow_pruning_allowed(best_score)
-            && ordering.pruning_history(position, mv) < history_pruning_threshold(effective_depth)
+            && {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| {
+                    counters.history_pruning_attempts += 1;
+                });
+                ordering.pruning_history(position, mv) < history_pruning_threshold(effective_depth)
+            }
         {
+            #[cfg(feature = "instrumentation")]
+            crate::instrumentation::record(|counters| counters.history_pruning_cutoffs += 1);
             continue;
         }
 
@@ -2615,12 +2661,18 @@ fn pvs(
             && quiet
             && !gives_check
             && depth <= LMP_MAX_DEPTH
-            && move_count
-                >= late_move_pruning_threshold(depth, improving, &context.options.parameters)
+            && {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.lmp_attempts += 1);
+                move_count
+                    >= late_move_pruning_threshold(depth, improving, &context.options.parameters)
+            }
             && best_move.is_some()
             && shallow_pruning_allowed(best_score)
             && mover_has_non_pawn_material
         {
+            #[cfg(feature = "instrumentation")]
+            crate::instrumentation::record(|counters| counters.lmp_cutoffs += 1);
             continue;
         }
 
@@ -2636,10 +2688,14 @@ fn pvs(
             && eval_pruning_rule50_safe(position, depth)
             && mover_has_non_pawn_material
         {
+            #[cfg(feature = "instrumentation")]
+            crate::instrumentation::record(|counters| counters.futility_attempts += 1);
             let futility_value = static_eval
                 + frontier_futility_margin(&context.options.parameters, effective_depth);
             if futility_value <= alpha {
                 best_score = best_score.max(futility_value);
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.futility_cutoffs += 1);
                 continue;
             }
         }
@@ -2676,12 +2732,18 @@ fn pvs(
             // capture list; only quiets (whose SEE the picker never computes) still
             // walk the exchange here, and only inside the depth window.
             if within_window
-                && picker
-                    .current_capture_see()
-                    .unwrap_or_else(|| static_exchange_evaluation(position, mv))
-                    < threshold
+                && {
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record(|counters| counters.see_pruning_attempts += 1);
+                    picker
+                        .current_capture_see()
+                        .unwrap_or_else(|| static_exchange_evaluation(position, mv))
+                        < threshold
+                }
                 && (quiet || alpha >= 0 || has_other_non_pawn_material(position, mover, mv))
             {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.see_pruning_cutoffs += 1);
                 continue;
             }
         }
@@ -2811,6 +2873,10 @@ fn pvs(
             } else {
                 child_depth
             };
+            #[cfg(feature = "instrumentation")]
+            if reduced_depth < child_depth {
+                crate::instrumentation::record(|counters| counters.lmr_reductions += 1);
+            }
             let scout = pvs(
                 position,
                 reduced_depth,
@@ -2832,6 +2898,8 @@ fn pvs(
             .map(|score| -score);
             scout.and_then(|score| {
                 let score = if score > alpha && reduced_depth < child_depth {
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record(|counters| counters.reduced_fail_highs += 1);
                     // Post-LMR re-search handling (M3-F4). Two things happen once a
                     // reduced scout beats alpha, and both target the VERIFICATION
                     // rather than the reduction, because M3-F2 measured a 25-33%
@@ -2872,6 +2940,12 @@ fn pvs(
                         score
                     } else {
                         child_pv.clear();
+                        #[cfg(feature = "instrumentation")]
+                        crate::instrumentation::record_full_depth_research(
+                            reduced_depth,
+                            verification_depth,
+                            child_depth,
+                        );
                         pvs(
                             position,
                             verification_depth,
@@ -2893,6 +2967,12 @@ fn pvs(
                 };
                 if score > alpha && score < beta {
                     child_pv.clear();
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record_full_depth_research(
+                        reduced_depth,
+                        child_depth,
+                        child_depth,
+                    );
                     pvs(
                         position,
                         child_depth,
@@ -3063,6 +3143,8 @@ fn quiescence(
     context: &mut SearchContext<'_>,
     pv: &mut PvLine,
 ) -> Option<i32> {
+    #[cfg(feature = "instrumentation")]
+    crate::instrumentation::record(|counters| counters.qsearch_nodes += 1);
     if count_node && !context.visit_node(ply) {
         return None;
     }
@@ -3081,6 +3163,8 @@ fn quiescence(
         return Some(draw_score);
     }
     if ply >= MAX_SEARCH_PLY {
+        #[cfg(feature = "instrumentation")]
+        crate::instrumentation::record(|counters| counters.qsearch_static_evals += 1);
         return Some(context.static_eval(position));
     }
 
@@ -3128,6 +3212,8 @@ fn quiescence(
             // rebuilt by re-searching. Allowing the cutoff here measured 2.2x the nodes
             // to depth 12 in the endgame position.
             if !pv_node && bound_allows_cutoff && position.halfmove_clock() < 96 {
+                #[cfg(feature = "instrumentation")]
+                crate::instrumentation::record(|counters| counters.tt_cutoffs += 1);
                 return Some(score);
             }
         }
@@ -3146,7 +3232,11 @@ fn quiescence(
         tt_entry
             .filter(|entry| entry.static_eval != UNEVALUATED_STATIC_EVAL)
             .map_or_else(
-                || context.static_eval(position),
+                || {
+                    #[cfg(feature = "instrumentation")]
+                    crate::instrumentation::record(|counters| counters.qsearch_static_evals += 1);
+                    context.static_eval(position)
+                },
                 |entry| i32::from(entry.static_eval),
             )
     };
@@ -5250,8 +5340,17 @@ mod tests {
         static NETWORK: OnceLock<Option<mf_nnue::Network>> = OnceLock::new();
         NETWORK
             .get_or_init(|| {
-                let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+                let explicit_path = std::env::var_os("MF_NNUE_TEST_NET");
+                let path = explicit_path.clone().map_or_else(
+                    || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue"),
+                    PathBuf::from,
+                );
                 if !path.is_file() {
+                    assert!(
+                        explicit_path.is_none(),
+                        "MF_NNUE_TEST_NET requires an existing network file: {}",
+                        path.display()
+                    );
                     eprintln!("SKIPPED: NNUE search tests are missing {}", path.display());
                     return None;
                 }

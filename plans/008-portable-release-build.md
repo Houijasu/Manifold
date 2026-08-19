@@ -16,10 +16,22 @@
 - **Depends on**: none (independent of 001-007)
 - **Category**: direction
 - **Planned at**: commit `b9d15bf` + working tree, 2026-08-15
+- **Completion**: DONE locally on 2026-08-19; native/portable bench 37,420,
+  portable perft 4,865,609, force-magic green, controlled scanner fixture green,
+  portable scan zero matches, staged binary stable through publication, embedded
+  network hash stable through final validation, encoded flags isolated/restored,
+  repository-pinned toolchain isolated and recorded, exact-sysroot LLVM lookup verified,
+  committed publication survives backup-cleanup failure, ordinary release unchanged
 
 ## Why this matters
 
-`.cargo/config.toml` compiles the Windows MSVC target with `target-cpu=native`. Every release binary this repo has ever produced SIGILLs on any CPU without BMI2 — which currently blocks shipping the engine to anyone who did not build it. The codebase already contains everything needed for a portable build: the sliding-attack backend auto-selects black-magics when BMI2 is absent at compile time, and the NNUE SIMD backend dispatches at **runtime** (Scalar/Avx2/Avx2Vnni), so only the sliding layer and generic codegen need a baseline target. This plan adds a portable build path and a check that keeps it honest.
+`.cargo/config.toml` compiles the Windows MSVC target with `target-cpu=native`. Release
+binaries built on BMI2-capable machines may therefore contain BMI2 instructions and
+fail on older CPUs. The codebase already contains everything needed for a portable
+build: the sliding-attack backend auto-selects black-magics when BMI2 is absent at
+compile time, and the NNUE SIMD backend dispatches at **runtime**
+(Scalar/Avx2/Avx2Vnni), so only the sliding layer and generic codegen need a baseline
+target. This plan adds a portable build path and a check that keeps it honest.
 
 ## Current state
 
@@ -28,7 +40,8 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=native"]
 ```
-  (AGENTS.md documents the consequence: native builds select the PEXT backend via BMI2; `force-magic` selects black-magics for testing.)
+  (AGENTS.md documents the consequence: native builds on BMI2-capable hosts select the
+  PEXT backend; `force-magic` selects black-magics for testing.)
 - `crates/mf-core/Cargo.toml:9` — the `force-magic` feature exists precisely to exercise the non-PEXT backend.
 - `crates/mf-core/src/sliding.rs` — PEXT code is gated on `target_feature = "bmi2"` with a debug cross-check; without BMI2 at compile time the black-magic backend is selected automatically (per AGENTS.md "Non-Obvious Build & Test Behavior").
 - `crates/mf-nnue/src/simd.rs` — `SimdBackend` dispatch is runtime-detected (`is_x86_feature_detected!` style; backends Scalar/Avx2/Avx2Vnni) — no portability work needed there.
@@ -40,11 +53,11 @@ rustflags = ["-C", "target-cpu=native"]
 
 | Purpose | Command | Expected on success |
 |---|---|---|
-| Native bench (reference) | `cargo run --release -p mf-uci --bin manifold -- bench` | current pinned signature (e.g. 41,588 at time of writing — confirm the live pin) |
-| Portable build | `pwsh harness/build_portable.ps1` (created by this plan) | exit 0, artifact under `target/portable/` |
+| Native bench (reference) | dedicated native build inside `harness/build_portable.ps1` | 37,420 |
+| Portable build | `pwsh -NoProfile -File harness/build_portable.ps1` | exit 0, artifact under `target/portable/` |
 | Portable bench | `target/portable/manifold.exe bench` | **same** node signature as native |
 | Magic-backend tests | `cargo test -p mf-core --features force-magic` | all pass |
-| No-BMI2 scan | disassembly grep (step 4) | zero `pext`/`bzhi`/`tzcnt`-encoded-as-BMI2 instructions in the portable binary's .text |
+| No-BMI2 scan | instruction-token scan inside `harness/build_portable.ps1` | zero `pext`/`pdep`/`bzhi`/`mulx`/`sarx`/`shlx`/`shrx`/`rorx` mnemonics |
 
 ## Scope
 
@@ -57,12 +70,14 @@ rustflags = ["-C", "target-cpu=native"]
 **Out of scope**:
 - `.cargo/config.toml` — the default stays native; portability is an explicit build path, not a default change.
 - Multiple-architecture targets (ARM64 etc.).
-- Installers/packages; this plan produces a runnable .exe next to its net, nothing more.
+- Installers/packages; the default network is embedded, so this plan produces a
+  self-contained runnable `.exe` and requires no adjacent network file.
 - PGO for the portable build (contradiction in terms).
 
 ## Git workflow
 
-- One commit: `Add a portable baseline-x86-64 release build`.
+- Keep each implementation or review follow-up focused, with a sentence-case imperative
+  subject.
 
 ## Steps
 
@@ -70,27 +85,45 @@ rustflags = ["-C", "target-cpu=native"]
 
 Model the script's structure on `harness/build_pgo.ps1` (read it first; match its parameter style, logging, and metadata stamping). The body:
 
-1. Override the native flag for one invocation: `$env:RUSTFLAGS = '-C target-cpu=x86-64'` (RUSTFLAGS overrides `.cargo/config.toml` rustflags entirely — verify with `cargo build --release -p mf-uci --bin manifold --verbose` showing `-C target-cpu=x86-64` and no `native`).
-2. `cargo build --release -p mf-uci --bin manifold` into the normal target dir, then copy `target/release/manifold.exe` to `target/portable/manifold.exe`.
-3. Copy or hard-link `nets/main.nnue` to `target/portable/nets/main.nnue` (runtime discovery looks beside the executable — `crates/mf-nnue/src/provision.rs` documents the lookup), or document the embedded-net default already covering this (the default build embeds the net — confirm, and if so skip the copy and say why in the script).
-4. Stamp `target/portable/build-metadata.txt` with git SHA, RUSTFLAGS, date, and `rustc -vV`.
+1. Clear higher-precedence `CARGO_ENCODED_RUSTFLAGS` and inherited
+   `RUSTUP_TOOLCHAIN`, set
+   `$env:RUSTFLAGS = '-C target-cpu=x86-64'`, and set `$env:CARGO_TARGET_DIR` to
+   dedicated `target\portable-build`; restore or remove all four caller values in
+   `finally` according to their exact initial state. Treat `rust-toolchain.toml` as a
+   tracked build input before build and publication.
+2. Build `cargo build --release -p mf-uci --bin manifold`, verify the executable in
+   `target\portable-build\release`, and never write `target\release\manifold.exe`.
+3. Use the default embedded network, so no adjacent `nets` copy is required.
+4. Copy the portable output once into unique staging immediately after build; run all
+   portable gates and hash calculation against that staged file, then add the exact
+   40-hex engine-source sidecar and metadata before rollback-safe publication to
+   `target\portable`.
 
 **Verify**: script exits 0; `target/portable/manifold.exe bench` prints the **same** node signature as the native build.
 
 ### Step 2: Runtime sanity on this machine
 
-`target/portable/manifold.exe` on a BMI2-capable machine still works (baseline code runs everywhere): run `bench`, plus a 10-game smoke against the native build if fastchess is configured (`harness/run_match.ps1`, honoring the AGENTS.md affinity rules for 1T). Both binaries should be closely matched in strength (the portable one simply lacks BMI2 speed).
+`target/portable/manifold.exe` on a BMI2-capable machine still works while retaining
+baseline x86-64 compatibility: run `bench`, plus a 10-game smoke against the native
+build if fastchess is configured (`harness/run_match.ps1`, honoring the AGENTS.md
+affinity rules for 1T). Both binaries should be closely matched in strength (the
+portable one simply lacks BMI2 speed).
 
 **Verify**: bench signature identical; smoke match 0 forfeits (score irrelevant).
 
 ### Step 3: Prove the binary is actually baseline
 
-Disassemble and grep for BMI2 instructions (PowerShell-friendly options: `dumpbin /DISASM`, or `llvm-objdump -d` if on PATH, or the `iced_x86` crate as a one-off — pick what exists on this machine):
+Parse the host from the active pinned `rustc -vV`; resolve `llvm-profdata.exe` and
+`llvm-objdump.exe` only under that exact host beneath the active `rustc --print sysroot`,
+without falling back to another installed toolchain. Disassemble the staged portable
+binary and match only decoded instruction tokens (never comments or metadata):
 
-- Search the portable binary's .text for `pext`, `bzhi`, `andn`, `mulx`, `sarx`, `shlx`, `shrx`, `lzcnt`, `tzcnt` **as BMI2/BMI1/LZCNT/TZCNT encodings** (note: `rep bsf`-style `tzcnt` bytes can alias `bsf`; check for the `F3 0F BC` prefix form). Expect **zero** matches.
-- Search the native binary for the same; expect many (this proves the grep works — a control).
+- Reject portable `pext`, `pdep`, `bzhi`, `mulx`, `sarx`, `shlx`, `shrx`, and `rorx`.
+- Test all forbidden tokens through a controlled text fixture; native scan output is
+  informational only and must not gate portable builds on non-BMI2 hosts.
 
-**Verify**: zero BMI2+ instruction matches in portable; nonzero in native (control positive).
+**Verify**: zero specified instruction matches in portable; controlled fixture detects
+every specified mnemonic without matching comments or metadata.
 
 ### Step 4: Magic-backend confidence
 
@@ -109,17 +142,29 @@ README Build section: two artifacts (native, tuned to the build machine, fastest
 ## Test plan
 
 - Signature identity (native vs portable bench) — the core invariant.
-- Instruction-scan control experiment (step 3).
+- Deterministic instruction-scanner fixture plus the staged portable scan (step 3).
+- Staged-binary identity after mutating the original build output.
+- Embedded-network hash change rejection.
+- `CARGO_ENCODED_RUSTFLAGS` clearing/restoration for initially present and absent states.
+- Network revalidation inside the installed final directory's validation callback.
+- Backup-cleanup failure preserves the validated final and leaves the backup remainder.
+- Inherited `RUSTUP_TOOLCHAIN` is absent inside the build and restored/removed exactly.
+- Dirty `rust-toolchain.toml` is rejected before build/publication.
+- Rustc host parsing and exact-sysroot/host LLVM lookup are deterministic fixtures.
 - Perft anchor through the portable binary (step 4).
 - Optional 10-game smoke for runtime sanity.
 
 ## Done criteria
 
-- [ ] `harness/build_portable.ps1` produces `target/portable/manifold.exe` + metadata
-- [ ] Portable bench signature identical to native
-- [ ] Zero BMI2-family instructions in the portable binary; control positive on native
-- [ ] `cargo test -p mf-core --features force-magic` green; portable perft 5 = anchor
-- [ ] README documents both build paths
+- [x] `harness/build_portable.ps1` produces `target/portable/manifold.exe` + metadata
+- [x] Portable bench signature identical to native (37,420)
+- [x] Zero specified BMI2-family instruction tokens in the staged portable binary; controlled scanner fixture green
+- [x] Published binary is the exact staged file that passed every portable gate
+- [x] Embedded-network hash remains stable through the publication callback
+- [x] Higher-precedence encoded flags are cleared and exactly restored/removed
+- [x] Validated publication commits before backup cleanup; cleanup failure does not roll back
+- [x] `cargo test -p mf-core --features force-magic` green; portable perft 5 = 4,865,609
+- [x] README documents both build paths
 
 ## STOP conditions
 

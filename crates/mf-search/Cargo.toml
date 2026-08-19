@@ -24,3 +24,7 @@ required-features = ["instrumentation"]
 [[example]]
 name = "see_profile"
 required-features = ["instrumentation"]
+
+[[example]]
+name = "search_profile"
+required-features = ["instrumentation"]
