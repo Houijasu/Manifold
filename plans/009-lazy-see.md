@@ -173,7 +173,7 @@ no end-to-end regression.
 **Verify**: `cargo test --workspace` → all pass; **bench must still be 37420**. A moved
 signature means the equivalence is broken — STOP, do not re-pin your way past it.
 
-### Step 3: lazy SEE in the qsearch picker (strength-sensitive)
+### Step 3: lazy SEE in the qsearch picker (strength-sensitive) — DONE (1c1c6cf)
 
 Restructure the **qsearch variant only** (`MovePicker::qsearch`, `qsearch_see_threshold`
 set):
@@ -198,20 +198,58 @@ the qsearch variant must be re-pinned — record old → new expectations); benc
 re-pinned old → new; see_profile's `load_captures` share collapses toward
 "yielded captures only".
 
-### Step 4: measure
+**Execution record (2026-08-19, commit 1c1c6cf)**: implemented as planned — MVV-LVA
+scoring (`mvv_lva_capture_score`, the eager formula minus the SEE term), the gate moved
+into `pick_best_capture` (failures masked exactly as the load gate dropped them),
+promotions and the TT capture exempt, and the `i32::MIN` ablation threshold skipping the
+gate entirely. The good/bad split survives only for below-zero thresholds (a load-time
+`see_ge(mv, 0)` per capture, replacing the eager `see >= 0`), so the shipped zero
+threshold runs zero SEE-family calls at load. The yielded SET is pinned unchanged
+against the exact-SEE oracle at thresholds {MIN, −50, 0, +50}. Bench re-pinned
+37420 → 37557, which moved every `bench_cli.rs` anchor (30/30 green after re-pinning)
+and the two `search_invariants.rs` pins (checked-node-eval 6006/5892 → 5968/5856; the
+LMR direction test re-read at depth 9 → 8, its documented long-tail failure mode). All
+73 workspace targets green; fmt and clippy clean; `current_capture_see` now exposes
+`None` for the lazy variant's non-TT capture yields (only the qsearch loop owned those,
+and it never reads the value).
+
+### Step 4: measure — DONE (2026-08-19)
 
 `nps_compare` depth 12 (old vs new binaries) and 1-thread `mtbench` before/after. Record
 the NPS ratio and the see_profile share change. Expected ceiling: the step-0-measured
 never-yielded fraction of the 8.7 % SEE share, plus the cheaper predicate on yielded
 captures.
 
-### Step 5: strength gate
+**Measured**: see_profile over the profile mix — SEE calls 1664.45 → 1581.05/kn,
+per-call 134.3 → 116.0 ns, and the site split shows the collapse: `load_captures`
+1201.24 → 761.51 calls/kn (the qsearch portion is gone; the remainder is the full-search
+picker's eager staging, untouched by design), replaced by `qsearch_yield_gate` at
+361.60 calls/kn of cheaper early-exit predicates. Depth-12 `nps_compare`: NPS geomean
+1.00x (throughput neutral, the goal), nodes-to-depth 1.42x in the new build's favor on
+3 of 4 positions (endgame −62 %, midgame −29 %, startpos −18 %, kiwipete +13 %).
+1-thread `mtbench` (depth 10, bench mix): +8 % nodes, NPS neutral. Nodes-to-depth is
+therefore mixed by position set and depth — an ordering change moves different trees in
+different directions — so the keep-or-revert decision is deferred to the step-5 match,
+as planned.
+
+### Step 5: strength gate — DONE (2026-08-19)
 
 Run the match through `harness/run_match.ps1` into `experiments/<run-name>/` per the
 AGENTS.md harness rules (both engines `Threads=1` → `-use-affinity -concurrency 8`;
 never call fastchess directly). Keep step 3 if Elo is within noise or positive; revert
 step 3 (steps 0–2 stand on their own) if clearly negative. Record the verdict in the
 README row.
+
+**Measured**: `experiments/2026-08-19-009-lazy-qsearch-see/`, fixed-length 300 rounds
+(600 games), TC 8+0.08, Hash 64, Threads 1, UHO_4060_v4 book, seed 20260819, A = step 3
+(lazy-see), B = step 2 (65dfc06). Result: 149 W / 291 D / 160 L (49.08 %), Elo
+−6.37 ± 15.27, Ptnml(0-2) [8, 69, 152, 68, 3], zero forfeits/crashes/illegal moves
+(harness self-check green). **Verdict: KEPT** — within noise (the interval spans zero),
+nowhere near the "clearly negative" revert bar. The measurement is honest about the
+direction: the point estimate is slightly negative at this TC, while the nodes-to-depth
+measurements pointed the other way; a follow-up SPRT at LTC could settle it, but the
+plan's keep bar is met and the throughput goal (NPS neutral at 5 % fewer, cheaper SEE
+calls, early-cutoff qsearch nodes pay for zero load-time exchanges) is achieved.
 
 ## Test plan
 
@@ -225,13 +263,13 @@ README row.
 
 ## Done criteria
 
-- [x] All workspace gates exit 0 (through step 2; re-run after step 3)
+- [x] All workspace gates exit 0 (re-run after step 3: 73 targets, fmt, clippy)
 - [x] `cargo test -p mf-core see` green including the new predicate differential (default and force-magic backends)
-- [x] Exact-SEE oracle tests unchanged and passing (through step 2)
-- [ ] Bench signature 37420 unchanged through step 2; re-pinned with old → new after step 3
+- [x] Exact-SEE oracle tests unchanged and passing
+- [x] Bench signature 37420 unchanged through step 2; re-pinned 37420 → 37557 after step 3
 - [x] Per-site SEE shares (step 0) and see_profile before/after recorded
-- [x] `nps_compare` ratio recorded (steps 0–2: 0.98x–1.01x vs pre-009; step 3 pending)
-- [ ] Match verdict for step 3 recorded
+- [x] `nps_compare` ratio recorded (steps 0–2: 0.98x–1.01x; step 3: NPS geomean 1.00x, nodes-to-depth 1.42x)
+- [x] Match verdict for step 3 recorded: KEPT (−6.37 ± 15.27 Elo, within noise)
 
 ## STOP conditions
 

@@ -16,7 +16,7 @@ Note: the repo's earlier feature plans live in `docs/plans/` (multipv, syzygy, p
 | 006  | Targeted TT-move legality predicate | P2 | S-M | after 001/002 (bench re-pin collisions only) | DONE (bench 40705 unchanged; equivalence + fuzz differential green) |
 | 007  | CI + stale repo map | P2 | M | — | DONE (PR #2 green: Windows and Ubuntu jobs pass on the checksum-pinned workflow; fresh-clone provisioning documented) |
 | 008  | Portable release build | P2 | S-M | — | DONE locally (bench native/portable 37420; perft 4865609; force-magic + scanner fixture green; staged bytes and network hash stable; portable scan clean) |
-| 009  | SEE predicate + lazy qsearch SEE | P1 | M | 001 | IN PROGRESS (steps 0-2 DONE value-neutrally: bench 37420 unchanged, all nodes identical, 73 targets green; site split 72%/25%/3%/0% of 1664 SEE calls/kn; default-build NPS 0.98x-1.01x vs prior commit; step 3+ strength-sensitive: bench re-pin + match) |
+| 009  | SEE predicate + lazy qsearch SEE | P1 | M | 001 | DONE (all 5 steps, 2026-08-19: steps 0-2 value-neutral, bench 37420 unchanged; step 3 lazy qsearch SEE re-pinned bench 37420→37557 + all bench_cli/search_invariants anchors, see_profile load_captures 1201→762 calls/kn replaced by 362/kn yield-gate predicates, depth-12 NPS 1.00x with nodes-to-depth 1.42x; step 5 match KEPT at −6.37 ± 15.27 Elo, `experiments/2026-08-19-009-lazy-qsearch-see/`; supersedes 002 steps 3-5) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 
