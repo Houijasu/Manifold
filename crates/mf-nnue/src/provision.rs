@@ -285,7 +285,11 @@ mod tests {
                 },
                 source.display()
             );
-            fs::hard_link(source, destination).expect("test network hard link should be created");
+            // Hard links cannot cross Windows volumes, and the explicit fixture may live on a
+            // different drive than the temporary directory; copying carries identical bytes.
+            if fs::hard_link(&source, destination).is_err() {
+                fs::copy(&source, destination).expect("test network copy should be created");
+            }
         }
     }
 
