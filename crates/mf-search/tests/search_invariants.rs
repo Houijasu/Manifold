@@ -1080,13 +1080,6 @@ fn the_qsearch_checks_toggle_changes_the_searched_tree() {
 
 /// The checked-node-eval OFF arm's own fixed-depth signature.
 ///
-/// Kiwipete at depth 7 with a fresh TT is deliberately tactical: the search visits
-/// checked interior nodes, so the toggle has something to act on. The pinned number is
-/// the experiment's determinism anchor -- recorded once from this implementation, and
-/// any change to what the off arm searches moves it. The ON arm must agree with the
-/// default search bit-for-bit: the shipped default keeps today's tree.
-/// The checked-node-eval OFF arm's own fixed-depth signature.
-///
 /// The fourth bench position at depth 7 with a fresh TT: a tactical middlegame where
 /// the side to move lands in check with quiet evasions worth reducing, so the pinned
 /// `improving = false` changes an LMR reduction and the tree with it. Both numbers are
