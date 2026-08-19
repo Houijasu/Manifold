@@ -206,6 +206,10 @@ fn selectivity_options_default_to_enabled() {
             use_time_effort: false,
             use_interpolated_time_management: false,
             use_search_again_depth: false,
+            // Checked-node static evaluation ships ON: the default keeps the shipped
+            // tree bit-identical while the OFF arm is measured as an experiment. See
+            // the comment on `SearchOptions::default` in `search.rs`.
+            use_checked_node_eval: true,
             multi_pv: 1,
             // The tunable margins default to the constants the search shipped with, so
             // an untouched engine is bit-identical to one with no tuning surface at
@@ -411,17 +415,16 @@ fn null_move_pruning_is_inert_without_non_pawn_material() {
     assert_eq!(enabled.nodes, disabled.nodes);
 }
 
-#[test]
-fn pv_is_legal() {
-    let Some(network) = network() else {
-        return;
-    };
+/// The deterministic self-play walk behind both PV-legality tests: 32 plies from
+/// startpos, each searched to depth 5, with every PV move replayed for legality and
+/// the root position asserted unchanged afterwards.
+fn pv_walk_is_legal(options: SearchOptions, network: &Network) {
     let mut position = Position::startpos();
     let table = TranspositionTable::new(16).expect("test TT should allocate");
 
     for sample in 0..32 {
         let before = position.clone();
-        let result = search_default(&position, &table, limits(5), network);
+        let result = search(&position, &table, limits(5), options, network);
         let mut replay = position.clone();
         for (ply, &mv) in result.pv.iter().enumerate() {
             assert!(
@@ -443,100 +446,158 @@ fn pv_is_legal() {
 }
 
 #[test]
+fn pv_is_legal() {
+    let Some(network) = network() else {
+        return;
+    };
+    pv_walk_is_legal(SearchOptions::default(), network);
+}
+
+/// The same fixed walk with checked-node evaluation disabled. Skipping the static eval
+/// at in-check interior nodes may change the tree; it must never change move LEGALITY.
+#[test]
+fn pv_is_legal_with_checked_node_eval_disabled() {
+    let Some(network) = network() else {
+        return;
+    };
+    pv_walk_is_legal(
+        SearchOptions {
+            use_checked_node_eval: false,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+}
+
+/// The exact-search option set every mate test uses: every pruning and reduction
+/// toggle off, because a mate search must be exact.
+fn exact_mate_search_options() -> SearchOptions {
+    SearchOptions {
+        use_nmp: false,
+        use_rfp: false,
+        use_razoring: false,
+        use_lmr: false,
+        use_lmp: false,
+        use_futility: false,
+        use_see_pruning: false,
+        // The qsearch TT is a transposition cutoff, not a pruning heuristic, so
+        // it stays on here exactly as the interior TT does.
+        use_qsearch_tt: true,
+        // Delta pruning DROPS captures, so it is off for the same reason every
+        // other pruning toggle is: a mate search must be exact.
+        use_qsearch_delta_pruning: false,
+        // Quiet checks ADD moves to the qsearch and never drop one, so they
+        // cannot hide a forced mate either way. Set to the SHIPPED default so
+        // this test exercises the search that actually plays games -- finding
+        // every mate here without the widening is the stronger statement.
+        use_qsearch_checks: false,
+        // Capture LMR is a reduction, so it is off here for the same reason
+        // `use_lmr` is: a mate search must be exact.
+        use_capture_lmr: false,
+        // Inert here: with `use_lmr` off no scout is ever reduced, so neither
+        // post-LMR site can be reached. Set to the SHIPPED defaults so this
+        // test keeps exercising the search that actually plays games.
+        use_post_lmr_depth: true,
+        use_post_lmr_conthist: false,
+        use_singular_ext: false,
+        use_check_ext: true,
+        use_multicut: false,
+        use_iir: false,
+        use_probcut: false,
+        // History affects only move ORDER, never which moves are legal, so a
+        // forced mate must still be found with the tables on. Leaving them
+        // enabled keeps this test exercising the shipped ordering path.
+        use_butterfly_history: true,
+        use_capture_history: true,
+        use_pawn_history: false,
+        use_continuation_history: true,
+        // History pruning DROPS moves, so it must be off here for the same
+        // reason every other pruning toggle is: a mate search must be exact.
+        use_history_pruning: false,
+        // Correction history adjusts the static EVAL, never the move list, and
+        // `to_corrected_static_eval` clamps away from the decisive range so a
+        // residual can never manufacture or mask a mate score. Leaving it on
+        // keeps this test exercising the shipped eval path.
+        use_correction_history: true,
+        use_correction_sources: SearchOptions::default().use_correction_sources,
+        // Ordering-only signals, like the other history tables: set to the
+        // SHIPPED defaults so this test exercises the search that plays games.
+        use_tt_move_history: true,
+        use_low_ply_history: true,
+        // Inert here: its three consumers (LMR, RFP, the singular double
+        // margin) are all switched off above. Set to the SHIPPED default.
+        use_corrplexity: true,
+        // Inert here either way: this is a fixed-depth search with no soft
+        // limit to scale. Set to the SHIPPED default like every other toggle.
+        use_time_effort: false,
+        use_interpolated_time_management: false,
+        use_search_again_depth: false,
+        // Checked-node evaluation changes where a static eval comes FROM, never which
+        // moves exist, so it cannot hide a mate either way. Set to the SHIPPED default
+        // here; the disabled arm gets its own corpus run below.
+        use_checked_node_eval: true,
+        multi_pv: 1,
+        parameters: SearchOptions::default().parameters,
+    }
+}
+
+/// Searches `fen` for its forced mate and asserts the exact distance plus a legal,
+/// terminal PV.
+fn assert_mate_found(fen: &str, expected: i32, options: SearchOptions, network: &Network) {
+    let position = Position::from_fen(fen, false).expect("mate FEN should parse");
+    let table = TranspositionTable::new(16).expect("test TT should allocate");
+    let result = search(&position, &table, limits(24), options, network);
+
+    assert_eq!(
+        mate_moves(result.score),
+        Some(expected),
+        "wrong mate distance for {fen}: score {}, pv {:?}",
+        result.score,
+        result.pv
+    );
+
+    let mut replay = position.clone();
+    for &mv in &result.pv {
+        assert!(generate_legal_moves(&replay).contains(&mv));
+        replay.make_move(mv);
+    }
+    assert!(
+        generate_legal_moves(&replay).is_empty(),
+        "mate PV must end at a terminal position for {fen}"
+    );
+}
+
+/// A mate in one where the side to move STARTS in check: the rook on b1 checks the
+/// black king on b3 along the b-file, and the mate is the capture of the checker
+/// itself, `Qxb1#` -- the queen is defended by the king and covers a2 and b2. This is
+/// the tactical-blindness guard for the checked-node eval experiment: with the toggle
+/// off the root's checked evasions are searched without any static eval, and the mate
+/// must still be found.
+const IN_CHECK_MATE_CASE: (&str, i32) = ("8/8/8/1q6/8/1k6/8/KR6 b - - 0 1", 1);
+
+#[test]
 fn mate_in_n_found() {
     let Some(network) = network() else {
         return;
     };
     for (fen, expected) in MATE_CASES {
-        let position = Position::from_fen(fen, false).expect("mate FEN should parse");
-        let table = TranspositionTable::new(16).expect("test TT should allocate");
-        let result = search(
-            &position,
-            &table,
-            limits(24),
-            SearchOptions {
-                use_nmp: false,
-                use_rfp: false,
-                use_razoring: false,
-                use_lmr: false,
-                use_lmp: false,
-                use_futility: false,
-                use_see_pruning: false,
-                // The qsearch TT is a transposition cutoff, not a pruning heuristic, so
-                // it stays on here exactly as the interior TT does.
-                use_qsearch_tt: true,
-                // Delta pruning DROPS captures, so it is off for the same reason every
-                // other pruning toggle is: a mate search must be exact.
-                use_qsearch_delta_pruning: false,
-                // Quiet checks ADD moves to the qsearch and never drop one, so they
-                // cannot hide a forced mate either way. Set to the SHIPPED default so
-                // this test exercises the search that actually plays games -- finding
-                // every mate here without the widening is the stronger statement.
-                use_qsearch_checks: false,
-                // Capture LMR is a reduction, so it is off here for the same reason
-                // `use_lmr` is: a mate search must be exact.
-                use_capture_lmr: false,
-                // Inert here: with `use_lmr` off no scout is ever reduced, so neither
-                // post-LMR site can be reached. Set to the SHIPPED defaults so this
-                // test keeps exercising the search that actually plays games.
-                use_post_lmr_depth: true,
-                use_post_lmr_conthist: false,
-                use_singular_ext: false,
-                use_check_ext: true,
-                use_multicut: false,
-                use_iir: false,
-                use_probcut: false,
-                // History affects only move ORDER, never which moves are legal, so a
-                // forced mate must still be found with the tables on. Leaving them
-                // enabled keeps this test exercising the shipped ordering path.
-                use_butterfly_history: true,
-                use_capture_history: true,
-                use_pawn_history: false,
-                use_continuation_history: true,
-                // History pruning DROPS moves, so it must be off here for the same
-                // reason every other pruning toggle is: a mate search must be exact.
-                use_history_pruning: false,
-                // Correction history adjusts the static EVAL, never the move list, and
-                // `to_corrected_static_eval` clamps away from the decisive range so a
-                // residual can never manufacture or mask a mate score. Leaving it on
-                // keeps this test exercising the shipped eval path.
-                use_correction_history: true,
-                use_correction_sources: SearchOptions::default().use_correction_sources,
-                // Ordering-only signals, like the other history tables: set to the
-                // SHIPPED defaults so this test exercises the search that plays games.
-                use_tt_move_history: true,
-                use_low_ply_history: true,
-                // Inert here: its three consumers (LMR, RFP, the singular double
-                // margin) are all switched off above. Set to the SHIPPED default.
-                use_corrplexity: true,
-                // Inert here either way: this is a fixed-depth search with no soft
-                // limit to scale. Set to the SHIPPED default like every other toggle.
-                use_time_effort: false,
-                use_interpolated_time_management: false,
-                use_search_again_depth: false,
-                multi_pv: 1,
-                parameters: SearchOptions::default().parameters,
-            },
-            network,
-        );
+        assert_mate_found(fen, expected, exact_mate_search_options(), network);
+    }
+}
 
-        assert_eq!(
-            mate_moves(result.score),
-            Some(expected),
-            "wrong mate distance for {fen}: score {}, pv {:?}",
-            result.score,
-            result.pv
-        );
-
-        let mut replay = position.clone();
-        for &mv in &result.pv {
-            assert!(generate_legal_moves(&replay).contains(&mv));
-            replay.make_move(mv);
-        }
-        assert!(
-            generate_legal_moves(&replay).is_empty(),
-            "mate PV must end at a terminal position for {fen}"
-        );
+/// The whole mate corpus, plus a mate that starts with the side to move in check, must
+/// still resolve with checked-node evaluation disabled.
+#[test]
+fn mate_in_n_found_with_checked_node_eval_disabled() {
+    let Some(network) = network() else {
+        return;
+    };
+    let options = SearchOptions {
+        use_checked_node_eval: false,
+        ..exact_mate_search_options()
+    };
+    for &(fen, expected) in MATE_CASES.iter().chain([&IN_CHECK_MATE_CASE]) {
+        assert_mate_found(fen, expected, options, network);
     }
 }
 
@@ -1014,6 +1075,60 @@ fn the_qsearch_checks_toggle_changes_the_searched_tree() {
     assert_ne!(
         enabled.nodes, disabled.nodes,
         "UseQSearchChecks must reach the quiescence move list"
+    );
+}
+
+/// The checked-node-eval OFF arm's own fixed-depth signature.
+///
+/// Kiwipete at depth 7 with a fresh TT is deliberately tactical: the search visits
+/// checked interior nodes, so the toggle has something to act on. The pinned number is
+/// the experiment's determinism anchor -- recorded once from this implementation, and
+/// any change to what the off arm searches moves it. The ON arm must agree with the
+/// default search bit-for-bit: the shipped default keeps today's tree.
+#[test]
+fn checked_node_eval_toggle_off_has_a_stable_fixed_depth_signature() {
+    let Some(network) = network() else {
+        return;
+    };
+    let position = Position::from_fen(
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        false,
+    )
+    .expect("test FEN should parse");
+    let off_options = SearchOptions {
+        use_checked_node_eval: false,
+        ..SearchOptions::default()
+    };
+
+    let off_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let off = search(&position, &off_table, limits(7), off_options, network);
+    let repeat_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let repeat = search(&position, &repeat_table, limits(7), off_options, network);
+    assert_eq!(
+        off.nodes, repeat.nodes,
+        "the toggle-off tree must be deterministic"
+    );
+
+    let on_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let on = search_default(&position, &on_table, limits(7), network);
+    let explicit_on_table = TranspositionTable::new(16).expect("test TT should allocate");
+    let explicit_on = search(
+        &position,
+        &explicit_on_table,
+        limits(7),
+        SearchOptions {
+            use_checked_node_eval: true,
+            ..SearchOptions::default()
+        },
+        network,
+    );
+    assert_eq!(
+        on.nodes, explicit_on.nodes,
+        "the shipped default and the explicit-on arm must be bit-identical"
+    );
+    assert_ne!(
+        off.nodes, on.nodes,
+        "disabling checked-node evaluation must reach the search and change the tree"
     );
 }
 

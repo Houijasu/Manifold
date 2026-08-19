@@ -5573,6 +5573,137 @@ mod tests {
         );
     }
 
+    /// Black to move is in check from the rook on b1; the mate in one (`Qxb1#`) is the
+    /// mate corpus's in-check case.
+    const IN_CHECK_FEN: &str = "8/8/8/1q6/8/1k6/8/KR6 b - - 0 1";
+
+    /// The pinned values themselves: a skipped checked node carries the sentinel, no
+    /// correction, a zero complexity proxy, and no improving evidence.
+    #[test]
+    fn node_eval_pins_the_bundle_at_a_skipped_checked_node() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let run = |use_checked_node_eval: bool| {
+            let position = Position::from_fen(IN_CHECK_FEN, false)
+                .expect("in-check FEN should parse");
+            assert!(is_in_check(&position, position.side_to_move()));
+            let table = TranspositionTable::new(1).expect("test TT should allocate");
+            let stop = AtomicBool::new(false);
+            let counters = [NodeCounter::new(0)];
+            let history = [position.repetition_key()];
+            let shared_history = SharedHistory::new();
+            let low_ply_history = LowPlyHistory::new();
+            let mut context = SearchContext::new(
+                &table,
+                SearchLimits::default(),
+                None,
+                &stop,
+                &position,
+                &history,
+                &shared_history,
+                &low_ply_history,
+                SearchOptions {
+                    use_checked_node_eval,
+                    ..SearchOptions::default()
+                },
+                0,
+                0,
+                &counters,
+                network,
+            );
+            let eval = node_eval(&position, None, true, 1, &mut context);
+            (eval, context.static_evals[1])
+        };
+
+        let (skipped, history_slot) = run(false);
+        assert_eq!(
+            skipped.raw_static_eval,
+            i32::from(UNEVALUATED_STATIC_EVAL),
+            "a skipped checked node carries the sentinel, matching qsearch"
+        );
+        assert_eq!(skipped.corrplexity, 0, "no eval means a zero proxy");
+        assert!(!skipped.improving, "no eval means no improving evidence");
+        assert_eq!(
+            history_slot, None,
+            "a skipped checked node must leave the eval history unpopulated"
+        );
+
+        let (evaluated, history_slot) = run(true);
+        assert_ne!(
+            evaluated.raw_static_eval,
+            i32::from(UNEVALUATED_STATIC_EVAL),
+            "the default arm evaluates checked nodes"
+        );
+        assert!(
+            history_slot.is_none(),
+            "static_evals stays unpopulated in check either way"
+        );
+    }
+
+    /// At the `pvs` boundary: with the toggle off an in-check node stores the sentinel
+    /// in the TT, so later probes can never reuse a static eval that was not computed.
+    #[test]
+    fn skipped_checked_node_stores_the_sentinel_in_the_tt() {
+        let Some(network) = local_network() else {
+            return;
+        };
+        let mut position =
+            Position::from_fen(IN_CHECK_FEN, false).expect("in-check FEN should parse");
+        let table = TranspositionTable::new(1).expect("test TT should allocate");
+        let stop = AtomicBool::new(false);
+        let counters = [NodeCounter::new(0)];
+        let history = [position.repetition_key()];
+        let shared_history = SharedHistory::new();
+        let low_ply_history = LowPlyHistory::new();
+        let mut context = SearchContext::new(
+            &table,
+            SearchLimits::default(),
+            None,
+            &stop,
+            &position,
+            &history,
+            &shared_history,
+            &low_ply_history,
+            SearchOptions {
+                use_checked_node_eval: false,
+                ..SearchOptions::default()
+            },
+            0,
+            0,
+            &counters,
+            network,
+        );
+        let mut pv = PvLine::new();
+        pvs(
+            &mut position,
+            4,
+            -INFINITY,
+            INFINITY,
+            1,
+            true,
+            false,
+            true,
+            false,
+            None,
+            &mut context,
+            &mut pv,
+        )
+        .expect("unbounded test search should complete");
+
+        assert!(
+            context.static_evals[1].is_none(),
+            "a skipped checked node must leave the eval history unpopulated"
+        );
+        let entry = table
+            .probe(position.repetition_key())
+            .expect("pvs should store a TT entry");
+        assert_eq!(
+            entry.static_eval, UNEVALUATED_STATIC_EVAL,
+            "a skipped checked node must store the sentinel, matching qsearch"
+        );
+    }
+
     #[test]
     fn noncutting_tablebase_win_sets_a_search_floor() {
         let probe = direct_tablebase_pvs(

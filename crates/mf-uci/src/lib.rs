@@ -2516,6 +2516,46 @@ mod tests {
         assert!(!state.search_options.use_search_again_depth);
     }
 
+    #[test]
+    fn checked_node_eval_check_option_persists_and_rejects_malformed_values() {
+        let mut state = EngineState::try_new().expect("copied automatic network should load");
+        assert!(state.search_options.use_checked_node_eval);
+
+        handle_setoption(
+            "SeToPtIoN NaMe UsEcHeCkEdNoDeEvAl VaLuE fAlSe",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("mixed-case check write should be accepted");
+        assert!(!state.search_options.use_checked_node_eval);
+
+        state
+            .new_game()
+            .expect("new game should clear search state without resetting options");
+        assert!(!state.search_options.use_checked_node_eval);
+
+        let mut output = Vec::new();
+        handle_setoption(
+            "setoption name UseCheckedNodeEval value banana",
+            &mut state,
+            &mut output,
+        )
+        .expect("malformed check write should be writable");
+        assert!(!state.search_options.use_checked_node_eval);
+        assert_eq!(
+            String::from_utf8(output).expect("protocol output should be UTF-8"),
+            "info string invalid UseCheckedNodeEval value 'banana' (expected true|false)\n"
+        );
+
+        handle_setoption(
+            "setoption name UseCheckedNodeEval value TRUE",
+            &mut state,
+            &mut Vec::new(),
+        )
+        .expect("true check write should be accepted");
+        assert!(state.search_options.use_checked_node_eval);
+    }
+
     /// An oversize request resizes to the advertised maximum and says so.
     ///
     /// The old behaviour kept the previous table -- in a fresh session the 16 MB default

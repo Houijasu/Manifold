@@ -1103,6 +1103,49 @@ fn search_again_depth_preserves_the_control_bench_signature() {
     );
 }
 
+/// `UseCheckedNodeEval` ships ON: the default and explicit-on arms must reproduce the
+/// shipped signature bit-for-bit, and the off arm is pinned at its own signature.
+///
+/// The off arm is the checked-node-eval experiment: in-check interior nodes skip the
+/// fresh NNUE forward and the TT static-eval read, store the `UNEVALUATED_STATIC_EVAL`
+/// sentinel like qsearch does, and pin `improving = false` / `corrplexity = 0`. That
+/// changes the tree -- which is the point of the experiment -- so the off arm gets its
+/// own exact anchor, recorded from this implementation. A change that moves the OFF
+/// number has changed what the experiment measures; a change that moves either ON
+/// number has broken the bit-identical-default contract.
+#[test]
+fn checked_node_eval_ships_on_and_the_off_arm_has_its_own_signature() {
+    require_bench_network!();
+    let output = run_uci_session(
+        "bench\n\
+         setoption name UseCheckedNodeEval value true\n\
+         bench\n\
+         setoption name UseCheckedNodeEval value false\n\
+         bench\n\
+         quit\n",
+        "UCI checked-node eval session",
+    );
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    let nodes = metrics(stdout, "Nodes searched: ");
+    assert_eq!(nodes.len(), 3);
+
+    assert_eq!(
+        nodes[0], BENCH_NODE_COUNT,
+        "checked-node evaluation must be ON in the shipped default"
+    );
+    assert_eq!(
+        nodes[1], BENCH_NODE_COUNT,
+        "explicitly enabling the shipped default must not move the signature"
+    );
+    assert_ne!(
+        nodes[2], BENCH_NODE_COUNT,
+        "disabling checked-node evaluation must reach the search and change the tree"
+    );
+}
+
 /// Turning history off must reproduce the pinned NNUE all-off signatures bit-for-bit.
 ///
 /// This is the proof that M4-F1 moved the shipped bench signature by adding history
@@ -1415,6 +1458,7 @@ fn the_advertised_pawn_history_default_matches_the_shipped_default() {
         "UseContHistory",
         "UseLowPlyHistory",
         "UsePostLMRDepth",
+        "UseCheckedNodeEval",
     ] {
         assert!(
             stdout

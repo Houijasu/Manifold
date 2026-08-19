@@ -498,6 +498,7 @@ fn uci_handshake_is_ordered_and_well_formed() {
             .contains(&"option name UseInterpolatedTimeManagement type check default false")
     );
     assert!(lines[..uciok].contains(&"option name UseSearchAgainDepth type check default false"));
+    assert!(lines[..uciok].contains(&"option name UseCheckedNodeEval type check default true"));
     assert!(lines[..uciok].contains(&"option name EvalFile type string default <empty>"));
     // There is no evaluator to switch to, so the engine must not advertise a toggle.
     assert!(
