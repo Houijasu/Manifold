@@ -32,7 +32,7 @@ pub use notation::{format_uci_move, parse_uci_move};
 pub use perft::{perft, perft_divide};
 pub use piece::{Color, Piece, PieceKind, material_value};
 pub use position::{NullUndo, Position, Undo};
-pub use see::static_exchange_evaluation;
+pub use see::{see_ge, static_exchange_evaluation};
 pub use sliding::{
     SlidingAttackBackend, SlidingAttacks, bishop_attacks, queen_attacks, rook_attacks,
 };

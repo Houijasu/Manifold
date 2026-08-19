@@ -21,6 +21,74 @@ pub fn static_exchange_evaluation(position: &Position, mv: Move) -> i32 {
     value
 }
 
+/// Threshold predicate over the same greedy exchange walk as
+/// [`static_exchange_evaluation`]: answers whether the exact value reaches `threshold`,
+/// stopping as soon as the stand-pat structure of the exchange makes the answer
+/// inevitable.
+///
+/// Every ply of the walk is a decision for the side to move: stand pat and freeze the
+/// running total, or recapture. The exact walk folds those decisions backward from the
+/// deepest ply; this one short-circuits them forward, because the opponent standing
+/// pat settles a below-threshold `false` and the mover standing pat settles an
+/// at-or-above-threshold `true`. The differential battery pins the equivalence:
+/// `see_ge(p, m, t)` must equal `static_exchange_evaluation(p, m) >= t` everywhere.
+pub fn see_ge(position: &Position, mv: Move, threshold: i32) -> bool {
+    #[cfg(feature = "instrumentation")]
+    let started = crate::instrumentation::cycles();
+    let value = see_ge_greedy(position, mv, threshold);
+    #[cfg(feature = "instrumentation")]
+    crate::instrumentation::record_see(crate::instrumentation::cycles().wrapping_sub(started));
+    value
+}
+
+fn see_ge_greedy(position: &Position, mv: Move, threshold: i32) -> bool {
+    let (mut state, mover, initial_gain) = prepare_exchange(position, mv);
+    let mut attackers = [
+        state.attackers_to(state.target, Color::White),
+        state.attackers_to(state.target, Color::Black),
+    ];
+
+    // Same ply cap as the exact walk's `gains` array: both walks must stop at the same
+    // recapture for the equivalence to hold on degenerate boards.
+    const MAX_EXCHANGE_PLIES: usize = 32;
+    let mut gain = initial_gain;
+    let mut side = !mover.color();
+    let mut depth = 0usize;
+
+    loop {
+        if side == mover.color() {
+            if gain >= threshold {
+                return true;
+            }
+        } else if gain < threshold {
+            return false;
+        }
+
+        if depth + 1 >= MAX_EXCHANGE_PLIES {
+            break;
+        }
+        let Some(next) = state.best_greedy_recapture(side, &attackers) else {
+            break;
+        };
+        let victim = state
+            .target_piece
+            .expect("a recapture sequence must have a victim on the target");
+        let exchange = exchange_value(victim.kind()) + next.promotion_gain;
+        gain = if side == mover.color() {
+            gain + exchange
+        } else {
+            gain - exchange
+        };
+        depth += 1;
+        let from = next.from;
+        state.apply_recapture(next);
+        state.reveal_xray(from, &mut attackers);
+        side = !side;
+    }
+
+    gain >= threshold
+}
+
 fn static_exchange_evaluation_greedy(position: &Position, mv: Move) -> i32 {
     let (mut state, mover, initial_gain) = prepare_exchange(position, mv);
     let mut gains = [0; 32];
@@ -625,6 +693,53 @@ mod tests {
         assert!(
             compared >= 40_000,
             "random differential corpus was too capture-sparse: {compared}"
+        );
+    }
+
+    #[test]
+    fn see_ge_matches_exact_see_at_every_threshold_on_random_reachable_positions() {
+        const THRESHOLDS: [i32; 7] = [-200, -100, -50, 0, 50, 100, 200];
+        let mut compared = 0usize;
+
+        for seed in [0x5eed, 0xcafe, 0xd00d, 0xfade] {
+            let mut position = Position::startpos();
+            let mut random = seed;
+            for _ in 0..10_000 {
+                let moves = generate_legal_moves(&position);
+                for &mv in &moves {
+                    // Quiets are compared too (the interior SEE-pruning gate walks
+                    // them); castling is skipped because SEE refuses it by assertion,
+                    // exactly as every call site filters it out first.
+                    if mv.flag().is_castling() {
+                        continue;
+                    }
+                    let exact = static_exchange_evaluation(&position, mv);
+                    for &threshold in &THRESHOLDS {
+                        assert_eq!(
+                            see_ge(&position, mv, threshold),
+                            exact >= threshold,
+                            "see_ge diverged for move {mv:?} in position {position:?} \
+                             at threshold {threshold}"
+                        );
+                    }
+                    compared += 1;
+                }
+
+                if moves.is_empty() {
+                    position = Position::startpos();
+                    continue;
+                }
+                let mv = moves[next_random(&mut random) as usize % moves.len()];
+                position.make_move(mv);
+                if position.halfmove_clock() >= 100 {
+                    position = Position::startpos();
+                }
+            }
+        }
+
+        assert!(
+            compared >= 100_000,
+            "random differential corpus was too move-sparse: {compared}"
         );
     }
 
