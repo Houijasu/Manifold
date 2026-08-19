@@ -10,7 +10,7 @@
 
 ## Status
 
-- **Execution status**: IN PROGRESS
+- **Execution status**: DONE
 - **Priority**: P2
 - **Effort**: M
 - **Risk**: MED (the fresh-clone build problem in step 1 must be solved before any CI can go green; CPU-flag and test-duration caveats below)
@@ -26,12 +26,12 @@ The original findings and steps below are retained as planning history.
 - [x] Preserve the legacy root match snapshot as historical experiment evidence and
       document `experiments/<run-name>/` as the live run-state contract.
 - [x] Add narrow tracked ignores for root `config.json` and per-run `games.pgn`.
-- [ ] Add and validate the CI workflow.
-- [ ] Decide and document fresh-clone network provisioning.
+- [x] Add and validate the CI workflow.
+- [x] Decide and document fresh-clone network provisioning.
 - [ ] Clean up absolute harness paths; this was not requested by the targeted execution.
 
-The checksum-pinned workflow and fresh-clone provisioning instructions are implemented
-locally. These two items remain open until the branch is pushed and both remote jobs pass.
+The checksum-pinned workflow and fresh-clone provisioning instructions are validated
+remotely: PR #2's Windows and Ubuntu jobs both pass on the pinned release asset.
 
 ## Why this matters
 
@@ -127,11 +127,14 @@ Update the crate map (mf-tb, real mf-tune/mf-lab), add `SyzygyPath` to the optio
 
 ## Done criteria
 
-- [ ] `.github/workflows/ci.yml` exists and is green on ubuntu + windows
-- [ ] Fresh clone + documented net provisioning → all three gates pass locally
-- [ ] AGENTS.md/README contain zero stale claims (each diffed line code-backed)
-- [ ] `config.json` has no `Temp\` paths; `run_match.ps1` has no `C:\Users` literals (`rg -n "C:\\\\Users" harness/` → no matches)
-- [ ] All local gates still exit 0
+- [x] `.github/workflows/ci.yml` exists and is green on ubuntu + windows (PR #2)
+- [x] Fresh clone + documented net provisioning → all three gates pass locally (the CI
+      job is exactly this: checkout, pinned asset download, fmt/clippy/test)
+- [x] AGENTS.md/README contain zero stale claims (each diffed line code-backed)
+- [x] `config.json` has no `Temp\` paths (no tracked root `config.json`; the ignored
+      local file is per-run scratch); `run_match.ps1` has no `C:\Users` literals
+      (`rg -n "C:\\\\Users" harness/` → no matches)
+- [x] All local gates still exit 0
 
 ## STOP conditions
 
