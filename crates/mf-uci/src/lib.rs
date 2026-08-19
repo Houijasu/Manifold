@@ -2143,6 +2143,18 @@ mod tests {
 
     use super::*;
 
+    fn test_network_path() -> std::path::PathBuf {
+        if let Some(path) = std::env::var_os("MF_NNUE_TEST_NET").map(std::path::PathBuf::from) {
+            assert!(
+                path.is_file(),
+                "MF_NNUE_TEST_NET requires an existing network file: {}",
+                path.display()
+            );
+            return path;
+        }
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue")
+    }
+
     struct BrokenWriter;
 
     impl Write for BrokenWriter {
@@ -2737,8 +2749,7 @@ mod tests {
 
     #[test]
     fn bad_explicit_eval_file_preserves_the_previous_network_arc() {
-        let valid =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let valid = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
@@ -2774,8 +2785,7 @@ mod tests {
 
     #[test]
     fn good_explicit_eval_file_loads_and_reports_source_description_and_backend() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
 
@@ -2799,8 +2809,7 @@ mod tests {
 
     #[test]
     fn changing_eval_file_clears_eval_dependent_search_state() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let key = state.position.zobrist().main();
         state.transposition_table.store(
@@ -2829,8 +2838,7 @@ mod tests {
 
     #[test]
     fn empty_marker_eval_file_value_returns_to_automatic_resolution() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
@@ -2862,8 +2870,7 @@ mod tests {
 
     #[test]
     fn empty_eval_file_value_returns_to_automatic_resolution() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let mut state = EngineState::try_new().expect("copied automatic network should load");
         let mut output = Vec::new();
         handle_setoption(
@@ -2916,8 +2923,7 @@ mod tests {
     /// left over from a previous run.
     #[test]
     fn bench_node_count_is_deterministic_for_a_given_network() {
-        let path =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../nets/main.nnue");
+        let path = test_network_path();
         let network = Network::load(&path)
             .unwrap_or_else(|error| panic!("test NNUE network {}: {error}", path.display()));
         let mut first_output = Vec::new();
