@@ -24,6 +24,9 @@ pub fn interrupted() -> bool {
     INTERRUPTED.load(Ordering::Relaxed)
 }
 
+// Only the Windows console handler and the tests raise the flag; other platforms take
+// the default termination behavior, so compiling it there would be dead code.
+#[cfg(any(windows, test))]
 fn request_stop() {
     INTERRUPTED.store(true, Ordering::Relaxed);
 }
