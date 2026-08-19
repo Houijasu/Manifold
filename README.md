@@ -88,7 +88,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Fresh clones need the pinned NNUE network from
 `https://github.com/Houijasu/Manifold/releases/download/nnue-e8449b6/manifold-main-e8449b6.nnue`.
-Its SHA-256 checksum is
+The asset is 111,261,604 bytes. Its SHA-256 checksum is
 `E8449B689E26E40DFD8FAC0423E7825377AFDE8B7D40FC14BFB96DFA32FF908A`.
 
 PowerShell:
@@ -107,6 +107,9 @@ mkdir -p nets
 curl --fail --location --retry 3 'https://github.com/Houijasu/Manifold/releases/download/nnue-e8449b6/manifold-main-e8449b6.nnue' --output nets/main.nnue
 echo 'E8449B689E26E40DFD8FAC0423E7825377AFDE8B7D40FC14BFB96DFA32FF908A  nets/main.nnue' | sha256sum --check -
 ```
+
+The committed perft suites in `tools/testdata/` are required by mf-core's
+fresh-clone integration tests.
 
 `bench` has a pinned node signature asserted by `bench_cli` tests. Any change that
 moves the signature is a strength change -- deliberate or bug -- and must be justified
