@@ -20,6 +20,7 @@
   portable perft 4,865,609, force-magic green, controlled scanner fixture green,
   portable scan zero matches, staged binary stable through publication, embedded
   network hash stable through final validation, encoded flags isolated/restored,
+  repository-pinned toolchain isolated and recorded, exact-sysroot LLVM lookup verified,
   committed publication survives backup-cleanup failure, ordinary release unchanged
 
 ## Why this matters
@@ -84,10 +85,12 @@ rustflags = ["-C", "target-cpu=native"]
 
 Model the script's structure on `harness/build_pgo.ps1` (read it first; match its parameter style, logging, and metadata stamping). The body:
 
-1. Clear higher-precedence `CARGO_ENCODED_RUSTFLAGS`, set
+1. Clear higher-precedence `CARGO_ENCODED_RUSTFLAGS` and inherited
+   `RUSTUP_TOOLCHAIN`, set
    `$env:RUSTFLAGS = '-C target-cpu=x86-64'`, and set `$env:CARGO_TARGET_DIR` to
-   dedicated `target\portable-build`; restore or remove all three caller values in
-   `finally` according to their exact initial state.
+   dedicated `target\portable-build`; restore or remove all four caller values in
+   `finally` according to their exact initial state. Treat `rust-toolchain.toml` as a
+   tracked build input before build and publication.
 2. Build `cargo build --release -p mf-uci --bin manifold`, verify the executable in
    `target\portable-build\release`, and never write `target\release\manifold.exe`.
 3. Use the default embedded network, so no adjacent `nets` copy is required.
@@ -110,9 +113,10 @@ portable one simply lacks BMI2 speed).
 
 ### Step 3: Prove the binary is actually baseline
 
-Locate `llvm-objdump.exe` beside the pinned toolchain's `llvm-profdata.exe`, disassemble
-the staged portable binary, and match only decoded instruction tokens (never comments
-or metadata):
+Parse the host from the active pinned `rustc -vV`; resolve `llvm-profdata.exe` and
+`llvm-objdump.exe` only under that exact host beneath the active `rustc --print sysroot`,
+without falling back to another installed toolchain. Disassemble the staged portable
+binary and match only decoded instruction tokens (never comments or metadata):
 
 - Reject portable `pext`, `pdep`, `bzhi`, `mulx`, `sarx`, `shlx`, `shrx`, and `rorx`.
 - Test all forbidden tokens through a controlled text fixture; native scan output is
@@ -144,6 +148,9 @@ README Build section: two artifacts (native, tuned to the build machine, fastest
 - `CARGO_ENCODED_RUSTFLAGS` clearing/restoration for initially present and absent states.
 - Network revalidation inside the installed final directory's validation callback.
 - Backup-cleanup failure preserves the validated final and leaves the backup remainder.
+- Inherited `RUSTUP_TOOLCHAIN` is absent inside the build and restored/removed exactly.
+- Dirty `rust-toolchain.toml` is rejected before build/publication.
+- Rustc host parsing and exact-sysroot/host LLVM lookup are deterministic fixtures.
 - Perft anchor through the portable binary (step 4).
 - Optional 10-game smoke for runtime sanity.
 

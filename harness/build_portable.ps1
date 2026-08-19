@@ -26,6 +26,7 @@ $portableRustFlags = '-C target-cpu=x86-64'
 $expectedBenchSignature = 37420
 $expectedPerftSignature = 4865609
 $forbiddenInstructions = @('pext', 'pdep', 'bzhi', 'mulx', 'sarx', 'shlx', 'shrx', 'rorx')
+$buildInputPaths = @('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo', 'crates')
 
 function New-PortableFailure {
     param(
@@ -57,8 +58,11 @@ function Invoke-WithRestoredBuildEnvironment {
     $savedRustFlags = $env:RUSTFLAGS
     $hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
     $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
+    $hadRustupToolchain = Test-Path Env:RUSTUP_TOOLCHAIN
+    $savedRustupToolchain = $env:RUSTUP_TOOLCHAIN
     try {
         Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
+        Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
         & $Body
     } finally {
         if ($hadCargoTargetDir) {
@@ -76,6 +80,11 @@ function Invoke-WithRestoredBuildEnvironment {
         } else {
             Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
         }
+        if ($hadRustupToolchain) {
+            $env:RUSTUP_TOOLCHAIN = $savedRustupToolchain
+        } else {
+            Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -90,11 +99,18 @@ function Get-ValidatedHeadCommit {
 }
 
 function Assert-BuildInputsMatchHead {
-    $changes = @(& git status --porcelain --untracked-files=normal -- Cargo.toml Cargo.lock .cargo crates 2>&1)
-    $exitCode = $LASTEXITCODE
-    Assert-NativeSuccess $exitCode 'git status for build inputs' 5
-    if ($changes.Count -ne 0) {
-        throw (New-PortableFailure "ABORT: build inputs differ from HEAD: $($changes -join '; ')." 5)
+    param(
+        [scriptblock]$GetStatus = {
+            param([string[]]$Paths)
+            $lines = @(& git status --porcelain --untracked-files=normal -- $Paths 2>&1)
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = $lines }
+        }
+    )
+
+    $status = & $GetStatus $buildInputPaths
+    Assert-NativeSuccess $status.ExitCode 'git status for build inputs' 5
+    if ($status.Lines.Count -ne 0) {
+        throw (New-PortableFailure "ABORT: build inputs differ from HEAD: $($status.Lines -join '; ')." 5)
     }
 }
 
@@ -157,23 +173,54 @@ function Get-RustcVerboseVersion {
     return $output -join [Environment]::NewLine
 }
 
-function Find-LlvmObjdump {
+function Get-RustcHost {
+    param([string]$VerboseVersion)
+
+    $matches = [regex]::Matches($VerboseVersion, '(?m)^host:\s*(\S+)\s*$')
+    if ($matches.Count -ne 1) {
+        throw (New-PortableFailure 'ABORT: rustc -vV did not return exactly one host.' 2)
+    }
+    return $matches[0].Groups[1].Value
+}
+
+function Get-RustcSysroot {
     $sysrootOutput = @(& rustc --print sysroot 2>&1)
     $exitCode = $LASTEXITCODE
     Assert-NativeSuccess $exitCode 'rustc --print sysroot' 2
-    if ($sysrootOutput.Count -ne 1) {
+    if ($sysrootOutput.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$sysrootOutput[0])) {
         throw (New-PortableFailure 'ABORT: rustc returned an invalid sysroot.' 2)
     }
-    $sysroot = [string]$sysrootOutput[0]
-    $profdata = Join-Path $sysroot 'lib\rustlib\x86_64-pc-windows-msvc\bin\llvm-profdata.exe'
-    if (-not (Test-Path -LiteralPath $profdata)) {
+    return [System.IO.Path]::GetFullPath([string]$sysrootOutput[0])
+}
+
+function Find-LlvmTools {
+    param(
+        [string]$Sysroot,
+        [string]$RustcHost
+    )
+
+    $toolDirectory = Join-Path $Sysroot "lib\rustlib\$RustcHost\bin"
+    $profdata = Join-Path $toolDirectory 'llvm-profdata.exe'
+    if (-not (Test-Path -LiteralPath $profdata -PathType Leaf)) {
         throw (New-PortableFailure "ABORT: llvm-profdata.exe is unavailable.`n`nrustup component add llvm-tools-preview" 2)
     }
-    $objdump = Join-Path (Split-Path -Parent $profdata) 'llvm-objdump.exe'
-    if (-not (Test-Path -LiteralPath $objdump)) {
+    $objdump = Join-Path $toolDirectory 'llvm-objdump.exe'
+    if (-not (Test-Path -LiteralPath $objdump -PathType Leaf)) {
         throw (New-PortableFailure "ABORT: llvm-objdump.exe is unavailable.`n`nrustup component add llvm-tools-preview" 2)
     }
-    return [System.IO.Path]::GetFullPath($objdump)
+    return [pscustomobject]@{
+        Profdata = [System.IO.Path]::GetFullPath($profdata)
+        Objdump  = [System.IO.Path]::GetFullPath($objdump)
+    }
+}
+
+function Get-LlvmObjdumpVersion {
+    param([string]$Objdump)
+
+    $output = @(& $Objdump --version 2>&1)
+    $exitCode = $LASTEXITCODE
+    Assert-NativeSuccess $exitCode 'llvm-objdump --version' 2
+    return $output -join [Environment]::NewLine
 }
 
 function Get-ForbiddenInstructionTokens {
@@ -352,7 +399,12 @@ function Invoke-PortableBuild {
         if (-not (Test-Path -LiteralPath $networkPath)) {
             throw (New-PortableFailure "ABORT: required embedded network is missing: $networkPath." 3)
         }
-        $objdump = Find-LlvmObjdump
+        $rustcVersion = Get-RustcVerboseVersion
+        $rustcHost = Get-RustcHost $rustcVersion
+        $rustcSysroot = Get-RustcSysroot
+        $llvmTools = Find-LlvmTools $rustcSysroot $rustcHost
+        $objdump = $llvmTools.Objdump
+        $objdumpVersion = Get-LlvmObjdumpVersion $objdump
         $networkHash = (Get-FileHash -LiteralPath $networkPath -Algorithm SHA256).Hash
         $releaseExistedBefore = Test-Path -LiteralPath $ordinaryRelease
         $releaseHashBefore = if ($releaseExistedBefore) {
@@ -411,7 +463,6 @@ function Invoke-PortableBuild {
             Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore | Out-Null
 
             [System.IO.File]::WriteAllText((Join-Path $stagingDirectory 'manifold.exe.source-commit'), $sourceCommit)
-            $rustcVersion = Get-RustcVerboseVersion
             $releaseStatus = Confirm-OrdinaryReleasePreserved $releaseExistedBefore $releaseHashBefore
             Assert-StableFileHash $networkPath $networkHash 'embedded network' | Out-Null
             Assert-StableFileHash $stagedBinary $binaryHash 'staged portable binary' | Out-Null
@@ -420,6 +471,9 @@ function Invoke-PortableBuild {
                 "engine source HEAD: $sourceCommit"
                 "rustc -vV:"
                 $rustcVersion
+                "rustc sysroot: $rustcSysroot"
+                "rustc host: $rustcHost"
+                "RUSTUP_TOOLCHAIN: cleared; repository rust-toolchain.toml is authoritative"
                 "native RUSTFLAGS: $nativeRustFlags"
                 "portable RUSTFLAGS: $portableRustFlags"
                 "CARGO_ENCODED_RUSTFLAGS: cleared during build and tests"
@@ -432,13 +486,17 @@ function Invoke-PortableBuild {
                 "portable bench signature: $portableBench"
                 "portable perft 5: $portablePerft"
                 "force-magic tests: passed"
-                "disassembler: $objdump"
+                "llvm-profdata: $($llvmTools.Profdata)"
+                "llvm-objdump: $objdump"
+                "llvm-objdump --version:"
+                $objdumpVersion
                 "native forbidden instructions (informational): $nativeScan"
                 "portable forbidden instructions: none"
                 "ordinary release: $releaseStatus"
             ) | Set-Content -LiteralPath (Join-Path $stagingDirectory 'build-metadata.txt')
 
             Assert-PortableArtifacts $stagingDirectory $sourceCommit $binaryHash $networkHash
+            Assert-BuildInputsMatchHead
             if ((Get-ValidatedHeadCommit) -cne $sourceCommit) {
                 throw (New-PortableFailure 'ABORT: HEAD changed immediately before portable publication.' 5)
             }

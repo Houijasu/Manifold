@@ -28,6 +28,42 @@ try {
     if ($_.Exception.Message -notmatch 'no node signature') { throw }
 }
 
+$rustcFixture = @'
+rustc 1.97.1 (test)
+binary: rustc
+commit-hash: 0000000000000000000000000000000000000000
+host: test-host-pc-windows-msvc
+release: 1.97.1
+LLVM version: 22.1.6
+'@
+if ((Get-RustcHost $rustcFixture) -cne 'test-host-pc-windows-msvc') {
+    throw 'rustc host parser returned the wrong host'
+}
+try {
+    Get-RustcHost 'rustc output without a host line'
+    throw 'missing rustc host must be rejected'
+} catch {
+    if ($_.Exception.Message -eq 'missing rustc host must be rejected') { throw }
+    if ($_.Exception.Message -notmatch 'exactly one host') { throw }
+}
+
+if ($buildInputPaths -notcontains 'rust-toolchain.toml') {
+    throw 'rust-toolchain.toml is missing from build input pathspecs'
+}
+try {
+    Assert-BuildInputsMatchHead {
+        param([string[]]$Paths)
+        if ($Paths -notcontains 'rust-toolchain.toml') {
+            throw 'rust-toolchain.toml was not checked as a build input'
+        }
+        [pscustomobject]@{ ExitCode = 0; Lines = @(' M rust-toolchain.toml') }
+    }
+    throw 'dirty rust-toolchain.toml must be rejected'
+} catch {
+    if ($_.Exception.Message -eq 'dirty rust-toolchain.toml must be rejected') { throw }
+    if ($_.Exception.Message -notmatch 'rust-toolchain.toml') { throw }
+}
+
 $tokens = @(Get-ForbiddenInstructionTokens @(
     '0000000140001000: c4 e2 e2 f5 c3        pext rax, rbx, rcx'
     '0000000140001004: 48 89 d8              mov rax, rbx # pdep appears only in a comment'
@@ -58,18 +94,25 @@ $hadRustFlags = Test-Path Env:RUSTFLAGS
 $savedRustFlags = $env:RUSTFLAGS
 $hadEncodedRustFlags = Test-Path Env:CARGO_ENCODED_RUSTFLAGS
 $savedEncodedRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
+$hadRustupToolchain = Test-Path Env:RUSTUP_TOOLCHAIN
+$savedRustupToolchain = $env:RUSTUP_TOOLCHAIN
 try {
     $env:CARGO_TARGET_DIR = 'caller-target'
     $env:RUSTFLAGS = 'caller-flags'
     $env:CARGO_ENCODED_RUSTFLAGS = 'caller-encoded-flags'
+    $env:RUSTUP_TOOLCHAIN = 'caller-toolchain'
     try {
         Invoke-WithRestoredBuildEnvironment {
             if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
                 throw 'CARGO_ENCODED_RUSTFLAGS was not cleared inside the build environment'
             }
+            if (Test-Path Env:RUSTUP_TOOLCHAIN) {
+                throw 'RUSTUP_TOOLCHAIN was not cleared inside the build environment'
+            }
             $env:CARGO_TARGET_DIR = 'inner-target'
             $env:RUSTFLAGS = 'inner-flags'
             $env:CARGO_ENCODED_RUSTFLAGS = 'inner-encoded-flags'
+            $env:RUSTUP_TOOLCHAIN = 'inner-toolchain'
             throw 'expected test failure'
         }
     } catch {
@@ -84,6 +127,9 @@ try {
     if ($env:CARGO_ENCODED_RUSTFLAGS -ne 'caller-encoded-flags') {
         throw 'caller CARGO_ENCODED_RUSTFLAGS was not restored'
     }
+    if ($env:RUSTUP_TOOLCHAIN -ne 'caller-toolchain') {
+        throw 'caller RUSTUP_TOOLCHAIN was not restored'
+    }
 
     Remove-Item Env:CARGO_ENCODED_RUSTFLAGS
     Invoke-WithRestoredBuildEnvironment {
@@ -94,6 +140,17 @@ try {
     }
     if (Test-Path Env:CARGO_ENCODED_RUSTFLAGS) {
         throw 'initially absent CARGO_ENCODED_RUSTFLAGS was not removed after success'
+    }
+
+    Remove-Item Env:RUSTUP_TOOLCHAIN
+    Invoke-WithRestoredBuildEnvironment {
+        if (Test-Path Env:RUSTUP_TOOLCHAIN) {
+            throw 'initially absent RUSTUP_TOOLCHAIN appeared inside the build environment'
+        }
+        $env:RUSTUP_TOOLCHAIN = 'inner-toolchain'
+    }
+    if (Test-Path Env:RUSTUP_TOOLCHAIN) {
+        throw 'initially absent RUSTUP_TOOLCHAIN was not removed after success'
     }
 } finally {
     if ($hadCargoTargetDir) {
@@ -111,6 +168,11 @@ try {
     } else {
         Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
     }
+    if ($hadRustupToolchain) {
+        $env:RUSTUP_TOOLCHAIN = $savedRustupToolchain
+    } else {
+        Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
+    }
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -124,6 +186,33 @@ New-Item -ItemType Directory -Path $final | Out-Null
 Set-Content (Join-Path $staging 'new.txt') 'new'
 Set-Content (Join-Path $final 'old.txt') 'old'
 try {
+    $toolSysroot = Join-Path $testRoot 'tool-sysroot'
+    $toolBin = Join-Path $toolSysroot 'lib\rustlib\test-host-pc-windows-msvc\bin'
+    New-Item -ItemType Directory -Path $toolBin | Out-Null
+    $expectedProfdata = Join-Path $toolBin 'llvm-profdata.exe'
+    $expectedObjdump = Join-Path $toolBin 'llvm-objdump.exe'
+    Set-Content $expectedProfdata 'profdata'
+    Set-Content $expectedObjdump 'objdump'
+    $llvmTools = Find-LlvmTools $toolSysroot 'test-host-pc-windows-msvc'
+    if ($llvmTools.Profdata -cne [System.IO.Path]::GetFullPath($expectedProfdata)) {
+        throw 'llvm-profdata was not resolved under the exact sysroot and host'
+    }
+    if ($llvmTools.Objdump -cne [System.IO.Path]::GetFullPath($expectedObjdump)) {
+        throw 'llvm-objdump was not resolved under the exact sysroot and host'
+    }
+
+    $wrongHostBin = Join-Path $toolSysroot 'lib\rustlib\wrong-host\bin'
+    New-Item -ItemType Directory -Path $wrongHostBin | Out-Null
+    Set-Content (Join-Path $wrongHostBin 'llvm-profdata.exe') 'wrong profdata'
+    Set-Content (Join-Path $wrongHostBin 'llvm-objdump.exe') 'wrong objdump'
+    try {
+        Find-LlvmTools $toolSysroot 'missing-host'
+        throw 'llvm lookup must not fall back to another host or toolchain'
+    } catch {
+        if ($_.Exception.Message -eq 'llvm lookup must not fall back to another host or toolchain') { throw }
+        if ($_.Exception.Message -notmatch 'rustup component add llvm-tools-preview') { throw }
+    }
+
     $buildOutput = Join-Path $testRoot 'build-output.exe'
     $stagedBinaryDirectory = Join-Path $testRoot 'binary-staging'
     [System.IO.File]::WriteAllText($buildOutput, 'validated portable bytes')

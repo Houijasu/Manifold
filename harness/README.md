@@ -147,8 +147,11 @@ network/binary hashes, signatures, and disassembler path; staging rollback preve
 partial artifacts. Once the new final directory validates, publication is committed
 before backup cleanup; a cleanup failure preserves both the validated final and backup
 remainder for inspection. The script clears higher-precedence
-`CARGO_ENCODED_RUSTFLAGS` while building/testing, then restores caller
-`RUSTFLAGS`/`CARGO_ENCODED_RUSTFLAGS`/`CARGO_TARGET_DIR` exactly. It revalidates the
-embedded network inside final publication validation and keeps
+`CARGO_ENCODED_RUSTFLAGS` and `RUSTUP_TOOLCHAIN` while building/testing, then restores
+caller `RUSTFLAGS`/`CARGO_ENCODED_RUSTFLAGS`/`CARGO_TARGET_DIR`/`RUSTUP_TOOLCHAIN`
+exactly. `rust-toolchain.toml` is a tracked build input, and LLVM tools are accepted only
+under the exact sysroot and host reported by that pinned `rustc`; metadata records the
+rustc output, sysroot, host, and objdump identity. The script revalidates the embedded
+network inside final publication validation and keeps
 `target\release\manifold.exe` byte-for-byte unchanged. The default embedded network
 means no adjacent `nets` copy is required.
